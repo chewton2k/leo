@@ -673,6 +673,23 @@ test('a lecture draws a typed point under its own minute, not under the minute b
   assert.deepEqual(flow.groups.map((g) => [g.at, g.items.map((i) => (i.passage || i.point)[0])]), [[3, [1, 2]], [95, [9]], [130, [3]]]);
 });
 
+test('a pause is marked between the lines on either side of it, with how long it lasted', () => {
+  const p = (seq, at) => [seq, { start_secs: at, end_secs: at + 5, text: String(seq), speaker: 'Microphone' }];
+  const trace = [
+    { at: '2026-11-25T17:08:34Z', stage: 'capture', detail: 'Recording started' },
+    { at: '2026-11-25T17:10:00Z', stage: 'paused', detail: '30.0' },
+    { at: '2026-11-25T17:14:10Z', stage: 'resumed', detail: '30.0' },
+    { at: '2026-11-25T17:15:00Z', stage: 'paused', detail: '90.0' },
+    { at: '2026-11-25T17:15:20Z', stage: 'resumed', detail: '90.0' },
+    { at: '2026-11-25T17:16:00Z', stage: 'paused', detail: '400.0' },
+  ];
+  const pauses = L.pausesOf(trace);
+  assert.deepEqual(pauses, [{ at: 30, mins: 4 }, { at: 90, mins: 0 }], 'a pause still open when the recording stopped is left out');
+  const flow = L.transcriptFlow([p(1, 3), p(2, 30), p(3, 50), p(4, 120)], [], ['Microphone'], [...pauses, { at: 2, mins: 1 }, { at: 500, mins: 1 }]);
+  assert.deepEqual(flow.groups.map((g) => (g.pause ? `paused ${g.pause.mins}` : g.items.map((i) => i.passage[0]).join(','))), ['1', 'paused 4', '2,3', 'paused 0', '4'], 'the line said at the moment of resuming comes after the mark, and pauses outside these lines are not drawn');
+  assert.deepEqual(L.pausesOf(undefined), []);
+});
+
 test('a live redraw keeps Pause, Stop and the wants box and changes Pause in place', () => {
   const node = (id, extra = {}) => {
     const attrs = { 'aria-label': 'Pause', title: 'Pause' };

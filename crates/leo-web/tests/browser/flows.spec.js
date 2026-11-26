@@ -2218,6 +2218,29 @@ test.describe('pictures', () => {
     expect(refused.ok(), 'the engine takes no line fixes').toBe(false);
   });
 
+  test('a pause shows as a faint mark in the transcript, and how the recording went is not listed', async ({ page }) => {
+    const note = await (await page.request.post('/api/notes', { data: { title: `Paused lecture ${test.info().project.name}`, body: 'Notes.' } })).json();
+    const folder = path.join(process.env.LEO_BROWSER_HOME, 'recording-sources', note.id);
+    fs.mkdirSync(folder, { recursive: true });
+    const passages = [[0, 'Before the break.'], [65, 'After the break.']].map(([at, text]) => ({ start_secs: at, end_secs: at + 5, text, speaker: '' }));
+    const trace = [
+      { at: '2026-11-03T09:00:00Z', stage: 'capture', detail: 'Recording started' },
+      { at: '2026-11-03T09:01:00Z', stage: 'paused', detail: '60.0' },
+      { at: '2026-11-03T09:05:00Z', stage: 'resumed', detail: '60.0' },
+      { at: '2026-11-03T09:06:10Z', stage: 'saved', detail: 'Note saved' },
+    ];
+    fs.writeFileSync(path.join(folder, 'browser-recording-2.json'), JSON.stringify({ id: 'browser-recording-2', started: '2026-11-03T09:00:00Z', passages, points: [], context: '', wants: '', warnings: [], trace }));
+    await page.goto(`/#/n/${note.id}`);
+    await page.locator('#note-facts [data-action="note-sources"]').click();
+    const aside = page.locator('#note-aside');
+    const mark = aside.locator('.source-pause');
+    await expect(mark).toHaveText('Paused · 4 min');
+    const order = await aside.locator('.source-text, .source-pause').allTextContents();
+    expect(order).toEqual(['Before the break.', 'Paused · 4 min', 'After the break.']);
+    await expect(aside).not.toContainText('How this recording went');
+    await expect(aside).not.toContainText('Note saved');
+  });
+
   test('a note no writing AI wrote up is written from its own card', async ({ page }) => {
     const made = await (await page.request.post('/api/notes', { data: { title: `Unwritten ${test.info().project.name}`, body: 'The transcript as it was heard.' } })).json();
     const pending = await page.request.patch(`/api/notes/${made.id}`, { data: { body: 'The transcript as it was heard.', base: made.version, written: false } });

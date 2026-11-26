@@ -172,8 +172,9 @@ function sourceItems(items) {
 function sourceRows(page) {
   const R = window.leoRecording;
   const { speakers } = page.head;
-  const { meeting, groups } = R.transcriptFlow(page.passages, page.points, speakers);
+  const { meeting, groups } = R.transcriptFlow(page.passages, page.points, speakers, R.pausesOf(page.head.trace));
   return groups.map((g) => {
+    if (g.pause) return `<div class="source-row source-pause" role="separator" data-text="">${g.pause.mins ? `Paused · ${g.pause.mins} min` : 'Paused'}</div>`;
     const text = esc(g.items.flatMap((i) => (i.echo ? i.echo : [i.passage || i.point])).map(([, p]) => p.text || '').join(' ').toLowerCase());
     const said = sourceItems(g.items);
     if (meeting) {
@@ -189,13 +190,6 @@ function speakerRow(head) {
   const names = R.speakersOf(head.speakers);
   if (!names.length) return '';
   return `<div class="speaker-row" aria-label="Speakers">${names.map((name) => `<span class="speaker-pill"><span class="tone-dot" style="--tone: ${R.toneOf(head.speakers, name)}"></span><button type="button" class="speaker-name" data-speaker="${esc(name)}" aria-label="Rename ${esc(name)}" title="Rename ${esc(name)}">${esc(name)}</button></span>`).join('')}</div>`;
-}
-
-function sourceDetails(source) {
-  if (!source.warnings.length && !source.trace.length) return '';
-  const warnings = source.warnings.map((w) => `<p class="set-note warn">${esc(w)}</p>`).join('');
-  const trace = source.trace.map((t) => `<li>${esc(new Date(t.at).toLocaleTimeString())} · ${esc(t.stage)} · ${esc(t.detail)}</li>`).join('');
-  return `<details class="source-more"><summary>${ICON.chevron}<span>How this recording went</span></summary>${warnings}<ul class="source-trace">${trace}</ul></details>`;
 }
 
 function sourceLabel(source, i) {
@@ -233,7 +227,6 @@ function drawRecordingSources(query = '') {
     ${speakerRow(head)}
     <div id="source-passages" class="source-list transcript-flow">${sourceRows(page.page)}<p class="hint source-none" hidden>Nothing on this page matches.</p></div>
     ${paging}
-    ${sourceDetails(head)}
   </div>`);
   if (!box) return;
   const filter = () => {

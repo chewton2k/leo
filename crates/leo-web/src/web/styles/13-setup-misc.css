@@ -401,7 +401,6 @@ body.files-over main::after {
   .select-control.has-menu > .select-menu-button, .select-control.has-menu > .select-menu { display: none; }
   .set-row .select-control > select, .field .select-control > select { appearance: auto; padding-right: 10px; }
 }
-.source-trace { margin: 0 0 10px; padding-left: 20px; color: var(--muted); font-size: var(--fs-xs); line-height: 1.6; }
 .source-keep { display: flex; align-items: center; gap: 8px; margin: 0 12px 10px; font-size: var(--fs-base); }
 :is(.sheet, .sheet-gone) .source-none { margin: 10px 0; }
 .set-card .grow { flex: 1; min-width: 0; }
