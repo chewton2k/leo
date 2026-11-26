@@ -5921,8 +5921,9 @@ test('Backspace or Delete on a selected picture takes it out of the note and sta
   await page.keyboard.press('Backspace');
   await expect.poll(body, { timeout: 5000 }).not.toContain('![Box]');
   expect(await body()).toMatch(/^Intro line\n\n *!\[Two\]\(data:image[^)]*\)\n\nAfter line$/);
-  await expect(page.locator('.pic-frame')).toHaveCount(0);
-  await expect(page.locator('#doc textarea')).toBeFocused();
+  await expect(img).toHaveCount(1);
+  await expect(img).toHaveClass(/picked/);
+  await expect(page.locator('#doc textarea')).toHaveCount(0);
   expect(page.url()).toContain(`#/n/${note.id}`);
   await page.keyboard.press('Escape');
   const backspace = (selector) => page.evaluate((s) => { const el = s ? document.createElement(s) : document.body; if (s) document.body.append(el); const e = new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }); el.dispatchEvent(e); if (s) el.remove(); return e.defaultPrevented; }, selector);
@@ -5987,7 +5988,7 @@ test('a click or a double-click on a picture outlines it once and opens no edito
   await page.request.delete(`/api/notes/${note.id}`);
 });
 
-test('in a checkbox item a click on a picture selects it, a click beside it puts the caret after it, and Enter there starts a checkbox', async ({ page }) => {
+test('in a checkbox item a click on a picture or beside it selects it, and Enter there starts a checkbox', async ({ page }) => {
   const svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="150"><rect width="300" height="150" fill="#9ab"/></svg>');
   const note = await (await page.request.post('/api/notes', { data: { title: `Boxed ${Date.now().toString(36)}`, body: `- [ ] ![Box](data:image/svg+xml;utf8,${svg})` } })).json();
   await page.goto(`/#/n/${note.id}`);
@@ -5999,13 +6000,183 @@ test('in a checkbox item a click on a picture selects it, a click beside it puts
   await expect(page.locator('.pic-handle')).toBeVisible();
   await expect(area).toHaveCount(0);
   const right = await img.boundingBox();
+  await page.keyboard.press('Escape');
   await page.mouse.click(right.x + right.width + 40, right.y + right.height / 2);
-  await expect(area).toHaveValue(/^!\[Box\]\(data:image/);
-  expect(await area.evaluate((el) => el.selectionStart === el.value.length)).toBe(true);
+  await expect(img).toHaveClass(/picked/);
+  await expect(img).toBeVisible();
+  await expect(area).toHaveCount(0);
   await page.keyboard.press('Enter');
   await expect(area).toHaveValue('');
   await expect(page.locator('#doc input[data-box]')).toHaveCount(2);
   await expect(page.locator('#doc .blk').first().locator('img.note-img')).toHaveCount(1);
+  await page.request.delete(`/api/notes/${note.id}`);
+});
+
+test('arrowing up and down past a picture frames it and never opens its Markdown', async ({ page }) => {
+  const svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="150"><rect width="300" height="150" fill="#9ab"/></svg>');
+  const note = await (await page.request.post('/api/notes', { data: { title: `Arrowed ${Date.now().toString(36)}`, body: `Intro line\n\n![Box](data:image/svg+xml;utf8,${svg})\n\nAfter line` } })).json();
+  await page.goto(`/#/n/${note.id}`);
+  const img = page.locator('#doc img.note-img');
+  const area = page.locator('#doc textarea');
+  await expect(img).toBeVisible();
+  await page.locator('#doc .blk').first().click();
+  await expect(area).toHaveValue('Intro line');
+  for (const [key, value] of [['ArrowDown', ''], ['ArrowDown', null], ['ArrowDown', ''], ['ArrowDown', 'After line'], ['ArrowUp', ''], ['ArrowUp', null], ['ArrowUp', ''], ['ArrowUp', 'Intro line']]) {
+    await page.keyboard.press(key);
+    await expect(img).toBeVisible();
+    if (value === null) {
+      await expect(img).toHaveClass(/picked/);
+      await expect(area).toHaveCount(0);
+    } else {
+      await expect(area).toHaveValue(value);
+      await expect(img).not.toHaveClass(/picked/);
+    }
+  }
+  await page.request.delete(`/api/notes/${note.id}`);
+});
+
+test('ArrowLeft and ArrowRight step over a mid-line picture, and Backspace or Delete beside it removes it', async ({ page }) => {
+  const svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="150"><rect width="300" height="150" fill="#9ab"/></svg>');
+  const note = await (await page.request.post('/api/notes', { data: { title: `Stepped ${Date.now().toString(36)}`, body: `- Before ![Box](data:image/svg+xml;utf8,${svg}) after\`` } })).json();
+  const body = async () => (await (await page.request.get(`/api/notes/${note.id}`)).json()).body;
+  await page.goto(`/#/n/${note.id}`);
+  const img = page.locator('#doc img.note-img');
+  const area = page.locator('#doc textarea');
+  const caret = () => area.evaluate((el) => [el.selectionStart, el.selectionEnd]);
+  await expect(img).toBeVisible();
+  const [before, word] = await page.locator('#doc li').evaluate((el) => ['Before', 'after'].map((said) => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let text = walker.nextNode();
+    while (text && !text.data.includes(said)) text = walker.nextNode();
+    const range = document.createRange();
+    range.setStart(text, text.data.indexOf(said));
+    range.setEnd(text, text.data.indexOf(said) + 1);
+    const { x, y, height } = range.getBoundingClientRect();
+    return { x: x + 1, y: y + height / 2 };
+  }));
+  await page.mouse.click(word.x, word.y);
+  await expect(area).toHaveValue(' after`');
+  await expect(img).toBeVisible();
+  expect(await caret()).toEqual([1, 1]);
+  await page.mouse.click(before.x, before.y);
+  await expect(area).toHaveValue('Before ');
+  expect(await caret()).toEqual([0, 0]);
+  await page.mouse.click(word.x, word.y);
+  await expect(area).toHaveValue(' after`');
+  expect(await caret()).toEqual([1, 1]);
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await expect(img).toHaveClass(/picked/);
+  await expect(area).toHaveCount(0);
+  await page.keyboard.press('ArrowLeft');
+  await expect(area).toHaveValue('Before ');
+  await expect(img).toBeVisible();
+  expect(await caret()).toEqual([7, 7]);
+  await page.keyboard.press('ArrowRight');
+  await expect(img).toHaveClass(/picked/);
+  await page.keyboard.press('ArrowRight');
+  await expect(area).toHaveValue(' after`');
+  expect(await caret()).toEqual([0, 0]);
+  await page.keyboard.press('Backspace');
+  await expect(img).toHaveCount(0);
+  await expect.poll(body, { timeout: 5000 }).toBe('- Before  after`');
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(img).toBeVisible();
+  await expect(area).toHaveValue(' after`');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await expect(area).toHaveValue('Before ');
+  await page.keyboard.press('Delete');
+  await expect(img).toHaveCount(0);
+  await expect.poll(body, { timeout: 5000 }).toBe('- Before  after`');
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await expect(area).toHaveValue('Before ');
+  await page.keyboard.type('`');
+  await expect(area).toHaveValue(/^Before `!\[Box\]\(data:image[^)]*\) after`$/);
+  await expect(img).toHaveCount(0);
+  await page.request.delete(`/api/notes/${note.id}`);
+});
+
+test('after resizing a picture in a bullet or beside text, a click left or right of it keeps it drawn', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'the click is a mouse click');
+  const svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="150"><rect width="300" height="150" fill="#9ab"/></svg>');
+  for (const [lead, tail, sides] of [['- ', '', [-6, 40]], ['Before ', ' after', [40]]]) {
+    const note = await (await page.request.post('/api/notes', { data: { title: `Resized ${Date.now().toString(36)}`, body: `${lead}![Box](data:image/svg+xml;utf8,${svg})${tail}` } })).json();
+    const body = async () => (await (await page.request.get(`/api/notes/${note.id}`)).json()).body;
+    await page.goto(`/#/n/${note.id}`);
+    const img = page.locator('#doc img.note-img');
+    const area = page.locator('#doc textarea');
+    await expect(img).toBeVisible();
+    await img.click();
+    const shown = Math.round((await img.boundingBox()).width);
+    await page.locator('.pic-handle').press('ArrowLeft');
+    await expect.poll(body, { timeout: 5000 }).toContain(`![Box|${shown - 20}](data:image`);
+    await page.keyboard.press('Escape');
+    await expect(img).not.toHaveClass(/picked/);
+    const box = await img.boundingBox();
+    for (const side of sides) {
+      await page.mouse.click(side < 0 ? box.x + side : box.x + box.width + side, box.y + box.height / 2);
+      await expect(img).toBeVisible();
+      if (tail) await expect(area).toHaveValue(tail);
+      else {
+        await expect(img).toHaveClass(/picked/);
+        await expect(area).toHaveCount(0);
+      }
+      await page.keyboard.press('Escape');
+    }
+    await page.request.delete(`/api/notes/${note.id}`);
+  }
+});
+
+test('Enter on a framed picture in a bullet starts the next bullet', async ({ page }) => {
+  const svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="150"><rect width="300" height="150" fill="#9ab"/></svg>');
+  const note = await (await page.request.post('/api/notes', { data: { title: `Bulleted ${Date.now().toString(36)}`, body: `- ![Box](data:image/svg+xml;utf8,${svg})` } })).json();
+  const body = async () => (await (await page.request.get(`/api/notes/${note.id}`)).json()).body;
+  await page.goto(`/#/n/${note.id}`);
+  const img = page.locator('#doc img.note-img');
+  await expect(img).toBeVisible();
+  await img.click();
+  await expect(img).toHaveClass(/picked/);
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#doc li')).toHaveCount(2);
+  await expect(page.locator('#doc textarea')).toHaveValue('');
+  await expect(img).toBeVisible();
+  await expect.poll(body, { timeout: 5000 }).toMatch(/^- !\[Box\]\(data:image[^)]*\)\n- $/);
+  await page.keyboard.press('Escape');
+  await page.locator('#title').click();
+  await page.keyboard.press('Tab');
+  await expect(img).toHaveClass(/picked/);
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('#doc textarea')).toHaveValue('');
+  await page.request.delete(`/api/notes/${note.id}`);
+});
+
+test('undoing a cut of text and a picture on one line brings both back drawn', async ({ page }) => {
+  const svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="150"><rect width="300" height="150" fill="#9ab"/></svg>');
+  const text = `Before ![Box](data:image/svg+xml;utf8,${svg}) after`;
+  const note = await (await page.request.post('/api/notes', { data: { title: `Cut ${Date.now().toString(36)}`, body: text } })).json();
+  const body = async () => (await (await page.request.get(`/api/notes/${note.id}`)).json()).body;
+  await page.goto(`/#/n/${note.id}`);
+  const img = page.locator('#doc img.note-img');
+  await expect(img).toBeVisible();
+  await page.locator('#doc .blk').first().evaluate((el) => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const texts = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) texts.push(node);
+    const start = texts.find((node) => node.data.includes('Before'));
+    const end = texts.find((node) => node.data.includes('after'));
+    getSelection().setBaseAndExtent(start, start.data.indexOf('Before') + 2, end, end.data.indexOf('after') + 2);
+  });
+  await page.keyboard.press('ControlOrMeta+x');
+  await expect.poll(body, { timeout: 5000 }).toBe('Beter');
+  await expect(img).toHaveCount(0);
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect.poll(body, { timeout: 5000 }).toBe(text);
+  await expect(img).toBeVisible();
+  expect(await img.evaluate((el) => el.naturalWidth > 0)).toBe(true);
+  await expect(page.locator('#doc textarea')).toHaveValue(' after');
   await page.request.delete(`/api/notes/${note.id}`);
 });
 
@@ -6060,6 +6231,7 @@ test('beside a lone picture a double-click or a Shift-click opens its Markdown, 
   await expect(page.locator('#doc textarea')).toHaveValue(/^!\[Box\]\(data:image/);
   const broken = await make('Intro line\n\n![](missing.png)\n\nAfter line');
   await page.goto(`/#/n/${broken.id}`);
+  await expect.poll(() => page.locator('#doc img.note-img').evaluate((el) => el.complete)).toBe(true);
   const line = await page.locator('#doc .blk').nth(2).boundingBox();
   await page.mouse.click(line.x + 200, line.y + line.height / 2);
   await expect(page.locator('#doc textarea')).toHaveValue('![](missing.png)');

@@ -67,6 +67,14 @@ test('resizing counts only the pictures the page draws, so outside images and co
   assert.equal(ed.setPictureWidth(line, 2, 200), line, 'there is no third drawn picture');
 });
 
+test('a line names where each drawn picture sits, the same ones resizing and removing count', () => {
+  const line = '`![code](a.png)` ![Logo](https://example.com/logo.png) Before ![Tree|400](attachments/tree.png) and ![[graph.png|250]] after';
+  const spans = ed.pictureSpans(line);
+  assert.deepEqual(spans, [{ at: line.indexOf('![Tree'), length: '![Tree|400](attachments/tree.png)'.length }, { at: line.indexOf('![[graph'), length: '![[graph.png|250]]'.length }]);
+  spans.forEach(({ at }, i) => assert.equal(ed.removePicture(line, i).at, at));
+  assert.deepEqual(ed.pictureSpans('no pictures'), []);
+});
+
 test('removing a picture takes out only the chosen drawn one, never code or outside images', () => {
   const line = '`![code](a.png)` ![Logo](https://example.com/logo.png) Before ![Tree|400](attachments/tree.png) and ![[graph.png|250]] after';
   assert.deepEqual(ed.removePicture(line, 0), { text: line.replace('![Tree|400](attachments/tree.png)', ''), at: line.indexOf('![Tree') });

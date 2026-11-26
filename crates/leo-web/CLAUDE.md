@@ -403,10 +403,17 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   never the file. A click or a double-click on a picture frames it and never opens its
   Markdown (2026-11-21, the user's call; Shift-click or a double-click beside it does). A
   picture is one caret position (`ed.rawOffset`, `shownBefore` in doc.js), and so is a formula, drawn or not (`markdown.mathSpans`, `.math`); in a list or
-  checkbox item a click on the picture frames it like any other, and a click beside it, left
-  or right of its box on its row, puts the caret before or after it (2026-11-21, the user's
-  call). Backspace or Delete on a framed picture removes it and leaves the caret in its place
-  (`ed.removePicture`); a Backspace outside any text field is `preventDefault`ed in a window
+  checkbox item a click on the picture frames it like any other. Pictures stay drawn while their
+  line is open (2026-11-26, the user's call): the line editor holds only the text run the caret is
+  in (the line is `editing.prefix` + the textarea + `editing.suffix`; `keptPictures` are drawn
+  pictures sitting directly in the line's text, `ed.pictureSpans`), and where the caret would sit
+  beside a picture with no text on that side the picture is framed instead, so nothing jumps.
+  Arrows step over a picture, Up and Down past a picture's row frame it, Enter on a framed picture
+  adds a line after it (a list continues), Backspace or Delete beside it removes it, and an undo
+  across one opens the text after it. Shift-click, a double-click beside a lone picture, a broken
+  picture, one inside a link or bold and a heading line open the Markdown, and an edit that would
+  change what a kept picture is (a code or maths span over it) reopens the line as Markdown.
+  Backspace or Delete on a framed picture removes it and leaves the caret in its place, or frames the picture beside it (`ed.removePicture`); a Backspace outside any text field is `preventDefault`ed in a window
   listener (events.js) so WebKit never goes back a page (2026-11-22, the user's call).
 - Note page only (2026-11-15; `leoDoc.mount(..., { noteTools: true })` in showNote,
   passed to `md.render` as `noteTools`; board cards, chat, margin and previews render

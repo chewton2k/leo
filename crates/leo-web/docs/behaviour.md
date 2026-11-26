@@ -393,7 +393,7 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   a corner handle: drag, arrow keys (Shift for 100 px) or double-click to
   reset; the change is written by `editing.setPictureWidth` and saved like any
   edit. It counts only pictures the page draws (not outside links or
-  `code`), so the size lands on the picture that was framed. A click beside a picture that is alone on its line frames it too (2026-11-15, the user's call); a broken picture, a line of several pictures or Shift opens the Markdown instead. Double-clicking the picture, or beside a lone one, edits its Markdown; Escape closes only the
+  `code`), so the size lands on the picture that was framed. A click beside a picture frames it too where no text sits on that side (2026-11-26, the user's call: pictures never turn into Markdown when the caret arrives, wherever they sit in a line). While a line with pictures is open they stay drawn and only the text the caret is in becomes editable; ArrowLeft and ArrowRight step over a picture, ArrowUp and ArrowDown past one frame it, Enter on a framed picture starts a line after it (continuing a list), and Backspace or Delete beside a picture removes it. A broken picture, one inside a link or bold, a heading line, Shift-click and a double-click beside a lone picture open the Markdown instead. Double-clicking the picture frames it; Escape closes only the
   frame.
 
 - Upload names (`safe_file_name`) drop trailing dots and spaces and dash

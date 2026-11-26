@@ -871,15 +871,25 @@
       tell();
     }
 
-    function edit(index, caret, reveal = true) {
+    function edit(index, caret, reveal = true, markup = false) {
       const block = blocks[index];
       if (!block) return;
       const length = lines.slice(block.start, block.end).join('\n').length;
       const at = caret === 'start' ? 0 : caret === 'end' || caret == null ? length : Math.max(0, Math.min(caret, length));
-      open(index, index, at, at, reveal);
+      open(index, index, at, at, reveal, markup);
     }
 
-    function open(first, last, from, to, reveal = true) {
+    const drawn = (img) => img.naturalWidth || !img.complete;
+
+    function keptPictures(el, raw) {
+      const host = el.querySelector('.task > span') || el.querySelector('li, p');
+      const shown = [...el.querySelectorAll('img.note-img')];
+      const spans = ed.pictureSpans(raw);
+      if (!host || shown.length !== spans.length) return [];
+      return shown.map((img, i) => ({ img, node: img.closest('.note-fig') || img, at: spans[i].at, end: spans[i].at + spans[i].length })).filter(({ img, node }) => node.parentNode === host && drawn(img));
+    }
+
+    function open(first, last, from, to, reveal = true, markup = false) {
       if (editing) stop();
       unfoldAt(first);
       const block = blocks[first];
@@ -894,18 +904,41 @@
       const raw = lines.slice(block.start, end.end).join('\n');
       const single = first === last && block.kind === 'line';
       const margin = !single && el.firstElementChild ? getComputedStyle(el.firstElementChild).margin : null;
-      const prefix = single && el.querySelector('li') ? ed.listPrefix(raw) : '';
-      const shown = single && !prefix ? textLeft(el) : null;
+      const head = single && el.querySelector('li') ? ed.listPrefix(raw) : '';
+      const kept = single && !markup ? keptPictures(el, raw) : [];
+      const before = kept.filter((pic) => pic.end <= to);
+      const left = before.at(-1);
+      const right = kept[before.length];
+      const begin = left ? left.end : head.length;
+      const finish = right ? right.at : raw.length;
+      if (kept.length) {
+        to = Math.min(Math.max(to, begin), finish);
+        if (from < begin) from = to;
+        if (!raw.slice(begin, finish).trim()) return frameDrawn((!left ? right : !right ? left : to > begin ? right : left).img, reveal);
+      }
+      const run = kept.length ? document.createRange() : null;
+      if (run) {
+        if (left) run.setStartAfter(left.node);
+        else run.setStart(right.node.parentNode, 0);
+        if (right) run.setEndBefore(right.node);
+        else run.setEnd(left.node.parentNode, left.node.parentNode.childNodes.length);
+      }
+      const prefix = run ? raw.slice(0, begin) : head;
+      const suffix = run ? raw.slice(finish) : '';
+      const shown = single && !prefix && !run ? textLeft(el) : null;
       const height = el.getBoundingClientRect().height;
       const content = single ? el.querySelector('.task > span') || el.querySelector('li, h2, h3, h4, h5, h6, p') : null;
-      const initialHeight = content ? content.getBoundingClientRect().height || height : height;
+      const initialHeight = run ? run.getBoundingClientRect().height || null : content ? content.getBoundingClientRect().height || height : height;
       const area = document.createElement('textarea');
       area.className = 'line-edit';
       if (margin !== null) area.style.margin = margin;
-      area.value = raw.slice(prefix.length);
+      area.value = raw.slice(prefix.length, raw.length - suffix.length);
       area.rows = 1;
       area.setAttribute('autocapitalize', 'sentences');
-      if (prefix && el.querySelector('li')) {
+      if (run) {
+        run.deleteContents();
+        run.insertNode(area);
+      } else if (prefix && el.querySelector('li')) {
         const text = el.querySelector('.task > span') || el.querySelector('li');
         text.replaceChildren(area);
       } else {
@@ -914,7 +947,7 @@
       }
       el.style.minHeight = `${height}px`;
       el.classList.add('editing');
-      editing = { index: first, last, start: block.start, end: end.end, originalEnd: end.end, kind: first === last ? block.kind : 'span', prefix, initialHeight, area };
+      editing = { index: first, last, start: block.start, end: end.end, originalEnd: end.end, kind: first === last ? block.kind : 'span', prefix, suffix, run: run && { left: left?.img, right: right?.img }, initialHeight, area };
       look(area);
       if (shown !== null && raw.trim()) {
         const from = caretBox(area, ed.rawOffset(raw, '', false)).x;
@@ -972,7 +1005,7 @@
       let node;
       while ((node = walker.nextNode())) if (node.nodeType === 3 ? !node.parentElement.closest('.math') : node.matches('img.note-img, .math')) texts.push(node);
       const whole = { node: blk, offset: inside > 0 ? blk.childNodes.length : 0 };
-      if (block.kind !== 'line' || !raw.trim() || !texts.length) return whole;
+      if (block.kind !== 'line' || !raw.trim() || !texts.length || (editing?.run && blk.classList.contains('editing'))) return whole;
       const total = texts.reduce((n, text) => n + (text.nodeType === 1 ? 1 : text.data.replace(/\u200b/g, '').length), 0);
       const isItem = ed.listed(lines, block.start);
       let low = 0;
@@ -1075,13 +1108,13 @@
 
     const docLength = () => lines.join('\n').length;
 
-    function editSpan(from, to) {
+    function editSpan(from, to, markup = false) {
       if (from > to) [from, to] = [to, from];
       const first = blockAtLine(lineOf(from));
       const last = blockAtLine(lineOf(to));
       if (first < 0 || last < 0) return;
       const base = lineStart(blocks[first].start);
-      open(first, last, from - base, to - base);
+      open(first, last, from - base, to - base, true, markup);
     }
 
     function pointAt(node, offset, side) {
@@ -1215,7 +1248,7 @@
       const source = span ? lines.join('\n').slice(span[0], span[1]) : pictureMarkdown(picked);
       const shown = [...container.querySelectorAll('img')].filter((img) => range.intersectsNode(img));
       const able = e.type === 'copy' && root.ClipboardItem && root.navigator.clipboard?.write;
-      if (able && shown.length === 1 && ed.onlyPictures(source) && (shown[0].naturalWidth || !shown[0].complete)) {
+      if (able && shown.length === 1 && ed.onlyPictures(source) && drawn(shown[0])) {
         const drawn = pictureDrawn(shown[0], source);
         putCopy({ 'image/png': drawn.then(({ png }) => png), 'text/html': drawn.then(({ html }) => html) }, shown[0]);
         return;
@@ -1298,11 +1331,7 @@
       if (!area && (e.target.closest?.('#chat') || [...document.querySelectorAll('.scrim')].some((scrim) => !scrim.contains(container)))) return;
       e.preventDefault();
       e.stopImmediatePropagation();
-      if (area) {
-        area.setRangeText(source, area.selectionStart, area.selectionEnd, 'end');
-        onInput();
-        return;
-      }
+      if (area) return typeIn(source);
       if (replaceSelection(source)) return;
       const at = framed && pictureAt(framed.img);
       if (!at) return insert(source);
@@ -1327,9 +1356,30 @@
 
     document.addEventListener('keydown', onDocumentKey);
 
-    function editLine(line, caret, reveal = true) {
+    function editLine(line, caret, reveal = true, markup = false) {
       const index = blockAtLine(line);
-      if (index >= 0) edit(index, caret, reveal);
+      if (index >= 0) edit(index, caret, reveal, markup);
+    }
+
+    const lineValue = () => editing.prefix + editing.area.value + editing.suffix;
+
+    function runHolds() {
+      const { prefix, suffix } = editing;
+      const line = lineValue();
+      const spans = ed.pictureSpans(line);
+      const math = md.mathSpans(line);
+      const kept = [...ed.pictureSpans(prefix), ...ed.pictureSpans(suffix).map(({ at, length }) => ({ at: at + line.length - suffix.length, length }))];
+      return kept.every(({ at, length }) => spans.some((s) => s.at === at && s.length === length) && !math.some(([a, b]) => at < b && at + length > a));
+    }
+
+    function typeIn(text) {
+      const { area } = editing;
+      area.setRangeText(text, area.selectionStart, area.selectionEnd, 'end');
+      onInput();
+      if (!editing || editing.kind !== 'line') return;
+      const caret = lineStart(editing.start) + editing.prefix.length + editing.area.selectionStart;
+      stop();
+      editSpan(caret, caret);
     }
 
     const lineIcon = (d) => `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
@@ -1388,14 +1438,20 @@
       const { area, start } = editing;
       editing.initialHeight = null;
       area.closest('.blk').style.minHeight = '';
-      const next = (editing.prefix + area.value).split('\n');
+      const next = lineValue().split('\n');
       const removed = lines.splice(start, editing.end - start, ...next);
       editing.end = start + next.length;
       look(area);
       fit(area);
       changed({ at: start, removed, added: next });
       if (!e?.isComposing) slashSeen();
-      const marker = ed.listPrefixAt(editing.prefix + area.value, lines, start);
+      if (editing.run && !e?.isComposing && !runHolds()) {
+        const caret = lineStart(start) + editing.prefix.length + area.selectionStart;
+        stop();
+        editSpan(caret, caret, true);
+        return;
+      }
+      const marker = ed.listPrefixAt(lineValue(), lines, start);
       if (editing.kind === 'line' && !e?.isComposing && marker.length > editing.prefix.length && /[^\S\n]$/.test(marker)) {
         const caret = lineStart(start) + editing.prefix.length + area.selectionStart;
         const line = lineOf(caret);
@@ -1413,7 +1469,7 @@
 
     function enterLine() {
       const { area, start, prefix } = editing;
-      const value = prefix + area.value;
+      const value = lineValue();
       const before = value.slice(0, prefix.length + area.selectionStart).split('\n');
       const after = value.slice(prefix.length + area.selectionEnd);
       const above = lines.slice(0, start).concat(before.slice(0, -1));
@@ -1471,7 +1527,7 @@
       const prefix = editing.prefix;
       const pos = prefix.length + area.selectionStart;
       const collapsed = area.selectionStart === area.selectionEnd;
-      const value = prefix + area.value;
+      const value = lineValue();
 
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -1511,6 +1567,15 @@
           stop();
           editLine(start - 1, above.length);
         }
+        return;
+      }
+
+      const pic = editing.run && collapsed && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && (['ArrowLeft', 'Backspace'].includes(e.key) && area.selectionStart === 0 ? editing.run.left : ['ArrowRight', 'Delete'].includes(e.key) && area.selectionStart === area.value.length ? editing.run.right : null);
+      if (pic) {
+        e.preventDefault();
+        const at = pictureAt(pic);
+        if (e.key.startsWith('Arrow')) framePicture(pic);
+        else dropPicture(at.start, at.length, at.index);
         return;
       }
 
@@ -1556,15 +1621,17 @@
         return;
       }
 
-      if (e.key === 'ArrowUp' && collapsed && (pos === prefix.length || (kind === 'line' && singleRow(area))) && start > 0) {
+      if (e.key === 'ArrowUp' && collapsed && (pos === prefix.length || (kind === 'line' && singleRow(area))) && (editing.run?.left || start > 0)) {
         e.preventDefault();
+        if (editing.run?.left) return framePicture(editing.run.left);
         stop();
         editLine(start - 1, 'end');
         return;
       }
 
-      if (e.key === 'ArrowDown' && collapsed && (pos === value.length || (kind === 'line' && singleRow(area))) && editing.end < lines.length) {
+      if (e.key === 'ArrowDown' && collapsed && (area.selectionStart === area.value.length || (kind === 'line' && singleRow(area))) && (editing.run?.right || editing.end < lines.length)) {
         e.preventDefault();
+        if (editing.run?.right) return framePicture(editing.run.right);
         const below = editing.end;
         stop();
         editLine(below, 'start');
@@ -1815,7 +1882,63 @@
       if (!blk) return null;
       const block = blocks[Number(blk.dataset.i)];
       if (!block) return null;
-      return { start: shifted(block.start), length: block.end - block.start, index: [...blk.querySelectorAll('img.note-img')].indexOf(img) };
+      const shown = [...blk.querySelectorAll('img.note-img')];
+      if (!(editing?.run && blk.classList.contains('editing'))) return { start: shifted(block.start), length: block.end - block.start, index: shown.indexOf(img) };
+      const after = shown.filter((pic) => (editing.selectionText || editing.area).compareDocumentPosition(pic) & Node.DOCUMENT_POSITION_FOLLOWING);
+      return { start: editing.start, length: editing.end - editing.start, index: after.includes(img) ? ed.pictureSpans(editing.prefix + editing.area.value).length + after.indexOf(img) : shown.indexOf(img) };
+    }
+
+    function pictureAgain(start, index) {
+      const blk = container.querySelector(`.blk[data-start="${start}"]`);
+      return blk && blk.querySelectorAll('img.note-img')[index];
+    }
+
+    function frameDrawn(img, reveal = true) {
+      if (!noteFocused()) document.activeElement.blur();
+      frame(img);
+      if (!img.complete) img.addEventListener('load', placeFrame, { once: true });
+      if (reveal) img.scrollIntoView({ block: 'nearest' });
+    }
+
+    function framePicture(img) {
+      const at = pictureAt(img);
+      if (editing) stop();
+      const again = at && pictureAgain(at.start, at.index);
+      if (again) frameDrawn(again);
+    }
+
+    function stepPast(img, forward, lineWise) {
+      const at = pictureAt(img);
+      const blk = img.closest('.blk');
+      if (!at || !blk) return;
+      const raw = lines[at.start];
+      const kept = keptPictures(blk, raw);
+      const k = kept.findIndex((pic) => pic.img === img);
+      const next = k < 0 ? null : kept[k + (forward ? 1 : -1)];
+      if (k >= 0) {
+        const from = forward ? kept[k].end : next ? next.end : blk.querySelector('li') ? ed.listPrefix(raw).length : 0;
+        const to = forward ? (next ? next.at : raw.length) : kept[k].at;
+        const caret = lineStart(at.start) + (forward ? from : to);
+        if (raw.slice(from, to).trim()) {
+          unframe();
+          return editSpan(caret, caret);
+        }
+        if (next) return frameDrawn(next.img);
+      }
+      const line = forward ? at.start + at.length : at.start - 1;
+      if (!lineWise || line < 0 || line >= lines.length) return;
+      unframe();
+      editLine(line, forward ? 'start' : 'end');
+    }
+
+    function enterAfter(img) {
+      const at = pictureAt(img);
+      const span = at && blocks[blockAtLine(at.start)]?.kind === 'line' && ed.pictureSpans(lines[at.start])[at.index];
+      if (!span) return;
+      unframe();
+      const caret = lineStart(at.start) + span.at + span.length;
+      editSpan(caret, caret, true);
+      if (editing) enterLine();
     }
 
     function pictureMarkdown(img) {
@@ -1886,8 +2009,7 @@
       lines.splice(at.start, at.length, ...after.split('\n'));
       changed();
       draw();
-      const blk = container.querySelector(`.blk[data-start="${at.start}"]`);
-      const again = blk && blk.querySelectorAll('img.note-img')[at.index];
+      const again = pictureAgain(at.start, at.index);
       if (!again) return;
       const show = () => {
         frame(again);
@@ -1900,22 +2022,25 @@
     function deletePicture(img) {
       const at = pictureAt(img);
       unframe();
-      if (!at || at.index < 0) return;
+      if (at && at.index >= 0) dropPicture(at.start, at.length, at.index);
+    }
+
+    function dropPicture(start, length, index) {
       if (editing) stop();
-      const before = lines.slice(at.start, at.start + at.length).join('\n');
-      const gone = ed.removePicture(before, at.index);
+      const before = lines.slice(start, start + length).join('\n');
+      const gone = ed.removePicture(before, index);
       if (gone.at < 0) return;
-      lines.splice(at.start, at.length, ...gone.text.split('\n'));
+      lines.splice(start, length, ...gone.text.split('\n'));
       changed();
       draw();
-      const caret = lineStart(at.start) + gone.at;
+      const caret = lineStart(start) + gone.at;
       editSpan(caret, caret);
     }
 
     function lonePicture(el) {
       const blk = el.closest('.blk');
       const pictures = blk && !blk.textContent.trim() ? blk.querySelectorAll('img.note-img') : [];
-      return pictures.length === 1 && pictures[0].naturalWidth ? pictures[0] : null;
+      return pictures.length === 1 && drawn(pictures[0]) ? pictures[0] : null;
     }
 
     container.addEventListener('mousedown', (e) => {
@@ -1927,13 +2052,22 @@
       if (!img || img.closest('.editing')) return;
       const blk = img.closest('.blk');
       unframe();
-      if (blk) editLine(shifted(Number(blk.dataset.start)), 'end', false);
+      if (blk) editLine(shifted(Number(blk.dataset.start)), 'end', false, true);
     });
 
     function onFrameKey(e) {
       if (!framed) return;
       if (!framed.img.isConnected || !framed.frame.isConnected) return unframe();
       const remove = (e.key === 'Backspace' || e.key === 'Delete') && noteFocused() && !selectedSpan();
+      const sideways = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+      const move = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(e.key) && !e.isComposing && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && noteFocused() && !selectedSpan() && !(sideways && e.target.closest?.('.pic-handle'));
+      if (move) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.key === 'Enter') enterAfter(framed.img);
+        else stepPast(framed.img, e.key === 'ArrowDown' || e.key === 'ArrowRight', !sideways);
+        return;
+      }
       if (e.key !== 'Escape' && !remove) return;
       e.preventDefault();
       e.stopPropagation();
@@ -1957,9 +2091,10 @@
         return;
       }
       const pic = e.target.closest('img.note-img');
-      if (pic && !pic.closest('.editing') && !e.shiftKey) {
+      if (pic && !e.shiftKey) {
         e.preventDefault();
-        frame(pic);
+        if (pic.closest('.editing')) framePicture(pic);
+        else frame(pic);
         return;
       }
       unframe();
@@ -2013,7 +2148,12 @@
       }
       if (e.target.closest('summary')) return;
       if (e.target.closest('label.task') && !e.target.closest('textarea')) e.preventDefault();
-      const blk = e.target.closest('.blk');
+      let blk = e.target.closest('.blk');
+      if (blk && blk.classList.contains('editing') && editing?.run && !e.target.closest('.line-edit, a')) {
+        const line = editing.start;
+        stop();
+        blk = container.querySelector(`.blk[data-start="${line}"]`);
+      }
       const tail = !blk && e.target.closest('.doc-tail');
       if (e.target.closest('a') || (!blk && !tail) || (blk && blk.classList.contains('editing'))) {
         settle();
@@ -2041,7 +2181,7 @@
       stop();
       const raw = lines[line] || '';
       const caret = cell ? ed.cellEnd(lines.slice(line, line + block.end - block.start).join('\n'), cell.parentNode.rowIndex, cell.cellIndex) : prefix !== null && raw.trim() ? ed.rawOffset(raw, prefix, ed.listed(lines, line)) : 'end';
-      editLine(line, caret, false);
+      editLine(line, caret, false, e.shiftKey);
     });
 
     const FOLDS_KEPT = 40;
@@ -2226,8 +2366,7 @@
         const at = area.selectionStart;
         const before = area.value.slice(0, at);
         const lead = before && !before.endsWith('\n') ? '\n' : '';
-        area.setRangeText(`${lead}${text}\n`, at, area.selectionEnd, 'end');
-        onInput();
+        typeIn(`${lead}${text}\n`);
         return;
       }
       const last = lines[lines.length - 1];
