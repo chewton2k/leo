@@ -1020,6 +1020,7 @@ pub fn each_point(
     Ok(())
 }
 
+#[cfg(test)]
 pub fn edit(notes: &Path, note: &str, id: &str, revision: u64, changes: &[Change]) -> Result<Head> {
     rewrite(notes, note, id, revision, changes, None)
 }

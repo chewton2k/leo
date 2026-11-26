@@ -1363,9 +1363,9 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
   lines · Show", shown as "You · echo · …" (their own track's name, never the turn they sit
   in), and a Found match inside a fold opens it before scrolling there. Tapping a speaker's name renames that speaker on every line of that recording
   (the note's text is not rewritten; typing a name another speaker has asks "Merge A into
-  B?" and merges only on Merge). Lines are fixed in
-  place and saved with Save fixes; paging, Earlier/Later, the pick list for several recordings,
-  What you want and Write the note again work as on the old sheet. The ⋯ menu's Show
+  B?" and merges only on Merge). The lines only show: nothing in the transcript can be
+  edited, and there is no Save fixes, What you want or Write the note again (2026-11-26); paging,
+  Earlier/Later and the pick list for several recordings work as on the old sheet. The ⋯ menu's Show
   transcript opens the same view with the selected text as the search.
 
 - Screenshots (the user's call): paste a PNG/JPEG/GIF/WebP into Your notes while

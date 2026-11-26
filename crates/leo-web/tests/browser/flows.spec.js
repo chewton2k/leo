@@ -2166,7 +2166,7 @@ test.describe('pictures', () => {
     await expect.poll(body).toBe('Four ![Pasted picture](attachments/a.png)');
   });
 
-  test('the transcript pages through a long recording, finds a phrase and saves only the fixed line', async ({ page }) => {
+  test('the transcript pages through a long recording, finds a phrase, keeps the width marks and only shows', async ({ page }) => {
     const note = await (await page.request.post('/api/notes', { data: { title: `Lecture ${test.info().project.name}`, body: 'Notes from a recording.' } })).json();
     const folder = path.join(process.env.LEO_BROWSER_HOME, 'recording-sources', note.id);
     fs.mkdirSync(folder, { recursive: true });
@@ -2184,6 +2184,15 @@ test.describe('pictures', () => {
     await expect(page.locator('#note-aside-facts')).toContainText('Transcript');
     await expect(page.locator('#doc')).toBeHidden();
     await expect(page.locator('#title')).toBeVisible();
+    const mark = page.locator('.page-mark[data-edge="right"]');
+    await expect(mark, 'the width marks stay beside the transcript').toBeVisible();
+    const width = () => page.locator('article.note').evaluate((el) => el.getBoundingClientRect().width);
+    const wide = await width();
+    await mark.focus();
+    await page.keyboard.press('ArrowLeft');
+    await expect.poll(width, 'and still resize the page').toBeLessThan(wide);
+    await page.keyboard.press('Enter');
+    await expect.poll(width).toBe(wide);
     const rows = sheet.locator('.source-text');
     await expect(rows.first()).toHaveText(/^Passage 1 /);
     const first = await rows.count();
@@ -2200,24 +2209,31 @@ test.describe('pictures', () => {
     const match = sheet.locator('.source-match');
     await expect(match).toHaveCount(1);
     await match.click();
-    const fixed = rows.last();
-    await expect(fixed).toHaveText(/Passage 12 about the zebrafish/);
+    const last = rows.last();
+    await expect(last).toHaveText(/Passage 12 about the zebrafish/);
     await expect(sheet.locator('[data-action="source-earlier"]')).toBeVisible();
-    await fixed.evaluate((box) => {
-      box.textContent = `${box.textContent} Fixed.`;
-      box.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(await last.evaluate((box) => box.isContentEditable), 'a transcript line cannot be edited').toBe(false);
+    await expect(sheet.locator('textarea, [data-action="source-save"], [data-action="source-regenerate"]'), 'no wants box, Save fixes or Write the note again').toHaveCount(0);
+    const refused = await page.request.put(`/api/notes/${note.id}/recording`, { data: { source: 'browser-recording-1', base: 1, changes: [{ kind: 'passage', seq: 12, text: 'x' }] } });
+    expect(refused.ok(), 'the engine takes no line fixes').toBe(false);
+  });
+
+  test('a note no writing AI wrote up is written from its own card', async ({ page }) => {
+    const made = await (await page.request.post('/api/notes', { data: { title: `Unwritten ${test.info().project.name}`, body: 'The transcript as it was heard.' } })).json();
+    const pending = await page.request.patch(`/api/notes/${made.id}`, { data: { body: 'The transcript as it was heard.', base: made.version, written: false } });
+    expect(pending.ok()).toBe(true);
+    let asked = 0;
+    await page.route(`**/api/notes/${made.id}/regenerate`, (route) => {
+      asked += 1;
+      return route.fulfill({ json: { title: 'Lecture', body: '## Written up\n\nThe main ideas.', base: 'v' } });
     });
-    const sent = page.waitForRequest((r) => r.method() === 'PUT' && r.url().endsWith(`/api/notes/${note.id}/recording`));
-    await sheet.locator('[data-action="source-save"]').click();
-    const body = (await sent).postDataJSON();
-    expect(body.source).toBe('browser-recording-1');
-    expect(body.changes, 'only the fixed line is sent').toHaveLength(1);
-    expect(body.changes[0].kind).toBe('passage');
-    await expect(page.locator('.toast')).toContainText('Saved your fixes');
-    const after = await (await page.request.get(`/api/notes/${note.id}/recording?q=zebrafish`)).json();
-    expect(after.matches).toHaveLength(1);
-    expect(after.matches[0].passage.text.endsWith(' Fixed.')).toBe(true);
-    expect(after.list).toHaveLength(1);
+    await page.goto(`/#/n/${made.id}`);
+    const card = page.locator('.writeup-pending');
+    await expect(card).toBeVisible();
+    await card.getByRole('button', { name: 'Write the notes' }).click();
+    await expect(page.locator('.scrim:not(.scrim-gone) .sheet')).toContainText('Written up');
+    expect(asked).toBe(1);
+    await expect(page.locator('#note-aside-facts'), 'it writes straight away, without opening the transcript').toBeEmpty();
   });
 
   test('the Picture button adds a picture from the device', async ({ page }) => {

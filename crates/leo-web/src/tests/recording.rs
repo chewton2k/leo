@@ -399,7 +399,6 @@ fn a_recording_whose_notes_were_not_written_says_so_until_they_are() {
     let written = run(crate::routes::sources::regenerate(
         State(state.clone()),
         Path(note.clone()),
-        Json(serde_json::from_value(serde_json::json!({})).unwrap()),
     ));
     assert_eq!(written.status(), StatusCode::OK);
     assert!(pending());
@@ -1656,7 +1655,7 @@ fn the_transcript_route_answers_the_list_a_page_and_matches_across_recordings() 
     let page = transcript_page(&state, &ids[0], serde_json::json!({"q": "nodes"}));
     assert_eq!(page["list"].as_array().unwrap().len(), 2);
     assert!(page["list"][0].get("trace").is_none());
-    assert_eq!(page["wants"], "the exam");
+    assert!(page.get("wants").is_none());
     assert_eq!(page["page"]["head"]["id"], "rec-first1");
     assert_eq!(page["page"]["head"]["trace"][0]["stage"], "saved");
     assert_eq!(page["page"]["passages"][0][1]["text"], "graphs have nodes");
@@ -1689,63 +1688,6 @@ fn the_transcript_route_answers_the_list_a_page_and_matches_across_recordings() 
 }
 
 #[test]
-fn a_fix_through_the_transcript_route_changes_only_the_rows_sent() {
-    let (state, _d, ids) = state_with(&[("Graphs", "")]);
-    let notes = state.notes_dir.clone();
-    let mut source = spoken("rec-fixed1", "dykstra");
-    source.passages.push(leo_core::recording::Passage {
-        start_secs: 6,
-        end_secs: 9,
-        text: "untouched".into(),
-        speaker: String::new(),
-        echo: false,
-        turns: Vec::new(),
-    });
-    leo_core::recording::save(&notes, &ids[0], &source).unwrap();
-    let put = |body: serde_json::Value| {
-        run(crate::routes::sources::edit_sources(
-            State(state.clone()),
-            Path(ids[0].clone()),
-            Json(serde_json::from_value(body).unwrap()),
-        ))
-    };
-    let fixed = put(
-        serde_json::json!({"source": "rec-fixed1", "base": 1, "changes": [{"kind": "passage", "seq": 1, "text": "Dijkstra"}]}),
-    );
-    assert_eq!(fixed.status(), StatusCode::OK);
-    assert_eq!(json_of(fixed)["revision"], 2);
-    let stale = put(
-        serde_json::json!({"source": "rec-fixed1", "base": 1, "changes": [{"kind": "passage", "seq": 1, "text": "x"}]}),
-    );
-    assert_eq!(stale.status(), StatusCode::CONFLICT);
-    let missing = put(
-        serde_json::json!({"source": "rec-fixed1", "base": 2, "changes": [{"kind": "point", "seq": 7, "text": "x"}]}),
-    );
-    assert_eq!(missing.status(), StatusCode::BAD_REQUEST);
-    let long = "x".repeat(300_000);
-    let kept_whole = put(
-        serde_json::json!({"source": "rec-fixed1", "base": 2, "changes": [{"kind": "point", "seq": 1, "text": long}]}),
-    );
-    assert_eq!(kept_whole.status(), StatusCode::OK);
-    assert_eq!(kept(&notes, &ids[0])[0].points[0].text, long);
-    let line = put(
-        serde_json::json!({"source": "rec-fixed1", "base": 3, "changes": [{"kind": "passage", "seq": 1, "text": long}]}),
-    );
-    assert_eq!(line.status(), StatusCode::OK);
-    assert_eq!(kept(&notes, &ids[0])[0].passages[0].text, long);
-    let all = kept(&notes, &ids[0]);
-    assert_eq!(
-        all[0]
-            .passages
-            .iter()
-            .map(|p| p.text.as_str())
-            .collect::<Vec<_>>(),
-        [long.as_str(), "untouched"]
-    );
-    assert_eq!(all[0].points[0].text, long);
-}
-
-#[test]
 fn regenerate_reads_a_note_with_1001_recordings() {
     let (mut state, _d, ids) = state_with(&[("Graphs", "")]);
     many(&state.notes_dir.clone(), &ids[0], 1001);
@@ -1758,7 +1700,6 @@ fn regenerate_reads_a_note_with_1001_recordings() {
     let answer = run(crate::routes::sources::regenerate(
         State(state.clone()),
         Path(ids[0].clone()),
-        Json(serde_json::from_value(serde_json::json!({})).unwrap()),
     ));
     assert_eq!(answer.status(), StatusCode::OK);
     assert_eq!(*heard.lock().unwrap(), 1001);

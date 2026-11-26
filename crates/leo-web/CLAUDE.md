@@ -1146,7 +1146,7 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   call; the side pane is gone): `openAside` (sources.js) sets `.note-layout.aside-open`, which hides
   `#doc`, the margin, outline, related and `#note-facts` and shows `#note-aside` with its own facts
   line `#note-aside-facts` (the doc stays mounted; `closeAside` redraws the margin). The title stays;
-  Back to note or Escape returns (refused with "Save your fixes first." while a fix is unsaved) to
+  Back to note or Escape returns to
   the scroll position and focus it opened from; after a redraw, focus goes to the same element by id
   or to the same original's chip (`focusAgain`).
   Transcript: facts "Transcript · <duration> · Back to note" (the duration once the last page is
@@ -1156,15 +1156,17 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   paragraph a minute with its time; typed points sit at their time as "Your point · …"; a run of
   passages with `echo: true` (missing is false) folds into "Hidden: N echo lines · Show"; the fold keeps its own speaker (`who`) and shows it as "You · echo", and `sourceMatch` opens a fold (`showEcho`) before scrolling to a match inside it. Tones
   come from `head.speakers` order (`toneOf`: You in ink, others `--hue-0`, `-1`, `-4`, …), so
-  paging never recolours. Each line is a `contenteditable="plaintext-only"` `.source-text` span;
+  paging never recolours. The transcript only shows (2026-11-26, the owner's call): each line is a
+  plain `.source-text` span, there is no Save fixes, What you want or Write the note again, and the
+  route takes no line fixes (`recording::edit` is kept for its own durability tests only);
   it pages through recordings (`?at=<id>&passages=<n|end>&points=<n|end>`, 512 KB of each kind a
   page, Earlier and Later; a pick list when a note has several; search matches across all of them
-  open the page that holds each); a fix sends only the changed rows (`{source, base: revision,
-  changes}`, batches under 1 MB); the speaker row renames a speaker for every line of that
+  open the page that holds each); the speaker row renames a speaker for every line of that
   recording (`{source, base, rename: {from, to}}` → `recording::rename_speaker` through the same
   revision writer; an empty name, a track name (Microphone, Computer audio, You, Others) or a name another speaker has (compared ignoring case) is 422 with its own message, so first-seen order never changes, and a rename to the same name writes nothing; a name another speaker has instead asks "Merge A into B?" (`confirmSheet`), and only on Merge sends `rename: {from, to, merge: true}` → `recording::merge_speaker` (2026-11-22, the orchestrator's call: one voice can appear as both a call app's name and Others N), which writes the existing spelling through the same version-checked writer; the note
-  text is not rewritten). What you want, Write the note again and "How this recording went" stay
-  below. The ⋯ menu's Show transcript opens the same view with the selected text as the search.
+  text is not rewritten). "How this recording went" stays below. A note no writing AI wrote up
+  is written from its own card's Write the notes (`source-regenerate`, POST `regenerate` with the
+  wants kept with its recordings, then the preview sheet). The ⋯ menu's Show transcript opens the same view with the selected text as the search.
   Originals: facts "<name> · Download · Back to note", the PDF (with its page), picture or text at
   the note's width; off the note the viewer sheet stays. Combine's Undo sends `{from}` and removes
   the recordings copied from that note (`copied_from`).
@@ -1508,7 +1510,7 @@ a modal.
   private staging folder, records each copy's digest from the staged bytes, publishes it
   without replacing anything, and records it only while it still matches (originals:
   the digest of the source bytes); a failed save or Undo removes only those that still
-  match. Transcript corrections and Combine Undo share the library's transcript writer lock.
+  match. Speaker renames and Combine Undo share the library's transcript writer lock.
   The cleanup locks (`audio_work`, `clearing`, `picture_cleanup`) and
   the task and board writer locks belong to each library, never the process. Keeping's
   age-based expiry (uploads, transcripts, unfinished and kept audio, backups) is the

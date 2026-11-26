@@ -38,7 +38,6 @@ function openAside(kind, facts, body) {
 function closeAside() {
   const layout = $('.note-layout');
   if (!layout || !layout.classList.contains('aside-open')) return;
-  if (transcriptOpen() && changedSources().length) return toast('Save your fixes first.');
   layout.classList.remove('aside-open');
   delete layout.dataset.aside;
   $('#note-aside').innerHTML = '';
@@ -72,10 +71,7 @@ function holdAside(id) {
   if (!asideOpen()) return null;
   const kind = $('.note-layout').dataset.aside;
   if (kind === 'file' && fileAside) return { kind, file: fileAside, back: asideReturn };
-  if (kind === 'transcript' && sourcePage && sourcePage.note === id) {
-    const wants = $('#regenerate-wants');
-    return { kind, fixes: changedSources(), wants: wants ? wants.value : null, back: asideReturn };
-  }
+  if (kind === 'transcript' && sourcePage && sourcePage.note === id) return { kind, back: asideReturn };
   return null;
 }
 
@@ -89,15 +85,9 @@ function restoreAside(held) {
   }
   drawRecordingSources();
   asideReturn = held.back;
-  held.fixes.forEach((fix) => {
-    const box = document.querySelector(`[data-${fix.kind}="${fix.seq}"]`);
-    if (box) box.textContent = fix.text;
-  });
-  if (held.wants !== null && $('#regenerate-wants')) $('#regenerate-wants').value = held.wants;
 }
 
 async function showRecordingSources(query = '') {
-  if (transcriptOpen() && changedSources().length) return toast('Save your fixes first.');
   const mine = seq;
   const s = await ready();
   if (!s || !s.note.id) return;
@@ -122,28 +112,21 @@ async function loadSourcePage(source, cursor, back) {
 }
 
 async function sourceEarlier() {
-  if (changedSources().length) return toast('Save your fixes first.');
   const back = sourcePage.back.slice();
   const cursor = back.pop();
   if (cursor) return loadSourcePage(sourcePage.page.head.id, cursor, back);
 }
 
 async function sourceLater() {
-  if (changedSources().length) return toast('Save your fixes first.');
   const { page } = sourcePage;
   if (page.next) return loadSourcePage(page.head.id, page.next, [...sourcePage.back, page.at]);
 }
 
 async function sourcePick(source) {
-  if (changedSources().length) {
-    $('#source-pick').value = sourcePage.page.head.id;
-    return toast('Save your fixes first.');
-  }
   return loadSourcePage(source, { passages: 0, points: 0 }, []);
 }
 
 async function sourceMatch(source, at) {
-  if (changedSources().length) return toast('Save your fixes first.');
   await loadSourcePage(source, { passages: Number(at), points: 0 }, Number(at) > 0 ? [{ passages: 0, points: 0 }] : []);
   const row = document.querySelector(`[data-passage="${at}"]`);
   if (!row) return;
@@ -163,7 +146,7 @@ function sourceClock(secs) {
 }
 
 function sourceSpan(kind, [at, p]) {
-  return `<span class="source-text" contenteditable="plaintext-only" spellcheck="true" data-${kind}="${at}">${esc(p.text || '')}</span>`;
+  return `<span class="source-text" data-${kind}="${at}">${esc(p.text || '')}</span>`;
 }
 
 function sourceItems(items) {
@@ -237,7 +220,6 @@ function drawRecordingSources(query = '') {
   const active = document.activeElement;
   const focus = active && active.closest && active.closest('#note-aside') ? { id: active.id, passage: active.dataset.passage, point: active.dataset.point } : null;
   query = query || ($('#source-query') && $('#source-query').value) || '';
-  const typedWants = $('#regenerate-wants') ? $('#regenerate-wants').value : null;
   const page = sourcePage;
   const { head } = page.page;
   const many = page.list.length > 1;
@@ -252,13 +234,8 @@ function drawRecordingSources(query = '') {
     <div id="source-passages" class="source-list transcript-flow">${sourceRows(page.page)}<p class="hint source-none" hidden>Nothing on this page matches.</p></div>
     ${paging}
     ${sourceDetails(head)}
-    <label class="source-wants"><span>What you want from the note</span><textarea id="regenerate-wants" class="set-input" rows="2" data-reads="4000" placeholder="For example: focus on what will be on the exam, keep it short">${esc(page.wants || '')}</textarea></label>
-    <p class="set-desc" id="regenerate-wants-hint"${Array.from((typedWants !== null ? typedWants : page.wants || '').trim()).length > 4000 ? '' : ' hidden'}>Felix reads the first 4,000 characters of this.</p>
-    <p class="hint">Fix a misheard word and save; writing the note again uses your fixes.</p>
-    <div class="buttons source-buttons"><button type="button" class="btn plain" data-action="source-save">Save fixes</button><button type="button" class="btn primary" data-action="source-regenerate">Write the note again</button></div>
   </div>`);
   if (!box) return;
-  if (typedWants !== null) $('#regenerate-wants', box).value = typedWants;
   const filter = () => {
     const q = $('#source-query', box).value.toLowerCase().trim();
     let shown = 0;
@@ -285,12 +262,6 @@ function drawRecordingSources(query = '') {
     filter();
     find();
   });
-  box.onkeydown = (e) => {
-    if (e.key === 'Enter' && e.target.matches && e.target.matches('.source-text')) {
-      e.preventDefault();
-      e.target.blur();
-    }
-  };
   box.onclick = (e) => {
     const show = e.target.closest && e.target.closest('[data-echo-show]');
     if (show) showEcho(show.closest('.echo-fold').nextElementSibling);
@@ -334,7 +305,6 @@ function renameSpeakerField(button) {
 }
 
 async function renameSpeaker(from, to) {
-  if (changedSources().length) throw Object.assign(new Error('Save your fixes first.'), { shown: true });
   if (window.leoRecording.NOT_SPEAKERS.includes(to)) throw Object.assign(new Error(`“${to}” names a recording, not a speaker. Choose another name.`), { shown: true });
   const into = ['you', 'others'].includes(to.toLowerCase()) ? null : (sourcePage.page.head.speakers || []).find((name) => name !== from && name.toLowerCase() === to.toLowerCase());
   if (!into) return saveSpeaker(from, to, false);
@@ -346,7 +316,6 @@ function mergeSpeaker(from, into) {
 }
 
 async function saveSpeaker(from, to, merge) {
-  if (changedSources().length) throw Object.assign(new Error('Save your fixes first.'), { shown: true });
   const page = sourcePage;
   const mine = seq;
   const { head } = page.page;
@@ -362,83 +331,28 @@ async function saveSpeaker(from, to, merge) {
   toast(merge ? `${from} is now part of ${to} in this recording.` : `${from} is now ${to} in this recording.`);
 }
 
-function changedSources() {
-  const { page } = sourcePage;
-  const changed = (rows, kind) =>
-    rows
-      .map(([at, p]) => {
-        const box = document.querySelector(`[data-${kind}="${at}"]`);
-        const text = box ? box.textContent : null;
-        return box && text !== p.text ? { kind, seq: at, text } : null;
-      })
-      .filter(Boolean);
-  return [...changed(page.passages, 'passage'), ...changed(page.points, 'point')];
-}
-
-function sourceBatches(changes, most = 1000000) {
-  const batches = [];
-  let batch = [];
-  let size = 0;
-  for (const change of changes) {
-    const bytes = new TextEncoder().encode(JSON.stringify(change)).length;
-    if (batch.length && size + bytes > most) {
-      batches.push(batch);
-      batch = [];
-      size = 0;
-    }
-    batch.push(change);
-    size += bytes;
-  }
-  if (batch.length) batches.push(batch);
-  return batches;
-}
-
-async function saveSource() {
-  const page = sourcePage;
+async function regenerateSource(button) {
+  const id = state.session && state.session.note.id;
+  if (!id) return;
   const mine = seq;
-  const changes = changedSources();
-  if (!changes.length) return toast('Nothing has changed.');
-  const { head } = page.page;
-  try {
-    for (const batch of sourceBatches(changes)) {
-      const saved = await api(`/api/notes/${enc(page.note)}/recording`, { method: 'PUT', body: { source: head.id, base: head.revision, changes: batch } });
-      head.revision = saved.revision;
-    }
-  } catch (e) {
-    if (e.status === 409) throw new Error('This recording changed while you were fixing it. Your fixes are still on this page: copy them, then close the transcript and open it again.');
-    throw e;
-  }
-  if (mine !== seq || sourcePage !== page || !$('#source-query')) return;
-  await loadSourcePage(page.page.head.id, page.page.at, page.back);
-  toast(`Saved your fixes to “${page.title || 'Untitled'}”`);
-}
-
-async function regenerateSource() {
-  if (changedSources().length) throw Object.assign(new Error('Save your fixes first, so the new note uses them.'), { shown: true });
-  const page = sourcePage;
-  const mine = seq;
-  const button = $('[data-action="source-regenerate"]');
   button.disabled = true;
   button.textContent = 'Writing…';
   try {
-    const preview = await api(`/api/notes/${enc(page.note)}/regenerate`, { method: 'POST', body: { wants: $('#regenerate-wants').value.trim() } });
-    const previous = await api(`/api/notes/${enc(page.note)}`);
-    if (mine !== seq || sourcePage !== page || !$('#regenerate-wants')) return;
-    generatedPreview = { ...preview, note: page.note, previous };
-    const box = sheet(`<h3>The note, written again</h3>
+    const preview = await api(`/api/notes/${enc(id)}/regenerate`, { method: 'POST', body: {} });
+    const previous = await api(`/api/notes/${enc(id)}`);
+    if (mine !== seq) return;
+    generatedPreview = { ...preview, note: id, previous };
+    const box = sheet(`<h3>The note, written up</h3>
       <p>Your current note stays as it is until you use this one.</p>
       <label class="source-keep"><span class="grow">Keep the current title</span>${settingsSwitch('id="regenerate-title"', true)}</label>
       <div class="prose combine-preview">${md.render(preview.body)}</div>
       ${sheetButtons(['Use this version', 'data-action="source-apply"'], { cancel: 'Back', action: 'source-back' })}`);
     $('.sheet', box).classList.add('source-sheet');
-    button.disabled = false;
-    button.textContent = 'Write the note again';
-  } catch (e) {
+  } finally {
     if (button.isConnected) {
       button.disabled = false;
-      button.textContent = 'Write the note again';
+      button.textContent = 'Write the notes';
     }
-    throw e;
   }
 }
 

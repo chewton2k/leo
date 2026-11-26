@@ -155,7 +155,7 @@ test('a note whose recording was not written up offers both ways forward', () =>
   const html = notice({ writeup_pending: true });
   assert.match(html, /<div class="set-card writeup-pending"><h3>These notes are not written up yet<\/h3><p class="set-note">No writing AI was ready, so leo kept the transcript as it is\.<\/p>/);
   assert.match(html, /<a class="btn primary sm" href="#\/settings\/writing">Set up writing AI<\/a>/);
-  assert.match(html, /<button type="button" class="btn plain sm" data-action="note-sources">Write the notes<\/button>/);
+  assert.match(html, /<button type="button" class="btn plain sm" data-action="source-regenerate">Write the notes<\/button>/);
   assert.equal(notice({}), '');
 });
 

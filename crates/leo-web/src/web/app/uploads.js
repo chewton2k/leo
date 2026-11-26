@@ -397,7 +397,6 @@ async function viewOriginal(id, name, page = null) {
   if (!kind) return;
   const url = `/api/notes/${enc(id)}/originals/${enc(name)}`;
   if (state.view === 'note' && state.session && state.session.note.id === id) {
-    if ($('.note-layout').dataset.aside === 'transcript' && changedSources().length) return toast('Save your fixes first.');
     sourcePage = null;
     return openFileAside(url, kind, name, page);
   }

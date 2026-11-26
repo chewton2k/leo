@@ -111,7 +111,6 @@ pub(crate) async fn sources(
             ),
             None => None,
         };
-        let wants = joined(heads.iter().map(|h| h.wants.as_str()));
         let mut list = serde_json::to_value(&heads).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         for head in list.as_array_mut().into_iter().flatten() {
             if let Some(head) = head.as_object_mut() {
@@ -119,23 +118,13 @@ pub(crate) async fn sources(
             }
         }
         let matches: Vec<_> = matches.into_iter().map(|m| m.1).collect();
-        Ok(serde_json::json!({"list": list, "wants": wants, "page": page, "matches": matches}))
+        Ok(serde_json::json!({"list": list, "page": page, "matches": matches}))
     }).await {
         Ok(value) => Json(value).into_response(), Err(code) => error(code, "Could not read this recording"),
     }
 }
 
-#[derive(Deserialize)]
-pub(crate) struct Regenerate {
-    #[serde(default)]
-    wants: Option<String>,
-}
-
-pub(crate) async fn regenerate(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Json(body): Json<Regenerate>,
-) -> Response {
+pub(crate) async fn regenerate(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     let Some(regenerate) = state.regenerator.clone() else {
         return error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -151,9 +140,7 @@ pub(crate) async fn regenerate(
         }
         let profile = recording::Profile {
             context: joined(sources.heads.iter().map(|h| h.context.as_str())),
-            wants: body
-                .wants
-                .unwrap_or_else(|| joined(sources.heads.iter().map(|h| h.wants.as_str()))),
+            wants: joined(sources.heads.iter().map(|h| h.wants.as_str())),
             ..Default::default()
         }
         .checked();
@@ -192,10 +179,7 @@ pub(crate) async fn regenerate(
 pub(crate) struct Fix {
     source: String,
     base: u64,
-    #[serde(default)]
-    changes: Vec<recording::Change>,
-    #[serde(default)]
-    rename: Option<Rename>,
+    rename: Rename,
 }
 
 #[derive(Deserialize)]
@@ -211,11 +195,10 @@ pub(crate) async fn edit_sources(
     Path(id): Path<String>,
     Json(body): Json<Fix>,
 ) -> Response {
-    if let Some(rename) = &body.rename {
-        if rename.to.trim() != rename.from {
-            if let Err(refused) = recording::speaker_name(&rename.to) {
-                return error(StatusCode::UNPROCESSABLE_ENTITY, format!("{refused}."));
-            }
+    let rename = &body.rename;
+    if rename.to.trim() != rename.from {
+        if let Err(refused) = recording::speaker_name(&rename.to) {
+            return error(StatusCode::UNPROCESSABLE_ENTITY, format!("{refused}."));
         }
     }
     let Ok(editing) = state.source_writing.clone().try_lock_owned() else {
@@ -226,24 +209,11 @@ pub(crate) async fn edit_sources(
     };
     match outside(&state, Some(id.clone()), move |notes, _| {
         let _editing = editing;
-        match &body.rename {
-            Some(rename) if rename.merge => recording::merge_speaker(
-                &notes,
-                &id,
-                &body.source,
-                body.base,
-                &rename.from,
-                &rename.to,
-            ),
-            Some(rename) => recording::rename_speaker(
-                &notes,
-                &id,
-                &body.source,
-                body.base,
-                &rename.from,
-                &rename.to,
-            ),
-            None => recording::edit(&notes, &id, &body.source, body.base, &body.changes),
+        let rename = &body.rename;
+        if rename.merge {
+            recording::merge_speaker(&notes, &id, &body.source, body.base, &rename.from, &rename.to)
+        } else {
+            recording::rename_speaker(&notes, &id, &body.source, body.base, &rename.from, &rename.to)
         }
         .map_err(|e| {
             match e.downcast_ref::<recording::Refused>() {
