@@ -1931,14 +1931,14 @@
       editLine(line, forward ? 'start' : 'end');
     }
 
-    function enterAfter(img) {
+    function enterAfter(img, key) {
       const at = pictureAt(img);
       const span = at && blocks[blockAtLine(at.start)]?.kind === 'line' && ed.pictureSpans(lines[at.start])[at.index];
       if (!span) return;
       unframe();
       const caret = lineStart(at.start) + span.at + span.length;
       editSpan(caret, caret, true);
-      if (editing) enterLine();
+      if (editing) key ? typeIn(key) : enterLine();
     }
 
     function pictureMarkdown(img) {
@@ -2061,6 +2061,13 @@
       const remove = (e.key === 'Backspace' || e.key === 'Delete') && noteFocused() && !selectedSpan();
       const sideways = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
       const move = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(e.key) && !e.isComposing && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && noteFocused() && !selectedSpan() && !(sideways && e.target.closest?.('.pic-handle'));
+      const typed = e.key.length === 1 && !e.isComposing && !e.metaKey && !e.ctrlKey && !e.altKey && noteFocused() && !selectedSpan();
+      if (typed) {
+        e.preventDefault();
+        e.stopPropagation();
+        enterAfter(framed.img, e.key);
+        return;
+      }
       if (move) {
         e.preventDefault();
         e.stopPropagation();
@@ -2365,8 +2372,9 @@
         const { area } = editing;
         const at = area.selectionStart;
         const before = area.value.slice(0, at);
-        const lead = before && !before.endsWith('\n') ? '\n' : '';
-        typeIn(`${lead}${text}\n`);
+        const inline = editing.kind === 'line' && ed.listed(lines, editing.start);
+        const lead = !inline && before && !before.endsWith('\n') ? '\n' : '';
+        typeIn(`${lead}${text}${inline ? '' : '\n'}`);
         return;
       }
       const last = lines[lines.length - 1];

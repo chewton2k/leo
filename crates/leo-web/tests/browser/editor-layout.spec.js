@@ -429,6 +429,33 @@ test('inserting a picture after a source-selection drag preserves the note and u
   }, { body });
 });
 
+test('a picture inserted into a checkbox or bullet stays in the item, and Enter, after typing too, continues the list', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    const picture = '![p](/api/image?inline=1)';
+    const items = () => page.evaluate(() => doc.source().split('\n').filter(line => line.startsWith('- ')).length);
+    for (const item of ['- [ ] ', '- ', '- foo']) {
+      for (const typed of ['', 'cat']) {
+        await page.goto(url + '/?body=' + encodeURIComponent(item));
+        await page.locator('#doc .blk').first().click();
+        await page.keyboard.press('End');
+        await page.evaluate(src => doc.insert(src), picture);
+        expect(await page.evaluate(() => doc.source())).toBe(item + picture);
+        if (typed) {
+          await page.keyboard.type(typed);
+          expect(await page.evaluate(() => doc.source())).toBe(item + picture + typed);
+        }
+        await page.keyboard.press('Enter');
+        expect(await items()).toBe(2);
+        await page.keyboard.type('x');
+        await page.keyboard.press('Enter');
+        expect(await items()).toBe(3);
+        await expect(page.locator('#doc img.note-img')).toHaveCount(1);
+      }
+    }
+  });
+});
+
 test('returning a drag to a list marker selects only the edited item text', async ({ browser }) => {
   await editorFixture(browser, async (context, url) => {
     const page = await context.newPage();

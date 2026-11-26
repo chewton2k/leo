@@ -409,7 +409,7 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   pictures sitting directly in the line's text, `ed.pictureSpans`), and where the caret would sit
   beside a picture with no text on that side the picture is framed instead, so nothing jumps.
   Arrows step over a picture, Up and Down past a picture's row frame it, Enter on a framed picture
-  adds a line after it (a list continues), Backspace or Delete beside it removes it, and an undo
+  adds a line after it (a list continues), a printable key goes into the line after it, a picture inserted into a list item stays in the item, Backspace or Delete beside it removes it, and an undo
   across one opens the text after it. Shift-click, a double-click beside a lone picture, a broken
   picture, one inside a link or bold and a heading line open the Markdown, and an edit that would
   change what a kept picture is (a code or maths span over it) reopens the line as Markdown.
