@@ -670,11 +670,11 @@ function back() {
   goBack('#/');
 }
 
-function chrome({ dir = '' } = {}) {
+function chrome({ dir = '', view = state.view } = {}) {
   floating.innerHTML = '';
-  document.body.classList.toggle('on-settings', ['settings', 'trash', 'keeping'].includes(state.view));
-  document.body.classList.toggle('on-calendar', state.view === 'calendar');
-  document.body.classList.toggle('on-boards', state.view === 'boards');
+  document.body.classList.toggle('on-settings', ['settings', 'trash', 'keeping'].includes(view));
+  document.body.classList.toggle('on-calendar', view === 'calendar');
+  document.body.classList.toggle('on-boards', view === 'boards');
   document.title = dir ? `${folderLabel(dir)} · leo` : 'leo';
 }
 

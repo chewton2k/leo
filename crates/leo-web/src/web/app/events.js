@@ -341,6 +341,7 @@ async function render() {
       try { localStorage.setItem(LAST_PLACE_KEY, '#/'); } catch (err) {}
       go('#/', { replace: true });
     } else if (e instanceof Offline) {
+      chrome({ view: kind });
       app.innerHTML = empty(DRAWN.offline, "Can't reach leo", 'Quit leo and open it again.');
     } else {
       for (const room of app.querySelectorAll('.blk.margin-room')) room.classList.remove('margin-room');

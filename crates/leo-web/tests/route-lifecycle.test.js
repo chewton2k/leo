@@ -8,7 +8,7 @@ function fixture() {
   const calls = [];
   class Offline extends Error {}
   const noop = () => {};
-  const context = { openingNote: null, renderGeneration: 0, hideAskFloat: noop,  clearTimeout: noop, cal: {}, document: {body: {classList: {toggle: noop}}}, location: {hash: '#/n/deleted'}, stopPageArrival: noop, library: {}, closeSearch: noop, leaveMap: noop, leaveBoards: noop, chat: {setContext: noop}, recorder: {leave: noop}, activity: {}, drawActivity: noop, app: {innerHTML: 'new draft', querySelectorAll: () => []}, DRAWN: {offline: 'drawn-offline'}, Offline, empty: (icon) => icon === 'drawn-offline' ? 'offline' : 'no drawing', toast: () => calls.push('toast'), go: hash => calls.push(hash), fail: () => calls.push('failure'), loadSideFolders: () => calls.push('sidebar'), newNote: async () => {}, showFolder: async () => {} };
+  const context = { openingNote: null, renderGeneration: 0, hideAskFloat: noop,  clearTimeout: noop, cal: {}, document: {body: {classList: {toggle: noop}}}, location: {hash: '#/n/deleted'}, stopPageArrival: noop, library: {}, closeSearch: noop, leaveMap: noop, leaveBoards: noop, chat: {setContext: noop}, recorder: {leave: noop}, activity: {}, drawActivity: noop, chrome: ({ view }) => calls.push(`chrome ${view}`), app: {innerHTML: 'new draft', querySelectorAll: () => []}, DRAWN: {offline: 'drawn-offline'}, Offline, empty: (icon) => icon === 'drawn-offline' ? 'offline' : 'no drawing', toast: () => calls.push('toast'), go: hash => calls.push(hash), fail: () => calls.push('failure'), loadSideFolders: () => calls.push('sidebar'), newNote: async () => {}, showFolder: async () => {} };
   vm.createContext(context);
   vm.runInContext(source.slice(source.indexOf('async function render()'), source.indexOf("window.addEventListener('online'")), context);
   return {context, calls, Offline};
@@ -65,7 +65,7 @@ test('the active route still handles missing notes and connection errors', async
     const {context, calls, Offline} = fixture();
     context.showNote = async () => { throw kind === 'missing' ? Object.assign(new Error('missing'), {status:404}) : kind === 'offline' ? new Offline() : new Error('failed'); };
     await context.render();
-    assert.deepEqual(calls, kind === 'missing' ? ['toast', '#/'] : kind === 'other' ? ['failure'] : []);
+    assert.deepEqual(calls, kind === 'missing' ? ['toast', '#/'] : kind === 'other' ? ['failure'] : ['chrome n']);
     assert.equal(context.app.innerHTML, kind === 'offline' ? 'offline' : 'new draft');
   }
 });
