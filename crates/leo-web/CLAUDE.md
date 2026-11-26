@@ -453,10 +453,10 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   panel, so a finished combine's Review stays reachable) shows on note pages again
   (2026-11-21, the user's call); the page reserves bottom room for it (`--dock-room`,
   set by `fitTasksWindow` from the dock's height, read by `body.on-note main`). A live
-  recording off the Record page is the first row of that panel (`pill()` in
-  recording.js fires `leo-recording`), and the recorder bar floats at the bottom of every other
-  page (`floatBar`: `#rec-float`, the Record page's bar with its wave, Pause and Stop; its time
-  opens the recording; 2026-11-25, the owner's call). The
+  recording off the Record page shows only as the recorder bar floating at the bottom of every
+  other page (`floatBar`: `#rec-float`, the Record page's bar with its wave, Pause and Stop; its
+  time opens the recording; while it shows, `--bottom` grows by 84 px so nothing sits under it; no
+  row in the background panel; 2026-11-25/26, the owner's call). The
   top bar shows no breadcrumbs on any page (`.crumbs` is kept invisible as the bar's
   spacer). On note pages at 1000 px and up the bar takes no room (2026-11-16): it is a
   zero-height sticky overlay holding only Felix's button, at the same spot as on every other

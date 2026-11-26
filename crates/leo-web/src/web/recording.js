@@ -1035,13 +1035,7 @@
     }
 
     function pill() {
-      const show = s.view && live(s.view) && !(s.container && s.container.isConnected);
-      floatBar(show);
-      const paused = show && s.view.state === 'paused';
-      const label = show ? `${paused ? 'Paused' : 'Recording'} · ${clock(s.view.secs)}` : '';
-      if (label === (s.pilled || '')) return;
-      s.pilled = label;
-      root.dispatchEvent(new root.CustomEvent('leo-recording', { detail: show ? { paused, label } : null }));
+      floatBar(Boolean(s.view && live(s.view) && !(s.container && s.container.isConnected)));
     }
 
     async function refresh() {

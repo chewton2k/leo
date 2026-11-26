@@ -300,19 +300,18 @@ test('earlier points go before the shown ones, once', () => {
   assert.deepEqual(L.earlierFirst([], shown), shown);
 });
 
-test('a live recording off the Record page is announced for the activity panel and floats its recorder bar, and not on it', () => {
-  const heard = [];
+test('a live recording off the Record page floats its recorder bar, keeps focus on it, and not on the Record page', () => {
   const bars = [];
   const from = recordingSource.indexOf('    function floatBar(');
   const node = () => {
     const el = { dataset: {}, innerHTML: '', classList: { on: new Set(), toggle(name, on) { if (on) this.on.add(name); else this.on.delete(name); } }, parts: {}, remove() { bars.splice(bars.indexOf(el), 1); } };
-    el.querySelector = (at) => (el.parts[at] ||= { textContent: '' });
+    el.querySelector = (at) => (el.parts[at] ||= { textContent: '', focus() { this.focused = true; } });
     return el;
   };
-  const document = { getElementById: (id) => bars.find((b) => b.id === id) || null, createElement: node, body: { appendChild: (el) => bars.push(el) } };
+  const document = { activeElement: null, getElementById: (id) => bars.find((b) => b.id === id) || null, createElement: node, body: { appendChild: (el) => bars.push(el) } };
   const pill = (s) => require('node:vm').runInNewContext(`(function(){${recordingSource.slice(from, recordingSource.indexOf('    async function refresh(', from))} return pill;})()`, {
     s, live: (view) => ['starting', 'recording', 'paused'].includes(view.state), clock: L.clock, paintWaveNow() {}, recBar: (v, lead) => `${lead}<pause title="${v.state === 'paused' ? 'Resume' : 'Pause'}">`,
-    root: { document, CustomEvent: class { constructor(name, init) { this.name = name; this.detail = init.detail; } }, dispatchEvent: (event) => heard.push(event) },
+    root: { document },
   });
   const page = { view: null, container: null };
   const announce = (view, container) => {
@@ -325,8 +324,11 @@ test('a live recording off the Record page is announced for the activity panel a
   assert.equal(bars.length, 1, 'off the Record page the recorder bar floats');
   assert.equal(bars[0].parts['#rec-time'].textContent, '1:15');
   assert.match(bars[0].innerHTML, /rec-float-open.*title="Pause"/, 'the shared recorder bar, led by a button back to the recording');
+  document.activeElement = { id: 'rec-pause', closest: (at) => at === '#rec-float' };
   announce({ state: 'recording', secs: 75 }, null);
   announce({ state: 'paused', secs: 3605 }, { isConnected: false });
+  assert.ok(bars[0].parts['#rec-pause'].focused, 'Pause pressed from the keyboard keeps focus as it turns into Resume');
+  document.activeElement = null;
   assert.equal(bars.length, 1, 'one bar, updated in place');
   assert.match(bars[0].innerHTML, /title="Resume"/);
   assert.ok(bars[0].classList.on.has('paused'));
@@ -335,12 +337,6 @@ test('a live recording off the Record page is announced for the activity panel a
   announce({ state: 'recording', secs: 6 }, { isConnected: true });
   announce({ state: 'done', secs: 5 }, null);
   assert.equal(bars.length, 0, 'a finished recording leaves no bar');
-  announce(null, null);
-  assert.deepEqual(JSON.parse(JSON.stringify(heard.map((event) => [event.name, event.detail]))), [
-    ['leo-recording', { paused: false, label: 'Recording · 1:15' }],
-    ['leo-recording', { paused: true, label: 'Paused · 1:00:05' }],
-    ['leo-recording', null],
-  ]);
 });
 
 test('a new transcript keeps the shown words and replaces only the changed tail', () => {

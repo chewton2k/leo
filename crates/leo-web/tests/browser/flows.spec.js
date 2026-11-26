@@ -2963,13 +2963,14 @@ test.describe('recording', () => {
     await expect(page.locator('[data-action="rec-pause"]')).toHaveText('Pause');
 
     await page.keyboard.press('Escape');
-    const pill = page.locator('#activity .activity-row', { hasText: 'Recording' });
-    await expect(pill).toContainText(/Recording · \d+:\d\d/);
-    await pill.click();
+    const bar = page.locator('#rec-float .rec-float-open');
+    await expect(bar).toContainText(/\d+:\d\d/);
+    await expect(page.locator('#activity .activity-row', { hasText: 'Recording' }), 'the floating bar is the only recording row').toHaveCount(0);
+    await bar.click();
     await expect(page.locator('[data-action="rec-stop"]')).toBeVisible();
     await page.locator('[data-action="rec-stop"]').click();
     await expect(page).toHaveURL(new RegExp(`#/n/${made.id}$`), { timeout: 8000 });
-    await expect(pill).toHaveCount(0);
+    await expect(page.locator('#rec-float')).toHaveCount(0);
   });
 
   test('a wide window puts Felix in a column beside the tabs and keeps the transcript node across polls', async ({ page }) => {
@@ -6611,6 +6612,32 @@ test.describe('round 2 redesign', () => {
     await fold(page, 'To review');
     await page.locator('#doc .doc-tail').click();
     await opened('To review');
+  });
+
+  test('a chevron below a line that grew while open folds its own heading', async ({ page }) => {
+    const note = await makeNote(page, `Folding grown ${tagOf()}`);
+    await page.goto(`/#/n/${note.id}`);
+    await page.locator('#doc .blk li', { hasText: 'Memoization' }).click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Shift+Enter');
+    await page.keyboard.type('Tabulation works bottom up.');
+    await page.keyboard.press('Shift+Enter');
+    await page.keyboard.type('Both reuse answers.');
+    await fold(page, 'Knapsack');
+    await expect(page.locator('#doc .editing')).toHaveCount(0);
+    await expect(page.locator('#doc .blk table'), 'Knapsack folded, not a heading above or below it').toBeHidden();
+    await expect(heading(page, 'Knapsack').locator('.fold-btn')).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#doc .blk', { hasText: 'Both reuse answers.' })).toBeVisible();
+    await expect(page.locator('#doc .blk li', { hasText: 'Redo problem 3' })).toBeVisible();
+  });
+
+  test('a damaged remembered fold opens the note unfolded', async ({ page }) => {
+    const note = await makeNote(page, `Folding damaged ${tagOf()}`);
+    await page.goto('/#/');
+    await page.evaluate((id) => localStorage.setItem('leo-folds', JSON.stringify({ [id]: 5 })), note.id);
+    await page.goto(`/#/n/${note.id}`);
+    await expect(page.locator('#doc .blk table')).toBeVisible();
+    await expect(heading(page, 'Knapsack').locator('.fold-btn')).toHaveAttribute('aria-expanded', 'true');
   });
 
   test('two sections with the same heading fold one at a time', async ({ page }) => {
