@@ -250,7 +250,7 @@ test('Settings → Writing AI signs in, waits for the probe and turns the status
 test('a refused login shows Sign in until Test connection passes', async () => {
   const timers = [], calls = [];
   let refused = false, fail = true, plans = 0;
-  const out = { id: 'test-writing', className: '', textContent: '' };
+  const out = { id: 'test-writing', className: '', textContent: '', isConnected: true };
   const page = () => ({ writing: { state: 'ready' }, plans: [{ provider: 'codex', installed: true, signed_in: !refused, refused }] });
   const context = { app: { addEventListener() {} }, document: { addEventListener() {} }, window: {}, ICON: new Proxy({}, { get: () => '' }), esc: (text) => String(text), choiceCards: () => '', ON_MAC: true, seq: 1,
     $: () => out, setTimeout: (fn) => timers.push(fn), clearTimeout() {}, appChange: async (change) => { calls.push(change.action); },

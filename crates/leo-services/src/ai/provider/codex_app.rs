@@ -420,7 +420,9 @@ impl CodexThread {
             output: self.total.output.saturating_sub(before.output),
         };
         let estimated = used == Tokens::default();
-        super::agent_cli::answered(&self.bin);
+        if !answer.trim().is_empty() {
+            super::agent_cli::answered(&self.bin);
+        }
         Ok((
             answer.trim().to_string(),
             Spent {

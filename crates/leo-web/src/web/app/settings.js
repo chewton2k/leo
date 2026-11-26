@@ -1152,11 +1152,12 @@ async function testAi(el) {
     out.className = 'set-result bad';
     out.textContent = e.message;
     recheck = true;
-  } finally {
-    el.disabled = false;
   }
-  const page = recheck && await api('/api/settings').catch(() => null);
-  if (!page || mine !== seq || state.view !== 'settings') return;
+  const page = recheck && out.isConnected && await api('/api/settings').catch(() => null);
+  if (!page || mine !== seq || state.view !== 'settings' || !out.isConnected) {
+    el.disabled = false;
+    return;
+  }
   const { className, textContent } = out;
   state.settings.plans = page.plans;
   drawSettings(state.settings);

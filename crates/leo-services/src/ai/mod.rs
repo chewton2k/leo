@@ -570,7 +570,7 @@ mod tests {
             super::why(
                 Ready,
                 Some("Claude Code"),
-                "claude ended. If it is not signed in, run it"
+                "claude ended. If it is not signed in, choose Claude Code in Writing AI and press Sign in."
             ),
             "leo can't write yet: Claude Code needs you to sign in."
         );

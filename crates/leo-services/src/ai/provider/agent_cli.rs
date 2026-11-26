@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -931,7 +932,9 @@ impl ClaudeSession {
                 true,
             ),
         };
-        answered(&self.bin);
+        if !answer.trim().is_empty() {
+            answered(&self.bin);
+        }
         Ok((
             answer,
             Spent {
@@ -1511,44 +1514,56 @@ fn auth_probe(agent: Agent, bin: &str) -> Option<(bool, String)> {
 
 fn signed_out(said: &str) -> bool {
     let said = said.to_lowercase();
-    said.split(|c: char| !c.is_alphanumeric())
-        .any(|word| word == "401")
+    said.split_whitespace()
+        .any(|word| word.trim_matches(|c: char| !c.is_alphanumeric()) == "401")
         || [
-            "logged in",
-            "signed in",
+            "not logged in",
+            "not signed in",
+            "logged out",
+            "signed out",
             "sign in again",
             "signing in again",
             "/login",
             "codex login",
             "unauthorized",
-            "authenticat",
+            "failed to authenticate",
+            "authentication token",
+            "authentication_error",
         ]
         .iter()
         .any(|marker| said.contains(marker))
 }
 
-static REFUSED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static REFUSED: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 
 pub(super) fn with_sign_in(agent: Agent, bin: &str, said: &str) -> String {
     let said = said.trim().trim_end_matches('.');
     if !signed_out(said) {
         return format!("{said}.");
     }
-    if !refused(bin) {
-        let mut seen = REFUSED.lock().unwrap_or_else(|e| e.into_inner());
-        seen.push(bin.to_string());
-    }
+    REFUSED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(bin.to_string());
     format!("{said}. If it is not signed in, {}.", agent.sign_in())
 }
 
 pub(super) fn answered(bin: &str) {
-    let mut seen = REFUSED.lock().unwrap_or_else(|e| e.into_inner());
-    seen.retain(|was| was != bin);
+    REFUSED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(bin);
+    SIGN_INS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|(was, signed, _)| was != bin || *signed);
 }
 
 pub fn refused(bin: &str) -> bool {
-    let seen = REFUSED.lock().unwrap_or_else(|e| e.into_inner());
-    seen.iter().any(|was| was == bin)
+    REFUSED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains(bin)
 }
 
 const SIGN_IN_FRESH: Duration = Duration::from_secs(600);
@@ -3258,6 +3273,9 @@ mod sign_in_tests {
             "unknown error",
             "open the sign in page",
             "busy, request id 4401b, ray a401-9",
+            "you are signed in as Sam, usage limit reached",
+            "mcp server github: authentication required",
+            "used 1,401 tokens",
             "",
         ] {
             assert_eq!(with_sign_in(Agent::Codex, bin, said), format!("{said}."));
