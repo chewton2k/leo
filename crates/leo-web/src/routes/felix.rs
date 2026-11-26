@@ -822,18 +822,10 @@ pub(crate) fn execute_tool(
             proposal: None,
             found: Vec::new(),
         }
-    } else if let Some(problem) = desk.not_offered(&call.name) {
-        tools::Done {
-            step: format!(
-                "Retried {}: {}",
-                call.name.replace('_', " "),
-                lowered(&tools::why_it_failed(&problem))
-            ),
-            result: format!("That did not work: {problem}"),
-            proposal: None,
-            found: Vec::new(),
-        }
-    } else if let Err(problem) = tools::check(call) {
+    } else if let Some(problem) = desk
+        .not_offered(&call.name)
+        .or_else(|| tools::check(call).err())
+    {
         tools::Done {
             step: format!(
                 "Retried {}: {}",
@@ -1019,6 +1011,15 @@ pub(crate) fn execute_tool(
     Ok(done)
 }
 
+fn fail(step: String, why: String) -> tools::Done {
+    tools::Done {
+        step,
+        result: format!("That did not work: {why}."),
+        proposal: None,
+        found: Vec::new(),
+    }
+}
+
 const MOST_PICTURES_LOOKED_AT: usize = 4;
 
 fn read_original(
@@ -1027,12 +1028,6 @@ fn read_original(
     call: &tools::Call,
 ) -> Result<tools::Done> {
     let wanted = call.text("note");
-    let fail = |step: String, why: String| tools::Done {
-        step,
-        result: format!("That did not work: {why}."),
-        proposal: None,
-        found: Vec::new(),
-    };
     let chosen = call.text("file");
     let named = desk.file_named(&chosen).cloned();
     let looked = store_now(state, |store| {
@@ -1267,12 +1262,6 @@ fn look_at_picture(
     call: &tools::Call,
 ) -> Result<tools::Done> {
     let wanted = call.text("note");
-    let fail = |step: String, why: String| tools::Done {
-        step,
-        result: format!("That did not work: {why}."),
-        proposal: None,
-        found: Vec::new(),
-    };
     let found = store_now(state, |store| Ok(desk.pictures_for(store, &wanted)))
         .map_err(|_| anyhow::anyhow!("leo could not read the notes"))?;
     let (title, pictures) = match found {

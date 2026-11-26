@@ -133,7 +133,8 @@ call names and echo levels): none for part 0, 1 s for every later part (every
 capture starts at part 0; an older manifest's unused `fresh` list is ignored and
 not written back).
 
-Speaker labels (2026-11-16, per recording: `Profile.speakers`, off by default;
+Speaker labels (2026-11-16, per recording: `Profile.speakers`, sent only for a Call since
+2026-11-25 (no switch);
 omitted from JSON when off, so old cache keys hold; on a call, 2026-11-22, the
 owner's call, only the Others track gets it, You is always You, and leo-host's
 `merged` names its voices Others 1, Others 2… by first appearance; a voice's
@@ -349,7 +350,11 @@ probe. Sign-in probes accept only recognized status output, honor exit status an
 share the bounded watchdog; raw output never leaves. `coding_plans` reports
 availability, tri-state sign-in and saved usage, never changes the selected
 writer, never makes a model call; an installed CLI alone is not sign-in;
-availability and sign-in use the same normalized `AgentCli::bin`.
+availability and sign-in use the same normalized `AgentCli::bin`. A probe says yes
+to a login the server refuses, so `note_sign_in` (the one place a run's failure gets
+its sign-in step) also remembers the program as refused, in memory, until it answers
+or its probe says signed out; only `coding_plans` reads that (`refused`), so setup,
+the checks before a run and Health's sign-in row stay on the probe. A run that ends without words names no sign-in step.
 
 ### Plan limits (`usage.rs`)
 

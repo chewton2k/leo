@@ -903,11 +903,17 @@ function marginDraw() {
   for (const id of [...marginPage.els.keys(), ...marginPage.marks.keys()]) if (!keep.has(id)) marginDropThread(id);
   const origin = columns.getBoundingClientRect();
   const page = $('article.note', columns).getBoundingClientRect();
-  const boxes = placed.map(({ t, at }) => ({ t, at, rects: s.doc.spanRects(at.from, at.to).map((r) => ({ ...r, left: r.left - origin.left, right: r.right - origin.left, top: r.top - origin.top, bottom: r.bottom - origin.top })) })).filter(({ rects }) => rects.length).map((box) => {
+  const folds = new Map();
+  const boxes = placed.map(({ t, at }) => ({ t, at, rects: s.doc.spanRects(at.from, at.to).map((r) => ({ ...r, left: r.left - origin.left, right: r.right - origin.left, top: r.top - origin.top, bottom: r.bottom - origin.top })) })).filter(({ t, at, rects }) => {
+    const head = s.doc.foldedHeading(at.from);
+    if (head !== null) folds.set(head, (folds.get(head) || 0) + (t.status === 'resolved' ? 0 : 1));
+    return rects.length && head === null;
+  }).map((box) => {
     const el = marginPage.els.get(box.t.id) || (margins || marginIsOpen(box.t) ? marginElement(box.t) : null);
     if (el) marginFill(el, box.t, marginPage.arriving.has(box.t.id), box.at.how !== 'exact' || box.t.reworded);
     return { ...box, el };
   });
+  s.doc.foldNotes(folds);
   const cuts = marginCuts(boxes);
   const shown = new Set(boxes.map(({ t }) => t.id));
   for (const [id, el] of marginPage.els) if (!shown.has(id)) el.hidden = true;

@@ -7,13 +7,13 @@
 //! Deleting writes a tombstone line; the file goes when the Trash period ends.
 
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::path::Path;
+use std::sync::{Arc, OnceLock};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::jsonline::{load, read_all, write_file, Index, Line};
+use crate::jsonline::{load, read_all, write_file, Index};
 
 pub const MOST_COLUMNS: usize = 12;
 pub const FACE_CHARS: usize = 240;
@@ -66,33 +66,9 @@ pub struct Card {
     pub deleted: bool,
 }
 
-impl Line for Board {
-    const DIR: &'static str = "boards";
-    fn id(&self) -> &str {
-        &self.id
-    }
-    fn stamp(&self) -> DateTime<Utc> {
-        self.updated_at
-    }
-    fn deleted_at(&mut self, now: DateTime<Utc>) {
-        self.deleted = true;
-        self.updated_at = now;
-    }
-}
+crate::jsonline::json_line!(Board, "boards");
 
-impl Line for Card {
-    const DIR: &'static str = "cards";
-    fn id(&self) -> &str {
-        &self.id
-    }
-    fn stamp(&self) -> DateTime<Utc> {
-        self.updated_at
-    }
-    fn deleted_at(&mut self, now: DateTime<Utc>) {
-        self.deleted = true;
-        self.updated_at = now;
-    }
-}
+crate::jsonline::json_line!(Card, "cards");
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(from = "Card")]
@@ -135,19 +111,7 @@ impl From<Card> for Placed {
     }
 }
 
-impl Line for Placed {
-    const DIR: &'static str = "cards";
-    fn id(&self) -> &str {
-        &self.id
-    }
-    fn stamp(&self) -> DateTime<Utc> {
-        self.updated_at
-    }
-    fn deleted_at(&mut self, now: DateTime<Utc>) {
-        self.deleted = true;
-        self.updated_at = now;
-    }
-}
+crate::jsonline::json_line!(Placed, "cards");
 
 pub trait Seat: Clone {
     fn seat_column(&self) -> &str;
@@ -192,13 +156,8 @@ struct Tables {
 }
 
 fn tables(chats: &Path) -> Arc<Tables> {
-    static TABLES: OnceLock<Mutex<HashMap<PathBuf, Arc<Tables>>>> = OnceLock::new();
-    let key = crate::db::beside_of(chats, None).to_path_buf();
-    let mut all = TABLES
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    Arc::clone(all.entry(key).or_default())
+    static TABLES: crate::jsonline::PerFolder<Tables> = OnceLock::new();
+    crate::jsonline::per_folder(&TABLES, chats)
 }
 
 pub fn generation(chats: &Path) -> u64 {

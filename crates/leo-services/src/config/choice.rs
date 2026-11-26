@@ -182,13 +182,6 @@ pub fn local_models(cfg: &Config) -> Local {
     }
 }
 
-pub fn ollama_models(base_url: &str) -> Vec<String> {
-    if !crate::ai::loopback(base_url) || !crate::health::port_open(base_url) {
-        return Vec::new();
-    }
-    tags(base_url)
-}
-
 pub(crate) fn tags(base_url: &str) -> Vec<String> {
     let root = crate::ollama::root(base_url);
     static CLIENT: std::sync::LazyLock<reqwest::Result<reqwest::blocking::Client>> =
@@ -318,18 +311,20 @@ pub fn effort_for(provider: &str, model: &str, configured: Option<&str>) -> Opti
     )
 }
 
-pub fn write_effort(doc: &mut DocumentMut, provider: &str, effort: Option<&str>) {
+fn provider_table<'a>(doc: &'a mut DocumentMut, provider: &str) -> Option<&'a mut Table> {
     let providers = doc
         .entry("providers")
-        .or_insert(Item::Table(implicit_table()));
-    let Some(providers) = providers.as_table_mut() else {
-        return;
-    };
+        .or_insert(Item::Table(implicit_table()))
+        .as_table_mut()?;
     providers.set_implicit(true);
-    let block = providers
+    providers
         .entry(provider)
-        .or_insert_with(|| Item::Table(Table::new()));
-    if let Some(table) = block.as_table_mut() {
+        .or_insert_with(|| Item::Table(Table::new()))
+        .as_table_mut()
+}
+
+pub fn write_effort(doc: &mut DocumentMut, provider: &str, effort: Option<&str>) {
+    if let Some(table) = provider_table(doc, provider) {
         match effort {
             Some(effort) => {
                 table.insert("effort", toml_edit::value(effort));
@@ -346,17 +341,7 @@ pub fn write_model(doc: &mut DocumentMut, provider: &str, model: &str) {
         Some(pc) if pc.kind == Some(ProviderKind::Parakeet) => "model_path",
         _ => "model",
     };
-    let providers = doc
-        .entry("providers")
-        .or_insert(Item::Table(implicit_table()));
-    let Some(providers) = providers.as_table_mut() else {
-        return;
-    };
-    providers.set_implicit(true);
-    let block = providers
-        .entry(provider)
-        .or_insert_with(|| Item::Table(Table::new()));
-    if let Some(table) = block.as_table_mut() {
+    if let Some(table) = provider_table(doc, provider) {
         table.insert(field, toml_edit::value(model));
     }
 }
@@ -652,8 +637,11 @@ mod tests {
 
     #[test]
     fn a_closed_port_lists_no_ollama_models_quickly() {
+        let mut cfg = load("[chat]\nchain = [\"ollama\"]\n");
+        cfg.providers.get_mut("ollama").unwrap().base_url = Some("http://127.0.0.1:9/v1".into());
+        assert!(local_models(&cfg).ollama.is_empty());
         let started = std::time::Instant::now();
-        assert!(ollama_models("http://127.0.0.1:9/v1").is_empty());
+        assert!(!crate::health::port_open("http://127.0.0.1:9/v1"));
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
     }
 
@@ -705,7 +693,6 @@ mod tests {
     #[test]
     fn an_ollama_on_another_computer_is_never_probed() {
         let remote = "http://192.0.2.1:11434/v1".to_string();
-        assert!(ollama_models(&remote).is_empty());
         let mut cfg = load("[chat]\nchain = [\"ollama\"]\n");
         let ollama = cfg.providers.get_mut("ollama").unwrap();
         ollama.base_url = Some(remote);

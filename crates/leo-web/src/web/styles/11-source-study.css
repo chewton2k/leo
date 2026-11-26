@@ -116,7 +116,7 @@
 .app-update-banner { max-width: 1080px; margin: 8px auto; padding: 10px 16px; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; background: var(--accent-soft); border-radius: var(--radius); }
 .app-update-banner .grow { flex: 1; }
 .note-aside, .note-aside-facts { display: none; }
-.note-layout.aside-open :is(#doc, .related, .note-outline, .margin-layer, #note-facts, .margin-instructions, .writeup-pending, .note-find, .page-marks) { display: none; }
+.note-layout.aside-open :is(#doc, .related, .note-outline, .margin-layer, #note-facts, .margin-instructions, .writeup-pending, .note-find, .note-follow) { display: none; }
 .note-layout.aside-open .note-aside { display: block; margin-top: 12px; }
 .note-layout.aside-open .note-aside-facts { display: block; }
 @media print {
@@ -130,17 +130,16 @@
 .aside-img { display: block; max-width: 100%; height: auto; border-radius: var(--r-tile); }
 .note-transcript { display: flex; flex-direction: column; gap: 12px; }
 .note-transcript .source-list { max-height: none; overflow: visible; margin: 0; }
-.note-transcript .source-wants, .note-transcript .source-match { margin-left: 0; margin-right: 0; width: 100%; }
-.note-transcript .source-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.note-transcript .source-match { margin-left: 0; margin-right: 0; width: 100%; }
 .note-transcript > .hint { margin: 0; }
 .transcript-flow { display: flex; flex-direction: column; gap: 16px; }
 .transcript-flow .source-row { padding: 0; }
 .transcript-flow .source-row.turn { display: block; }
+.transcript-flow .source-pause { display: flex; align-items: center; gap: 12px; margin: 4px 0 12px; color: var(--faint); font-size: var(--fs-xs); }
+.transcript-flow .source-pause::before, .transcript-flow .source-pause::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
 .transcript-flow .source-row .rec-at { padding-top: 3px; }
 .transcript-flow .spoken { margin: 0; font-size: var(--fs-md); line-height: 1.65; color: var(--text); overflow-wrap: anywhere; }
 .transcript-flow .source-text { display: inline; flex: none; padding: 0; border: 0; border-radius: var(--r-xs); overflow: visible; }
-.transcript-flow .source-text:hover { background: var(--wash); }
-.transcript-flow .source-text:focus { background: var(--tint); text-decoration: underline; text-decoration-color: var(--focus); text-underline-offset: 3px; }
 .minute-said { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .turn-who { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); font-weight: 500; color: var(--text); }
 .transcript-flow .turn-who .rec-at { min-width: 0; padding-top: 0; }

@@ -901,10 +901,16 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
     let mut save_failed = false;
     let mut heard_up_to = 0;
     let mut lost_up_to = 0;
+    let mut was_paused = false;
 
     while !controls.stop.load(Ordering::Relaxed) && !capture.ended() {
         std::thread::sleep(POLL);
-        capture.set_paused(controls.pause.load(Ordering::Relaxed));
+        let paused = controls.pause.load(Ordering::Relaxed);
+        capture.set_paused(paused);
+        if paused != std::mem::replace(&mut was_paused, paused) {
+            let stage = if paused { "paused" } else { "resumed" };
+            session.trace(stage, &format!("{:.1}", capture.recorded_secs()));
+        }
 
         match save_points(&session, controls) {
             Ok(()) => save_failed = false,

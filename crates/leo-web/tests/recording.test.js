@@ -155,7 +155,7 @@ test('a note whose recording was not written up offers both ways forward', () =>
   const html = notice({ writeup_pending: true });
   assert.match(html, /<div class="set-card writeup-pending"><h3>These notes are not written up yet<\/h3><p class="set-note">No writing AI was ready, so leo kept the transcript as it is\.<\/p>/);
   assert.match(html, /<a class="btn primary sm" href="#\/settings\/writing">Set up writing AI<\/a>/);
-  assert.match(html, /<button type="button" class="btn plain sm" data-action="note-sources">Write the notes<\/button>/);
+  assert.match(html, /<button type="button" class="btn plain sm" data-action="source-regenerate">Write the notes<\/button>/);
   assert.equal(notice({}), '');
 });
 
@@ -176,16 +176,20 @@ function idle(checks, platform, denied = false) {
   })([], '');
 }
 
-test('each missing piece is said above Start in a quiet line, and Start stays enabled', () => {
+test('each missing piece is a row with its own fix above Start, and Start stays enabled', () => {
   const html = idle({ speech: false, writing: false, headset: true }, 'macos');
-  assert.match(html, /<p class="set-note">No speech model yet\. The audio is kept and written up once you choose one\. <a href="#\/settings\/models">Choose a speech model<\/a><\/p>/);
-  assert.match(html, /<p class="set-note">No writing AI is ready, so you.ll get a transcript\. <a href="#\/settings\/writing">Set up writing AI<\/a><\/p>/);
+  assert.match(html, /<div class="rec-check"><span class="rec-check-dot" aria-hidden="true"><\/span><span class="rec-check-text"><b>Speech model<\/b><span>Needed to turn audio into text\. The audio is kept until you choose one\.<\/span><\/span><a class="btn plain sm" href="#\/settings\/models">Choose model<\/a><\/div>/);
+  assert.match(html, /<b>Writing AI<\/b><span>Without one you get a transcript, not notes\.<\/span><\/span><a class="btn plain sm" href="#\/settings\/writing">Set up<\/a>/);
+  assert.ok(html.indexOf('rec-checks') < html.indexOf('rec-start'));
+  assert.doesNotMatch(html, /rec-ready/);
   assert.match(html, /<p class="set-note" id="rec-headset" hidden>Your sound output is a headset, so leo can.t record only what this computer plays\. Switch to other speakers or headphones first\.<\/p>/);
   assert.ok(html.indexOf('set-note') < html.indexOf('rec-start'));
   assert.doesNotMatch(html, /warn/);
   assert.doesNotMatch(html, /rec-go"[^>]*disabled/);
   const ready = idle({ speech: true, writing: true, headset: false }, 'macos');
-  assert.doesNotMatch(ready, /set-note|rec-headset/);
+  assert.doesNotMatch(ready, /set-note|rec-headset|rec-checks/);
+  assert.match(ready, /<p class="rec-ready"><span class="pencil-tick" aria-hidden="true"><\/span>Ready · the speech model and writing AI are set up<\/p>/, 'all set is one quiet line with the drawn tick');
+  assert.match(ready, /<button class="rec-go" data-action="rec-start" >Start recording<\/button>/, 'Start is a plain red button with no icon');
 });
 
 test('a denied microphone is said above Start with a way to the system settings, and Start stays enabled', () => {
@@ -221,7 +225,7 @@ test('choosing Call fills an empty want and never overwrites typed text', () => 
     const wants = { value: typed };
     const headset = { hidden: true };
     const box = { querySelector: (at) => ({ 'input[name="rec-kind"]:checked': { value: kind }, '#rec-headset': headset, '#rec-wants': wants })[at] };
-    piece('pickKind', 'idleForm', 'pickKind', { MEETING_WANTS: L.MEETING_WANTS })(box, true);
+    piece('pickKind', 'idleForm', 'pickKind', { MEETING_WANTS: L.MEETING_WANTS, redrawSpeakers: () => {} })(box, true);
     return { wants: wants.value, headset: headset.hidden };
   };
   assert.deepEqual(pick('call', ''), { wants: L.MEETING_WANTS, headset: false });
@@ -236,7 +240,7 @@ test('a meeting prompt preselects Call and its event and fills the meeting wordi
     const radios = ['microphone', 'screen', 'call'].map((value) => ({ value, disabled: false, get checked() { return picked === value; }, set checked(on) { if (on) picked = value; } }));
     const fields = { '#rec-title': { value: '' }, '#rec-wants': { value: typed }, '#rec-headset': { hidden: true }, '.rec-idle': {} };
     const box = { querySelector: (at) => at === 'input[name="rec-kind"]:checked' ? radios.find((r) => r.checked) : fields[at] || radios.find((r) => at === `input[name="rec-kind"][value="${r.value}"]`) || null };
-    piece('chooseEvent', 'idleForm', 'preselect', { s, MEETING_WANTS: L.MEETING_WANTS, eventNow: () => -1 })(box, asked);
+    piece('chooseEvent', 'idleForm', 'preselect', { s, MEETING_WANTS: L.MEETING_WANTS, eventNow: () => -1, redrawSpeakers: () => {} })(box, asked);
     return { kind: radios.find((r) => r.checked).value, event: s.event, chosen: s.eventChosen, title: fields['#rec-title'].value, wants: fields['#rec-wants'].value };
   };
   assert.deepEqual(ask({ event: 'sync@2', kind: 'call' }), { kind: 'call', event: 1, chosen: true, title: 'Design sync', wants: L.MEETING_WANTS });
@@ -296,12 +300,18 @@ test('earlier points go before the shown ones, once', () => {
   assert.deepEqual(L.earlierFirst([], shown), shown);
 });
 
-test('a live recording off the Record page is announced for the activity panel, and not on it', () => {
-  const heard = [];
-  const from = recordingSource.indexOf('    function pill(');
+test('a live recording off the Record page floats its recorder bar, keeps focus on it, and not on the Record page', () => {
+  const bars = [];
+  const from = recordingSource.indexOf('    function floatBar(');
+  const node = () => {
+    const el = { dataset: {}, innerHTML: '', classList: { on: new Set(), toggle(name, on) { if (on) this.on.add(name); else this.on.delete(name); } }, parts: {}, remove() { bars.splice(bars.indexOf(el), 1); } };
+    el.querySelector = (at) => (el.parts[at] ||= { textContent: '', focus() { this.focused = true; } });
+    return el;
+  };
+  const document = { activeElement: null, getElementById: (id) => bars.find((b) => b.id === id) || null, createElement: node, body: { appendChild: (el) => bars.push(el) } };
   const pill = (s) => require('node:vm').runInNewContext(`(function(){${recordingSource.slice(from, recordingSource.indexOf('    async function refresh(', from))} return pill;})()`, {
-    s, live: (view) => ['starting', 'recording', 'paused'].includes(view.state), clock: L.clock,
-    root: { CustomEvent: class { constructor(name, init) { this.name = name; this.detail = init.detail; } }, dispatchEvent: (event) => heard.push(event) },
+    s, live: (view) => ['starting', 'recording', 'paused'].includes(view.state), clock: L.clock, paintWaveNow() {}, recBar: (v, lead) => `${lead}<pause title="${v.state === 'paused' ? 'Resume' : 'Pause'}">`,
+    root: { document },
   });
   const page = { view: null, container: null };
   const announce = (view, container) => {
@@ -309,18 +319,24 @@ test('a live recording off the Record page is announced for the activity panel, 
     pill(page)();
   };
   announce(null, null);
+  assert.equal(bars.length, 0);
   announce({ state: 'recording', secs: 75 }, null);
+  assert.equal(bars.length, 1, 'off the Record page the recorder bar floats');
+  assert.equal(bars[0].parts['#rec-time'].textContent, '1:15');
+  assert.match(bars[0].innerHTML, /rec-float-open.*title="Pause"/, 'the shared recorder bar, led by a button back to the recording');
+  document.activeElement = { id: 'rec-pause', closest: (at) => at === '#rec-float' };
   announce({ state: 'recording', secs: 75 }, null);
   announce({ state: 'paused', secs: 3605 }, { isConnected: false });
+  assert.ok(bars[0].parts['#rec-pause'].focused, 'Pause pressed from the keyboard keeps focus as it turns into Resume');
+  document.activeElement = null;
+  assert.equal(bars.length, 1, 'one bar, updated in place');
+  assert.match(bars[0].innerHTML, /title="Resume"/);
+  assert.ok(bars[0].classList.on.has('paused'));
   announce({ state: 'recording', secs: 5 }, { isConnected: true });
+  assert.equal(bars.length, 0, 'the Record page has its own bar');
   announce({ state: 'recording', secs: 6 }, { isConnected: true });
   announce({ state: 'done', secs: 5 }, null);
-  announce(null, null);
-  assert.deepEqual(JSON.parse(JSON.stringify(heard.map((event) => [event.name, event.detail]))), [
-    ['leo-recording', { paused: false, label: 'Recording · 1:15' }],
-    ['leo-recording', { paused: true, label: 'Paused · 1:00:05' }],
-    ['leo-recording', null],
-  ]);
+  assert.equal(bars.length, 0, 'a finished recording leaves no bar');
 });
 
 test('a new transcript keeps the shown words and replaces only the changed tail', () => {
@@ -567,7 +583,7 @@ test('Felix\'s questions follow the stage: before Start, while recording, and on
     s: { view: { state: 'recording', source: 'microphone', points: [], warnings: [], secs: 3, transcript: '' }, earlier: [], wave: [], tab: 'points', wantsDraft: null, wantsState: '' },
     esc, icons, whenOf: L.whenOf, askChips: L.askChips, clock: L.clock, earlierFirst: L.earlierFirst, placed: () => [], stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => false, desktopNow: () => ({ platform: 'macos' }),
   })();
-  assert.match(live, /rec-notepad.*rec-wants-card.*<aside class="set-card rec-felix rec-ask" id="rec-ask" data-keep aria-label="Ask Felix"><header><h3>Felix<\/h3><\/header>.*What did I just miss\?/s, 'the questions sit in Felix\'s own column beside the tabs');
+  assert.match(live, /rec-notepad.*rec-wants-card.*<aside class="set-card rec-felix rec-ask" id="rec-ask" data-keep aria-label="Ask Felix"><header><h3>Felix<\/h3><\/header>.*What did I just miss\?.*data-rec-ask-form/s, 'the questions and a box for your own sit in Felix\'s column beside the tabs');
   assert.match(live, /id="rec-heard" role="tabpanel" data-keep/);
   assert.match(live, /id="rec-tab-points"/);
   assert.match(live, /id="rec-points-panel" role="tabpanel" aria-labelledby="rec-tab-points"/);
@@ -577,7 +593,7 @@ test('Felix\'s questions follow the stage: before Start, while recording, and on
   assert.match(live, /id="rec-stop" data-keep data-action="rec-stop"/);
   assert.match(live, /<textarea id="rec-wants-live"[^>]*data-keep/);
   assert.match(live, /data-rec-tab="points"[^>]*aria-selected="true"[^>]*>Your notes <span class="badge" id="rec-count">0<\/span><\/button>.*data-rec-tab="heard"[^>]*>Transcript<\/button>.*data-rec-tab="wants"[^>]*>What you want<\/button>/s, 'Your notes is the first tab and open by default');
-  assert.match(live, /<div class="rec-bar"[^>]*><span class="rec-dot"><\/span>.*id="rec-time">0:03<\/span>.*id="rec-wave".*data-action="rec-pause".*data-action="rec-stop"/s, 'one recorder bar: dot, clock, wave, Pause, Stop');
+  assert.match(live, /<div class="rec-bar-dock"><div class="rec-bar"[^>]*><span class="rec-dot"><\/span>.*id="rec-time">0:03<\/span>.*id="rec-wave".*data-action="rec-pause".*data-action="rec-stop"/s, 'one recorder bar at the bottom: dot, clock, wave, Pause, Stop');
 });
 
 test('a question asked while recording sends the newest transcript and the typed points within 8,000 characters', () => {
@@ -655,6 +671,23 @@ test('a lecture draws a typed point under its own minute, not under the minute b
   const p = (seq, at) => [seq, { start_secs: at, end_secs: at + 5, text: String(seq), speaker: 'Microphone' }];
   const flow = L.transcriptFlow([p(1, 3), p(2, 50), p(3, 130)], [[9, { at_secs: 95, text: 'point' }]], ['Microphone']);
   assert.deepEqual(flow.groups.map((g) => [g.at, g.items.map((i) => (i.passage || i.point)[0])]), [[3, [1, 2]], [95, [9]], [130, [3]]]);
+});
+
+test('a pause is marked between the lines on either side of it, with how long it lasted', () => {
+  const p = (seq, at) => [seq, { start_secs: at, end_secs: at + 5, text: String(seq), speaker: 'Microphone' }];
+  const trace = [
+    { at: '2026-11-25T17:08:34Z', stage: 'capture', detail: 'Recording started' },
+    { at: '2026-11-25T17:10:00Z', stage: 'paused', detail: '30.0' },
+    { at: '2026-11-25T17:14:10Z', stage: 'resumed', detail: '30.0' },
+    { at: '2026-11-25T17:15:00Z', stage: 'paused', detail: '90.0' },
+    { at: '2026-11-25T17:15:20Z', stage: 'resumed', detail: '90.0' },
+    { at: '2026-11-25T17:16:00Z', stage: 'paused', detail: '400.0' },
+  ];
+  const pauses = L.pausesOf(trace);
+  assert.deepEqual(pauses, [{ at: 30, mins: 4 }, { at: 90, mins: 0 }], 'a pause still open when the recording stopped is left out');
+  const flow = L.transcriptFlow([p(1, 3), p(2, 30), p(3, 50), p(4, 120)], [], ['Microphone'], [...pauses, { at: 2, mins: 1 }, { at: 500, mins: 1 }]);
+  assert.deepEqual(flow.groups.map((g) => (g.pause ? `paused ${g.pause.mins}` : g.items.map((i) => i.passage[0]).join(','))), ['1', 'paused 4', '2,3', 'paused 0', '4'], 'the line said at the moment of resuming comes after the mark, and pauses outside these lines are not drawn');
+  assert.deepEqual(L.pausesOf(undefined), []);
 });
 
 test('a live redraw keeps Pause, Stop and the wants box and changes Pause in place', () => {

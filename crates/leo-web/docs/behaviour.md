@@ -300,7 +300,7 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   A lettered list begins at `a` or `A`, continues an item on the line above, or has a box
   (`listable`; `after` is the option for a note's one-line blocks), so `p. 12`, `c. 1900` and
   `e. coli` stay prose everywhere, editing included. `listLevels` is the one forward pass over a
-  note; `listed` answers for one line. `Note::checkbox_line` in leo-core stays context-free and
+  note; `listed` answers for one line. `notes::checkbox_line` in leo-core stays context-free and
   counts the same lines, which is why a box always makes an item. Enter continues with `continueLine`,
   keeping the marker's gap; on an empty item it steps out one level, then leaves the list;
   Backspace at the start of an item's text does the same through `stepBack`, keeping the
@@ -367,7 +367,7 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   line lands past its raw marks.
 
 - `markdown.js` escapes first, numbers checkboxes exactly like
-  `Note::toggle_checkbox`, draws `[[Title]]` links, callouts (`> [!type]`,
+  `notes::checkbox_line`, draws `[[Title]]` links, callouts (`> [!type]`,
   `-`/`+` dropdowns), ```mermaid (`diagrams.js`), math (`math.js`), ```svg as
   a sandboxed `<img src="data:…">`, and local pictures (`/api/image`; outside
   images stay links). `interactive: false` makes task boxes read-only.
@@ -1028,7 +1028,7 @@ target. Check the page sequence after loading preferences.
   answers 409 `replaceable`), so a new read-along note still replaces them on a reworded sentence.
   An open thread with more than 6 messages folds the older ones behind a "Show N earlier" button.
 - Deletes: a note in the trash keeps its threads, so a restore finds them. Deleting
-  from the trash removes them at once (`forget_notes`) and its task details, recording
+  from the trash removes them at once (`finish_held_rows`) and its task details, recording
   sources and original uploads, reading place, meaning vectors and summary, and so does
   the end of the trash period; a removal that fails is retried on the next delete and
   daily, a recording in use is skipped, and nothing is removed while a note or a trashed
@@ -1178,7 +1178,7 @@ target. Check the page sequence after loading preferences.
   passage falls back to `/insert` with one request id per thread (`/insert` and `/weave` dedupe on note
   and request), which re-finds the passage or says it went to the end and skips the
   glow. Other open threads anchored in a rewritten block may lose their place. Ask in chat attaches the quote. `add_margin_note`'s Undo is refused
-  once the user has replied. `chat::gather_seeing` adds the open threads of the open note
+  once the user has replied. `chat::gather_indexed` adds the open threads of the open note
   the page can still place (words found exactly, or between their old surroundings: `margin::shown`)
   after the notes (`margin::context`, at most 3,000 characters and an eighth of the
   note room); the block's fence is keyed per process and stable while its content is,
@@ -1313,13 +1313,16 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
   The idle page (2026-11-22, the owner's call) starts with the title, like a note's
   ("Untitled recording", `#rec-title`), then the calendar event (when a calendar is connected)
   and the folder as chips that open the shared select menu (`#rec-event`, `#rec-dir`), then
-  Microphone, Screen and Call as one row of `.choice-pick` cards with a track diagram each
-  (one waveform, or two for Call) over the same `rec-kind` radios, What do you want
-  (`#rec-wants`), Label speakers (not for Call), the calendar hint as one linked line, the red
-  Start with the "keeps recording if you close the window" tip, and Felix's before-start
-  questions under it.
+  Microphone, Screen and Call as one full-width switch of three equal parts whose highlight
+  slides (`.rec-kinds`, the `choiceCards` ring, an icon each) over the same `rec-kind` radios with
+  the picked source's one line under it (`#rec-kind-line`), What do you want (`#rec-wants`), then
+  either one ready line with the pencil tick ("Ready · the speech model and writing AI are set
+  up", `.rec-ready`) or the gaps as rows with their own fix (`.rec-checks`: Speech model, Writing
+  AI, and Calendar as an optional row), the red Start (text only, no icon) with the "keeps
+  recording if you close the window" tip, and Felix's before-start questions under it
+  (2026-11-25, the owner's round 2 approval).
 
-- Record warns before Start (`/api/record` `checks` from `Housekeeper::checks`: `speech`, `writing`, `headset`, each cheap, never opening the microphone): quiet `.set-note` lines with links above Start, which stays enabled; the headset line shows only for Call. A denied microphone (`desktopApp.permissions`, passed to recording.js as `deps.desktop`) says so under the live title with Open System Settings; Call fills an empty "What do you want" with `MEETING_WANTS`.
+- Record warns before Start (`/api/record` `checks` from `Housekeeper::checks`: `speech`, `writing`, `headset`, each cheap, never opening the microphone): the `.rec-checks` rows above Start, which stays enabled; the headset line shows only for Call. A denied microphone (`desktopApp.permissions`, passed to recording.js as `deps.desktop`) says so under the live title with Open System Settings; Call fills an empty "What do you want" with `MEETING_WANTS`.
 
 - Live transcript (2026-11-21, the user's call): every second only the new words are
   added to the Transcript tab; the words already shown stay put, so a selection and the
@@ -1334,8 +1337,9 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
 
 - Live page (2026-11-22, the owner's call): the recording looks like the note it becomes.
   The header holds the title, chips for the event time, folder and kind, the hearing line
-  and, on the right, one recorder bar (pulsing red dot, clock, a small wave, Pause, red Stop
-  and save). Under it, tabs Your notes (with its count, open first) · Transcript · What you
+  and one recorder bar (pulsing red dot, clock, a small wave, Pause, red Stop and save) fixed at
+  the bottom of the window; off the Record page the same bar floats on every page (`#rec-float`).
+  Felix's column also takes your own question (`data-rec-ask-form`), sent like his three. Under it, tabs Your notes (with its count, open first) · Transcript · What you
   want; the open tab survives each poll and keyboard focus stays on it (arrow keys, Home and
   End move between tabs). Felix's three questions sit in a narrow column beside the tabs
   (a recording area of 820 px or more), under them when narrower. After Stop the page stays:
@@ -1359,9 +1363,9 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
   lines · Show", shown as "You · echo · …" (their own track's name, never the turn they sit
   in), and a Found match inside a fold opens it before scrolling there. Tapping a speaker's name renames that speaker on every line of that recording
   (the note's text is not rewritten; typing a name another speaker has asks "Merge A into
-  B?" and merges only on Merge). Lines are fixed in
-  place and saved with Save fixes; paging, Earlier/Later, the pick list for several recordings,
-  What you want and Write the note again work as on the old sheet. The ⋯ menu's Show
+  B?" and merges only on Merge). The lines only show: nothing in the transcript can be
+  edited, and there is no Save fixes, What you want or Write the note again (2026-11-26); paging,
+  Earlier/Later and the pick list for several recordings work as on the old sheet. The ⋯ menu's Show
   transcript opens the same view with the selected text as the search.
 
 - Screenshots (the user's call): paste a PNG/JPEG/GIF/WebP into Your notes while
@@ -1564,7 +1568,7 @@ Board tabs show only their names (2026-11-16); columns keep their card counts.
   the page fills the window and never scrolls itself. One header row (`kanbanHeadHtml`)
   holds the board tabs with count badges, a + for New board, Add column and the board's
   ⋯. The open board's tab is its name: `.kanban-title` edits in place inside it, so the
-  name shows once, and the current tab is marked by the pencil underline of note rules (`.kanban-tab.on::after`; 2026-11-21, the user's call). A card is hovered, and open, with a one-step tone (`--step`, no ring); the open card also keeps a 3 px ink edge on its left. A tab is one click; a card dropped on a tab moves to that board, with
+  name shows once, and the current tab is marked by the pencil underline of note rules (`.kanban-tab.on::after`; 2026-11-21, the user's call). A card is hovered, and open, with a one-step tone (`--step`); the open card also has a hairline all round (2026-11-25, the user's call, replacing an ink edge on its left). A tab is one click; a card dropped on a tab moves to that board, with
   Undo. `kanbanFit` shows whole tabs only, the open board's always among them, and puts
   the rest under "n more" (`#kanban-switch`, the shared dropdown; the tabs move to `.kanban-over`,
   and while a card is dragged they all show again and the row scrolls near its ends, so
@@ -1745,7 +1749,8 @@ may make additional internal requests; these are not subscription-balance estima
 Sign in and Install (2026-11-09): onboarding's writing status row and Settings → Writing AI's card offer
 Sign in (POST `/api/app` `sign_in`, provider checked in `app_settings::call`) or an Install link (`INSTALL_URL`);
 after Sign in, `signIn` polls `/api/writing?probe=signin` every 3 s for at most 2 minutes, then offers Check again
-(one probe), and stops when the view closes.
+(one probe), and stops when the view closes. The card offers Sign in only when the plan is not signed in; for a
+refused login (`plan.refused`) Sign in starts no check, since the probe cannot tell: Test connection, any answer, or a probe that says signed out clears it.
 Writing AI shows detected Codex/Claude accounts with bounded CLI sign-in checks,
 5-hour/7-day meters, reset times and the age of saved usage. Detection never
 changes the chosen provider; unknown or absent limits are stated explicitly.

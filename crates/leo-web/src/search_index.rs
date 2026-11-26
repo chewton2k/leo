@@ -9,7 +9,7 @@ use leo_core::store::{Changed, Store};
 
 use crate::chat::flat;
 use crate::db::Db;
-use crate::vectors::fnv64;
+use crate::vectors::fnv;
 
 pub const MOST_COPIED: usize = 8 * 1024 * 1024;
 const MOST_LOOKED: usize = 16 * 1024 * 1024;
@@ -30,7 +30,7 @@ fn locked<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 fn hash_of(text: &str) -> String {
-    format!("{:016x}", fnv64(text.bytes()))
+    fnv(text.bytes())
 }
 
 fn rows(text: &str) -> Option<Vec<&str>> {

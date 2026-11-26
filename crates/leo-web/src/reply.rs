@@ -19,6 +19,24 @@ pub(crate) fn error(status: StatusCode, message: impl ToString) -> Response {
         .into_response()
 }
 
+const PIECE: usize = 64 * 1024;
+
+pub(crate) fn streamed(file: std::fs::File, size: u64) -> Response {
+    let stream = futures_util::stream::try_unfold(
+        (tokio::fs::File::from_std(file), vec![0u8; PIECE]),
+        |(mut file, mut piece)| async move {
+            use tokio::io::AsyncReadExt;
+            let read = file.read(&mut piece).await?;
+            Ok::<_, std::io::Error>((read > 0).then(|| (piece[..read].to_vec(), (file, piece))))
+        },
+    );
+    let mut response = axum::body::Body::from_stream(stream).into_response();
+    response
+        .headers_mut()
+        .insert(header::CONTENT_LENGTH, header::HeaderValue::from(size));
+    response
+}
+
 pub(crate) const FOLDER_REFUSED: &str = "Use a folder name inside your notes, without . or ..";
 
 pub(crate) fn sentence(status: StatusCode) -> &'static str {

@@ -23,6 +23,7 @@ struct Queued {
     held: Option<leo_core::paths::FileDigest>,
 }
 use leo_core::paths::own::{HELD as HELD_DIR, ORIGINALS, SOURCES};
+use leo_core::paths::{file_stamp, FileStamp};
 
 const MOST_PICTURE_CHANGES: usize = 256;
 const HELD_FOLDER_BYTES: u64 = 256 * 1024 * 1024;
@@ -916,26 +917,6 @@ fn own_pictures(
     Some((recorded, older))
 }
 
-type Stamp = (u64, u128, i64);
-
-fn stamp_of(meta: &std::fs::Metadata) -> Stamp {
-    let modified = meta
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-        .map_or(0, |since| since.as_nanos());
-    #[cfg(unix)]
-    let changed = {
-        use std::os::unix::fs::MetadataExt;
-        meta.ctime()
-            .saturating_mul(1_000_000_000)
-            .saturating_add(meta.ctime_nsec())
-    };
-    #[cfg(not(unix))]
-    let changed = 0;
-    (meta.len(), modified, changed)
-}
-
 const NOT_TEXT: [&str; 12] = [
     "png", "jpg", "jpeg", "gif", "webp", "wav", "mp3", "m4a", "pdf", "docx", "pptx", "zip",
 ];
@@ -945,7 +926,7 @@ const BOOKKEEPING: [&str; 3] = ["pictures.json", "trash.json", leo_core::attachm
 struct Scan {
     roots: Vec<PathBuf>,
     leo: PathBuf,
-    stamps: HashMap<PathBuf, Option<Stamp>>,
+    stamps: HashMap<PathBuf, Option<FileStamp>>,
     found: HashSet<String>,
 }
 
@@ -990,7 +971,7 @@ impl Scan {
             }
             match std::fs::symlink_metadata(&dir) {
                 Ok(meta) if meta.is_dir() => {
-                    self.stamps.insert(dir.clone(), Some(stamp_of(&meta)));
+                    self.stamps.insert(dir.clone(), Some(file_stamp(&meta)));
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound && depth == 0 => {
                     self.stamps.insert(dir, None);
@@ -1014,7 +995,7 @@ impl Scan {
                 } else if !kind.is_file() {
                     return None;
                 } else if !self.skipped(&path) {
-                    let stamp = stamp_of(&entry.metadata().ok()?);
+                    let stamp = file_stamp(&entry.metadata().ok()?);
                     self.read(&path, stamp)?;
                     self.stamps.insert(path, Some(stamp));
                 }
@@ -1027,16 +1008,16 @@ impl Scan {
         self.stamps
             .iter()
             .all(|(path, expected)| match std::fs::symlink_metadata(path) {
-                Ok(meta) => !meta.file_type().is_symlink() && Some(stamp_of(&meta)) == *expected,
+                Ok(meta) => !meta.file_type().is_symlink() && Some(file_stamp(&meta)) == *expected,
                 Err(e) => expected.is_none() && e.kind() == std::io::ErrorKind::NotFound,
             })
     }
 
-    fn read(&mut self, path: &Path, expected: Stamp) -> Option<()> {
+    fn read(&mut self, path: &Path, expected: FileStamp) -> Option<()> {
         use std::io::Read;
         const MOST_TEXT_BYTES: u64 = 256 * 1024 * 1024;
         let file = leo_core::paths::open_regular(path).ok()?;
-        if stamp_of(&file.metadata().ok()?) != expected || expected.0 > MOST_TEXT_BYTES {
+        if file_stamp(&file.metadata().ok()?) != expected || expected.0 > MOST_TEXT_BYTES {
             return None;
         }
         let mut file = file.take(MOST_TEXT_BYTES + 1);
@@ -1164,7 +1145,7 @@ pub(crate) fn pictures_asked(state: &AppState, now: DateTime<Utc>, asked: &Asked
     };
     let ledger = notes.join(".leo").join(leo_core::attachments::MADE);
     let ledger_at = || match std::fs::symlink_metadata(&ledger) {
-        Ok(meta) if meta.is_file() => Some(Some(stamp_of(&meta))),
+        Ok(meta) if meta.is_file() => Some(Some(file_stamp(&meta))),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(None),
         _ => None,
     };

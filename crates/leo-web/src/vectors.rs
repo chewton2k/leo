@@ -151,7 +151,7 @@ pub(crate) fn fnv64(bytes: impl IntoIterator<Item = u8>) -> u64 {
     })
 }
 
-fn fnv(bytes: impl Iterator<Item = u8>) -> String {
+pub(crate) fn fnv(bytes: impl IntoIterator<Item = u8>) -> String {
     format!("{:016x}", fnv64(bytes))
 }
 
@@ -212,6 +212,7 @@ pub struct Work {
 }
 
 impl Vectors {
+    #[cfg(test)]
     pub fn for_notes(notes_dir: &Path) -> Vectors {
         let base = crate::db::beside_of(notes_dir, None);
         Vectors::at(base.join(leo_core::paths::own::MEANING))
@@ -222,6 +223,7 @@ impl Vectors {
         Vectors::loaded(base.join(leo_core::paths::own::MEANING), Some(live))
     }
 
+    #[cfg(test)]
     pub fn at(path: PathBuf) -> Vectors {
         Vectors::loaded(path, None)
     }

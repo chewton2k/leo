@@ -260,3 +260,20 @@ label.trash-row { cursor: pointer; }
   .print-notes li > :first-child { margin-top: 0; }
   .print-notes li > :last-child { margin-bottom: 0; }
 }
+.blk-folded { display: none; }
+.blk-fold :is(h1, h2, h3, h4, h5, h6) { position: relative; }
+.fold-btn { position: absolute; left: -26px; top: 50%; width: 20px; height: 20px; margin-top: -10px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--r-xs); background: none; color: var(--faint); cursor: pointer; opacity: 0; transition: opacity var(--t-follow) var(--ease-move); }
+.blk-fold:hover .fold-btn, .fold-btn:focus-visible, .blk-closed .fold-btn { opacity: 1; }
+.fold-btn:hover { color: var(--text); }
+.fold-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transform: rotate(90deg); transition: transform var(--t-follow) var(--ease-move); }
+.blk-closed .fold-btn svg { transform: none; }
+[data-fold-said]::after { content: attr(data-fold-said); margin-left: 10px; font-size: var(--fs-sm); font-weight: 400; color: var(--muted); }
+.blk-leaving { overflow: hidden; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .fold-btn, .fold-btn svg { transition: none; } }
+@media print { .blk-folded { display: block; } .fold-btn { display: none; } [data-fold-said]::after { content: none; } }
+.note-follow { position: relative; z-index: 1; margin: calc(64px - 40vh) 0 0; padding-top: 14px; box-shadow: 0 -1px 0 var(--line); }
+.note-follow-head { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; font-size: var(--fs-xs); color: var(--muted); }
+.note-follow-head svg { width: 14px; height: 14px; }
+.note-follow-asks { display: flex; flex-wrap: wrap; gap: 8px; }
+.note-follow-asks .btn { margin: 0; font-weight: 400; }
+@media print { .note-follow { display: none; } }

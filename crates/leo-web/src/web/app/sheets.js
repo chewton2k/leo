@@ -186,11 +186,11 @@ const QUICK_PLACES = [
 const QUICK_DOES = new Set(['ask', 'search', 'task', 'note', 'combine']);
 const QUICK_SEARCH_MS = 120;
 const QUICK_WAIT_MS = 800;
-const quick = { due: [], rows: [], at: 0, picked: null, notes: [], chats: [], folders: [], asked: '', timer: 0, seq: 0, busy: false, root: null };
+const quick = { due: [], rows: [], at: 0, picked: null, notes: [], chats: [], folders: [], recent: [], asked: '', timer: 0, seq: 0, busy: false, root: null };
 const inQuick = (sel) => (quick.root && !quick.root.classList.contains('scrim-gone') ? quick.root.querySelector(sel) : null);
 
 function quickLeo() {
-  Object.assign(quick, { due: [], rows: [], at: 0, picked: null, notes: [], chats: [], folders: [], asked: '' });
+  Object.assign(quick, { due: [], rows: [], at: 0, picked: null, notes: [], chats: [], folders: [], recent: [], asked: '' });
   quick.root = sheet(`<div class="quick-leo"><span class="quick-perch" aria-hidden="true">${chat.button(50)}</span>
     <label class="quick-bar">${ICON.search}<input id="quick-input" placeholder="Search notes, or ask Felix" autocomplete="off" spellcheck="false" enterkeyhint="go" maxlength="2000" aria-label="Quick Leo" role="combobox" aria-controls="quick-results" aria-expanded="true"><kbd>${shortcutText(shortcutKeys('quick'))}</kbd></label>
     <div class="quick-results" id="quick-results" role="listbox" aria-label="Results"></div>
@@ -221,6 +221,7 @@ function quickLeo() {
   cascade(inQuick('#quick-results'));
   input.focus();
   loadQuickDue().catch(() => {});
+  recentNotes().then((notes) => { quick.recent = notes; drawQuick(); }).catch(() => {});
   api('/api/folders').then((all) => { quick.folders = (all || []).map((f) => f.name); drawQuick(); }).catch(() => {});
 }
 
@@ -269,7 +270,8 @@ function quickLook(row) {
   if (row.kind === 'combine') return { icon: ICON.note, label: row.id ? `Combine “${row.title || 'Untitled'}” into…` : 'Open a note to combine it', hint: 'Combine notes' };
   if (row.kind === 'ask') return { icon: chat.button(20), said: quickSaid('Ask Felix about', row.text) };
   if (row.kind === 'task') return { icon: ICON.check, said: quickSaid('Add', row.title, quickTaskWhen(row)) };
-  if (row.kind === 'open') return { icon: ICON.note, label: row.title, hint: (quick.notes.find((n) => n.id === row.id)?.directory || '').replaceAll('/', ' / ') };
+  if (row.kind === 'open') return { icon: ICON.note, label: row.title, hint: (row.dir ?? quick.notes.find((n) => n.id === row.id)?.directory ?? '').replaceAll('/', ' / ') };
+  if (row.kind === 'start') return { icon: row.what === 'felix' ? chat.button(20) : ICON[row.icon], label: row.label, hint: row.hint || '', keys: row.keys };
   if (row.kind === 'folder') return { icon: ICON.folder, label: row.path.split('/').pop(), hint: row.path.includes('/') ? row.path.split('/').slice(0, -1).join(' / ') : 'Folder' };
   if (row.kind === 'chat') {
     const when = quick.chats.find((c) => c.id === row.id)?.updated_at;
@@ -280,11 +282,18 @@ function quickLook(row) {
   return { icon: ICON.plus, said: quickSaid('Start a note called', row.title) };
 }
 
+function quickRow(row, i, head) {
+  const look = quickLook(row);
+  const on = i === quick.at;
+  return `${head ? `<div class="quick-due-head" role="presentation">${head}</div>` : ''}<button type="button" class="quick-row${on ? ' on' : ''}" id="quick-row-${i}" role="option" aria-selected="${on}" data-action="quick-run" data-at="${i}" tabindex="-1"><span class="quick-icon">${look.icon}</span><span class="quick-label${look.said ? ' quick-said' : ''}">${look.said || esc(look.label)}</span>${look.hint ? `<span class="quick-hint">${esc(look.hint)}</span>` : ''}${look.keys ? `<kbd>${esc(look.keys)}</kbd>` : on ? '<kbd>↵</kbd>' : ''}</button>`;
+}
+
 function drawQuick() {
   const box = inQuick('#quick-results');
   if (!box) return;
   const text = (inQuick('#quick-input')?.value || '').trim();
   const fresh = quick.asked && text.toLowerCase().startsWith(quick.asked.toLowerCase());
+  if (!text) return drawQuickStart(box);
   const ranked = S.quickRank(text, { notes: fresh ? quick.notes : [], chats: fresh ? quick.chats : [], folders: quick.folders, places: QUICK_PLACES });
   const open = state.view === 'note' && state.session?.note;
   if (/^(merge|combine)(\s+(this|this note|note|notes|it|into|with))?$/i.test(text)) ranked.unshift(open ? { kind: 'combine', id: open.id, title: open.title, dir: open.directory } : { kind: 'combine' });
@@ -305,12 +314,7 @@ function drawQuick() {
   const keys = quick.rows.map((row) => JSON.stringify(row));
   flipList(box, '.quick-row', (el) => (quick.keys || [])[Number(el.dataset.at)], () => {
     quick.keys = keys;
-    box.innerHTML = quick.rows.map((row, i) => {
-      const look = quickLook(row);
-      const on = i === quick.at;
-      const head = headed && (i === 0 || doing(row) !== doing(quick.rows[i - 1])) ? `<div class="quick-due-head" role="presentation">${doing(row) ? 'Do' : 'Notes'}</div>` : '';
-      return `${head}<button type="button" class="quick-row${on ? ' on' : ''}" id="quick-row-${i}" role="option" aria-selected="${on}" data-action="quick-run" data-at="${i}" tabindex="-1"><span class="quick-icon">${look.icon}</span><span class="quick-label${look.said ? ' quick-said' : ''}">${look.said || esc(look.label)}</span>${look.hint ? `<span class="quick-hint">${esc(look.hint)}</span>` : ''}${on ? '<kbd>↵</kbd>' : ''}</button>`;
-    }).join('');
+    box.innerHTML = quick.rows.map((row, i) => quickRow(row, i, headed && (i === 0 || doing(row) !== doing(quick.rows[i - 1])) ? (doing(row) ? 'Do' : 'Notes') : '')).join('');
   }, { ms: QUICK_FLIP_MS });
   inQuick('#quick-input')?.setAttribute('aria-activedescendant', `quick-row-${quick.at}`);
 }
@@ -338,12 +342,37 @@ async function loadQuickDue() {
   drawQuickDue();
 }
 
-function drawQuickDue() {
-  const box = inQuick('#quick-results');
-  if (!box || quick.rows.length) return;
-  box.innerHTML = quick.due.length
+function quickStart() {
+  return [
+    ...quick.recent.map((n) => ({ kind: 'open', id: n.id, title: n.title || 'Untitled', dir: n.directory || '', group: 'Recent' })),
+    { kind: 'start', what: 'new', icon: 'filePlus', label: 'New note', keys: shortcutText(shortcutKeys('new')), group: 'Do' },
+    { kind: 'start', what: 'record', icon: 'mic', label: 'Start recording', group: 'Do' },
+    { kind: 'start', what: 'task', icon: 'check', label: 'New task', group: 'Do' },
+    { kind: 'start', what: 'felix', label: 'Ask Felix', hint: 'or type a question above', group: 'Do' },
+  ];
+}
+
+function drawQuickStart(box) {
+  quick.rows = quickStart();
+  const picked = quick.picked ? quick.rows.findIndex((row) => JSON.stringify(row) === quick.picked) : -1;
+  if (picked >= 0) quick.at = picked;
+  quick.at = Math.min(quick.at, quick.rows.length - 1);
+  quick.keys = quick.rows.map((row) => JSON.stringify(row));
+  box.innerHTML = quick.rows.map((row, i) => quickRow(row, i, i === 0 || row.group !== quick.rows[i - 1].group ? row.group : '')).join('') + quickDueHtml();
+  inQuick('#quick-input')?.setAttribute('aria-activedescendant', `quick-row-${quick.at}`);
+}
+
+function quickDueHtml() {
+  return quick.due.length
     ? `<div class="quick-due-head">Due today</div>${quick.due.map((t) => `<label class="quick-task${t.late ? ' late' : ''}"><input type="checkbox" class="sched-check" data-action="quick-done" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''} aria-label="Done: ${esc(t.title)}"><span class="grow">${esc(t.title)}</span><span class="hint">${esc(t.late ? 'Earlier' : t.time ? S.timeLabel(t.time, calLocale()) : 'Today')}</span></label>`).join('')}`
     : '';
+}
+
+function drawQuickDue() {
+  const box = inQuick('#quick-results');
+  if (!box) return;
+  if (!(inQuick('#quick-input')?.value || '').trim()) return drawQuick();
+  if (!quick.rows.length) box.innerHTML = quickDueHtml();
 }
 
 async function quickDone(el) {
@@ -366,6 +395,14 @@ async function quickGo(at) {
   }
   const row = quick.rows[at];
   if (!row) return;
+  if (row.kind === 'start') {
+    closeSheet();
+    if (row.what === 'felix') chat.toggle(true);
+    else if (row.what === 'new') actions.new({ dataset: {} });
+    else if (row.what === 'record') go('#/record');
+    else setTimeout(() => newTaskSheet(), LEAVE_MS);
+    return;
+  }
   if (row.kind === 'combine') {
     if (!row.id) return;
     closeSheet();

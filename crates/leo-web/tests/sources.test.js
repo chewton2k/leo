@@ -76,7 +76,6 @@ function engine(rows, size = 2) {
     if (q) for (const r of rows) for (const [seq, passage] of r.passages) if (passage.text.toLowerCase().includes(q)) matches.push({ source: r.id, seq, score: 1, passage });
     return clone({
       list: rows.map((r) => head(r, false)),
-      wants: rows.map((r) => r.wants).filter(Boolean).join('\n'),
       page: {
         head: head(at, true),
         passages: p.rows,
@@ -109,7 +108,7 @@ function screen(eng) {
       return folds.get(opened);
     };
     ui.folds = folds;
-    ui.areas = [...html.matchAll(/<span class="source-text" contenteditable="plaintext-only" spellcheck="true" data-(passage|point)="(\d+)">([\s\S]*?)<\/span>/g)].map((m) => {
+    ui.areas = [...html.matchAll(/<span class="source-text" data-(passage|point)="(\d+)">([\s\S]*?)<\/span>/g)].map((m) => {
       const fold = foldOf(m.index);
       return {
         kind: m[1], seq: Number(m[2]), textContent: unescape(m[3]), dataset: { [m[1]]: m[2] }, scrolled: 0,
@@ -122,7 +121,6 @@ function screen(eng) {
     ui.query = field(unescape((html.match(/<input id="source-query" value="([^"]*)"/) || [, ''])[1]));
     const pick = html.includes('id="source-pick"');
     ui.pick = pick ? field((html.match(/<option value="([^"]*)" selected>/) || [, ''])[1]) : null;
-    ui.wants = field(unescape((html.match(/<textarea id="regenerate-wants"[^>]*>([\s\S]*?)<\/textarea>/) || [, ''])[1]));
     const from = html.indexOf('<div id="source-found">') + 23;
     ui.found = { innerHTML: html.slice(from, html.indexOf('\n', from)).replace(/<\/div>$/, '') };
     ui.passages = { scrollIntoView(where) { ui.scrolledTo = where; } };
@@ -144,7 +142,7 @@ function screen(eng) {
     if (selector === '#note-aside') return aside;
     if (selector === '#note-aside-facts') return facts;
     if (!ui.open) return null;
-    const map = { '#source-query': ui.query, '#source-pick': ui.pick, '#source-found': ui.found, '#source-passages': ui.passages, '#regenerate-wants': ui.wants, '.source-none': ui.none };
+    const map = { '#source-query': ui.query, '#source-pick': ui.pick, '#source-found': ui.found, '#source-passages': ui.passages, '.source-none': ui.none };
     return map[selector] || null;
   };
   ui.chips = [];
@@ -175,7 +173,6 @@ function screen(eng) {
     md: { render: String },
     setTimeout: (fn) => ui.timers.push({ fn, live: true }),
     clearTimeout: (id) => { if (ui.timers[id - 1]) ui.timers[id - 1].live = false; },
-    TextEncoder,
     fillTextFile: async (box) => { ui.filled = box; },
   };
   const uploads = read('uploads.js');
@@ -191,9 +188,6 @@ function screen(eng) {
       t.live = false;
       await t.fn();
     }
-  };
-  ui.edit = (kind, seq, text) => {
-    ui.areas.find((a) => a.kind === kind && a.seq === seq).textContent = text;
   };
   ui.shown = (kind) => ui.areas.filter((a) => a.kind === kind).map((a) => [a.seq, a.textContent]);
   return ui;
@@ -217,7 +211,7 @@ test('opening a note with several recordings lists them and shows the first page
   assert.deepEqual(ui.shown('point'), [[7, 'typed point seven'], [9, 'typed point nine']]);
   assert.ok(ui.html.includes('data-action="source-later"'));
   assert.ok(!ui.html.includes('data-action="source-earlier"'));
-  assert.equal(ui.wants.value, 'keep it short');
+  assert.doesNotMatch(ui.html, /contenteditable|regenerate-wants|source-save|source-regenerate/, 'the transcript only shows: no editable lines, no wants box, no Save fixes or Write the note again');
 });
 
 test('choosing another recording shows the first page of that one', async () => {
@@ -276,86 +270,9 @@ test('after jumping to a match in the middle of a recording the earlier lines ar
   assert.deepEqual(ui.shown('passage'), [[1, 'first recording line 1'], [2, 'first recording line 2']]);
 });
 
-test('fixing two lines sends only those two lines with the revision and reloads the same page', async () => {
-  const { eng, ui } = await opened();
-  await ui.context.sourceLater();
-  ui.edit('passage', 4, 'fixed four');
-  ui.edit('passage', 3, 'fixed three');
-  const before = eng.log.length;
-  await ui.context.saveSource();
-  const put = eng.log[before];
-  assert.equal(put.method, 'PUT');
-  assert.equal(put.url, '/api/notes/n1/recording');
-  assert.deepEqual(put.body, { source: 'rec-aaaaaaaa', base: 1, changes: [{ kind: 'passage', seq: 3, text: 'fixed three' }, { kind: 'passage', seq: 4, text: 'fixed four' }] });
-  assert.equal(eng.log.length, before + 2, 'one save and one reload of the same page');
-  assert.equal(eng.log.at(-1).url, '/api/notes/n1/recording?q=&at=rec-aaaaaaaa&passages=3&points=end');
-  assert.deepEqual(ui.shown('passage'), [[3, 'fixed three'], [4, 'fixed four']]);
-  assert.equal(ui.context.page().page.head.revision, 2);
-  assert.deepEqual(ui.toasts.at(-1), { message: 'Saved your fixes to “Lecture”', bad: false });
-  assert.ok(ui.html.includes('data-action="source-earlier"'), 'the page is still the second page');
-});
-
-test('a fixed point is sent as a point, and nothing is sent when nothing changed', async () => {
-  const { eng, ui } = await opened();
-  await ui.context.saveSource();
-  assert.deepEqual(ui.toasts.at(-1), { message: 'Nothing has changed.', bad: false });
-  assert.equal(eng.log.length, 1);
-  ui.edit('point', 9, 'typed point nine, fixed');
-  await ui.context.saveSource();
-  assert.deepEqual(eng.log[1].body.changes, [{ kind: 'point', seq: 9, text: 'typed point nine, fixed' }]);
-});
-
-test('a save refused because the revision moved keeps the fixes on the page and says the recording changed', async () => {
-  const { eng, ui } = await opened();
-  eng.rows[0].revision = 5;
-  ui.edit('passage', 2, 'my fix');
-  await ui.context.saveSource().catch(ui.context.fail);
-  const said = ui.toasts.at(-1);
-  assert.equal(said.bad, true);
-  assert.match(said.message, /changed/);
-  assert.match(said.message, /still/);
-  assert.equal(ui.shown('passage')[1][1], 'my fix', 'the person\'s fix is still on the page');
-  assert.equal(ui.sheets, 1, 'the transcript was not redrawn');
-  assert.equal(eng.log.filter((c) => c.method === 'GET').length, 1, 'nothing was reloaded over the fix');
-});
-
-test('a save that fails part way can be tried again with the revision the saved part returned', async () => {
-  const { eng, ui } = await opened();
-  const big = 'x'.repeat(600000);
-  ui.edit('passage', 1, big);
-  ui.edit('passage', 2, `${big}!`);
-  let puts = 0;
-  eng.hooks.failPut = () => ++puts === 2;
-  await ui.context.saveSource().catch(ui.context.fail);
-  assert.equal(ui.toasts.at(-1).bad, true);
-  assert.equal(eng.rows[0].revision, 2, 'the first batch was saved');
-  eng.hooks.failPut = null;
-  await ui.context.saveSource();
-  const sent = eng.log.filter((c) => c.method === 'PUT');
-  assert.deepEqual(sent.map((c) => c.body.base), [1, 2, 2, 3], 'the retry names the revision the first batch made');
-  assert.deepEqual(ui.toasts.at(-1), { message: 'Saved your fixes to “Lecture”', bad: false });
-  assert.equal(eng.rows[0].passages[1][1].text, `${big}!`);
-});
-
-test('switching recording, page or match with unsaved fixes keeps the fixes and the chosen recording', async () => {
-  const { eng, ui } = await opened();
-  ui.edit('passage', 1, 'my fix');
-  const before = eng.log.length;
-  ui.pick.value = 'rec-bbbbbbbb';
-  await ui.context.sourcePick('rec-bbbbbbbb');
-  assert.equal(ui.pick.value, 'rec-aaaaaaaa', 'the list goes back to the recording that is shown');
-  assert.deepEqual(ui.toasts.at(-1), { message: 'Save your fixes first.', bad: false });
-  await ui.context.sourceLater();
-  await ui.context.sourceEarlier();
-  await ui.context.sourceMatch('rec-bbbbbbbb', '3');
-  assert.equal(eng.log.length, before, 'nothing was asked of the engine');
-  assert.equal(ui.shown('passage')[0][1], 'my fix');
-  assert.equal(ui.sheets, 1);
-});
-
 test('the sheet\'s buttons run the paging functions', () => {
   const actions = read('actions.js');
-  for (const [name, call] of [['source-save', 'saveSource'], ['source-earlier', 'sourceEarlier'], ['source-later', 'sourceLater'], ['source-match', 'sourceMatch']]) {
+  for (const [name, call] of [['source-earlier', 'sourceEarlier'], ['source-later', 'sourceLater'], ['source-match', 'sourceMatch']]) {
     assert.ok(new RegExp(`'${name}': \\([a-z]*\\) => ${call}\\(`).test(actions), name);
   }
   assert.ok(/'source-match': \(el\) => sourceMatch\(el\.dataset\.source, el\.dataset\.at\)/.test(actions));
@@ -488,28 +405,13 @@ test('Later scrolls the list to its start so a tall list still moves', async () 
   assert.equal(ui.scrolledTo.block, 'start');
 });
 
-test('showing the transcript again with unsaved fixes refuses and asks for nothing', async () => {
-  const { eng, ui } = await opened();
-  ui.edit('passage', 1, 'my fix');
-  const before = eng.log.length;
-  await ui.context.showRecordingSources();
-  assert.equal(eng.log.length, before);
-  assert.deepEqual(ui.toasts.at(-1), { message: 'Save your fixes first.', bad: false });
-  assert.equal(ui.shown('passage')[0][1], 'my fix');
-});
-
-test('a redraw of the same note puts the transcript back with its unsaved fixes and typed wants', async () => {
+test('a redraw of the same note puts the transcript back', async () => {
   const { ui } = await opened();
-  ui.edit('passage', 2, 'kept fix');
-  ui.wants.value = 'typed wants';
   const held = ui.context.holdAside('n1');
   assert.equal(held.kind, 'transcript');
-  assert.equal(JSON.stringify(held.fixes.map((f) => [f.seq, f.text])), '[[2,"kept fix"]]');
   ui.layout.classes.clear();
   ui.open = false;
   ui.context.restoreAside(held);
   assert.equal(ui.open, true);
-  assert.deepEqual(ui.shown('passage').map(([seq, text]) => [seq, text]).filter(([seq]) => seq === 2), [[2, 'kept fix']]);
-  assert.equal(ui.wants.value, 'typed wants');
   assert.equal(ui.context.holdAside('other'), null, 'another note\'s page is never held');
 });

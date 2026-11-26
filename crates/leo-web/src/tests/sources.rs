@@ -24,7 +24,7 @@ fn source(id: &str) -> leo_core::recording::Archive {
     }
 }
 #[test]
-fn retained_sources_are_editable_with_conflict_protection_and_regeneration_is_a_preview() {
+fn retained_sources_are_found_and_regeneration_is_a_preview() {
     let (mut state, _d, ids) = state_with(&[("Graphs", "cs130")]);
     let id = ids[0].clone();
     store_now(&state, |store| {
@@ -42,59 +42,27 @@ fn retained_sources_are_editable_with_conflict_protection_and_regeneration_is_a_
         Query(serde_json::from_value(serde_json::json!({"q":"shortest"})).unwrap()),
     )));
     assert_eq!(page["matches"].as_array().unwrap().len(), 1);
-    let edit = serde_json::json!({"source":"session-1234","base":page["page"]["head"]["revision"],"changes":[{"kind":"point","seq":1,"text":"priority queue"},{"kind":"passage","seq":1,"text":"Dijkstra’s algorithm"}]});
-    let put = || {
-        run(sources::edit_sources(
-            State(state.clone()),
-            Path(id.clone()),
-            Json(serde_json::from_value(edit.clone()).unwrap()),
-        ))
-    };
-    assert_eq!(put().status(), StatusCode::OK);
-    assert_eq!(put().status(), StatusCode::CONFLICT);
     let asked = Arc::new(Mutex::new(Vec::new()));
     let heard = Arc::clone(&asked);
-    state.regenerator = Some(Arc::new(move |sources, profile| {
-        let mut first = String::new();
-        sources
-            .rows(
-                &sources.heads[0],
-                |_, p| {
-                    first = p.text;
-                    Ok(false)
-                },
-                |_, _| Ok(false),
-            )
-            .unwrap();
-        assert_eq!(first, "Dijkstra’s algorithm");
+    state.regenerator = Some(Arc::new(move |_, profile| {
         heard.lock().unwrap().push(profile.wants.clone());
         Ok(("Generated".into(), "Preview body".into()))
     }));
-    run(sources::regenerate(
-        State(state.clone()),
-        Path(id.clone()),
-        Json(serde_json::from_value(serde_json::json!({"wants":"Just the decisions"})).unwrap()),
-    ));
     let response = json_of(run(sources::regenerate(
         State(state.clone()),
         Path(id.clone()),
-        Json(serde_json::from_value(serde_json::json!({})).unwrap()),
     )));
     assert_eq!(response["body"], "Preview body");
     assert_eq!(
         *asked.lock().unwrap(),
-        ["Just the decisions", "Focus on what is on the exam"],
-        "what the user wants is kept with the recording and can be changed when writing again"
+        ["Focus on what is on the exam"],
+        "what the user wanted is kept with the recording and used when the notes are written"
     );
     assert!(response["base"].is_string());
     state.regenerator = Some(Arc::new(|_, _| {
         anyhow::bail!("every chat provider failed. Last error: ollama: error sending request")
     }));
-    let failed = run(sources::regenerate(
-        State(state.clone()),
-        Path(id.clone()),
-        Json(serde_json::from_value(serde_json::json!({})).unwrap()),
-    ));
+    let failed = run(sources::regenerate(State(state.clone()), Path(id.clone())));
     assert_eq!(failed.status(), StatusCode::BAD_GATEWAY);
     let said = json_of(failed)["error"].as_str().unwrap().to_string();
     assert!(!said.starts_with(leo_core::NO_WRITING_AI), "{said}");
@@ -147,36 +115,6 @@ fn felix_reads_and_searches_the_recording_a_note_was_made_from() {
 }
 
 #[test]
-fn an_edited_typed_point_does_not_bring_back_its_old_wording() {
-    let (state, _d, ids) = state_with(&[("Graphs", "cs130")]);
-    let id = ids[0].clone();
-    let notes = store_now(&state, |store| {
-        leo_core::recording::save(&store.notes_dir, &id, &source("session-1234")).unwrap();
-        Ok(store.notes_dir.clone())
-    })
-    .unwrap();
-    let page = json_of(run(sources::sources(
-        State(state.clone()),
-        Path(id.clone()),
-        Query(serde_json::from_value(serde_json::json!({})).unwrap()),
-    )));
-    let edit = serde_json::json!({"source":"session-1234","base":page["page"]["head"]["revision"],"changes":[{"kind":"point","seq":1,"text":"explain a heap"}]});
-    let saved = run(sources::edit_sources(
-        State(state.clone()),
-        Path(id.clone()),
-        Json(serde_json::from_value(edit).unwrap()),
-    ));
-    assert_eq!(saved.status(), StatusCode::OK);
-    let mut points = Vec::new();
-    leo_core::recording::each_point(&notes, &id, |_, _, p| {
-        points.push(p.text.clone());
-        Ok(())
-    })
-    .unwrap();
-    assert_eq!(points, ["explain a heap"]);
-}
-
-#[test]
 fn a_long_brief_is_kept_whole_when_a_note_is_written_again() {
     let (mut state, _d, ids) = state_with(&[("Graphs", "cs130")]);
     let id = ids[0].clone();
@@ -194,15 +132,9 @@ fn a_long_brief_is_kept_whole_when_a_note_is_written_again() {
         heard.lock().unwrap().push(profile.wants.clone());
         Ok(("Generated".into(), "Preview body".into()))
     }));
-    for body in [serde_json::json!({}), serde_json::json!({ "wants": long })] {
-        let answer = run(sources::regenerate(
-            State(state.clone()),
-            Path(id.clone()),
-            Json(serde_json::from_value(body).unwrap()),
-        ));
-        assert_eq!(answer.status(), StatusCode::OK);
-    }
-    assert_eq!(*asked.lock().unwrap(), [long.clone(), long]);
+    let answer = run(sources::regenerate(State(state.clone()), Path(id.clone())));
+    assert_eq!(answer.status(), StatusCode::OK);
+    assert_eq!(*asked.lock().unwrap(), [long]);
 }
 
 #[test]

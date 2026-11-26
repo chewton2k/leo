@@ -20,6 +20,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::ai::chat::{clock, Jotted};
+use crate::stamp::Stamp;
 use leo_core::paths::write_atomic;
 
 pub const SEGMENT_SECS: u64 = 300;
@@ -363,16 +364,6 @@ enum Seen {
     Unreadable,
 }
 
-#[derive(Clone, PartialEq, Eq)]
-struct Stamp {
-    len: u64,
-    modified: SystemTime,
-    #[cfg(unix)]
-    changed: (i64, i64),
-    #[cfg(unix)]
-    file: (u64, u64),
-}
-
 type Held = std::collections::HashMap<PathBuf, (Option<Stamp>, std::time::Instant, Seen)>;
 
 static SEEN: std::sync::LazyLock<std::sync::Mutex<Held>> =
@@ -380,23 +371,6 @@ static SEEN: std::sync::LazyLock<std::sync::Mutex<Held>> =
 
 fn held() -> std::sync::MutexGuard<'static, Held> {
     SEEN.lock().unwrap_or_else(|e| e.into_inner())
-}
-
-fn stamp_of(meta: &std::fs::Metadata) -> Option<Stamp> {
-    Some(Stamp {
-        len: meta.len(),
-        modified: meta.modified().ok()?,
-        #[cfg(unix)]
-        changed: {
-            use std::os::unix::fs::MetadataExt;
-            (meta.ctime(), meta.ctime_nsec())
-        },
-        #[cfg(unix)]
-        file: {
-            use std::os::unix::fs::MetadataExt;
-            (meta.ino(), meta.dev())
-        },
-    })
 }
 
 pub enum Walk {
@@ -536,7 +510,7 @@ pub fn malformed(dir: &Path) -> bool {
 
 fn seen(dir: &Path) -> Seen {
     let stamp = match std::fs::symlink_metadata(dir.join("session.json")) {
-        Ok(meta) => stamp_of(&meta),
+        Ok(meta) => Stamp::of(&meta),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Seen::Malformed,
         Err(_) => return Seen::Unreadable,
     };
@@ -980,6 +954,7 @@ impl Session {
         assembled
     }
 
+    #[cfg(test)]
     pub fn spoken(&self) -> Option<Vec<speakers::Spoken>> {
         self.labels(&assemble(&self.segments(), self.manifest.segment_secs))
     }
@@ -1852,7 +1827,7 @@ mod tests {
             assert!(saved());
         }
         let stamp =
-            stamp_of(&std::fs::symlink_metadata(dir.join("session.json")).unwrap()).unwrap();
+            Stamp::of(&std::fs::symlink_metadata(dir.join("session.json")).unwrap()).unwrap();
         held().insert(dir.clone(), (Some(stamp), std::time::Instant::now(), stale));
         assert!(!saved());
         if let Some(entry) = held().get_mut(&dir) {

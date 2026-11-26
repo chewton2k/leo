@@ -125,10 +125,6 @@ pub fn changes_notes(name: &str) -> bool {
     matches!(kind_of(name), Some(Kind::EditsNote | Kind::Organizes))
 }
 
-pub fn organizes(name: &str) -> bool {
-    kind_of(name) == Some(Kind::Organizes)
-}
-
 pub fn answered_by_organize(name: &str) -> bool {
     matches!(kind_of(name), Some(Kind::ReadsLists | Kind::Organizes))
 }
@@ -889,6 +885,7 @@ pub fn describe_manual(spec: &Spec) -> String {
     )
 }
 
+#[cfg(test)]
 pub fn manual() -> String {
     manual_for(Access::Ask)
 }
@@ -3117,18 +3114,6 @@ fn note_part(body: &str, part: usize, size: usize) -> Option<(String, usize, usi
     Some((chars[start..end].iter().collect(), parts, first_line))
 }
 
-pub fn continued(conversation: &str, call: &Call, done: &Done) -> String {
-    let mut asked = call.args.clone();
-    if let Some(object) = asked.as_object_mut() {
-        object.insert("name".into(), serde_json::Value::String(call.name.clone()));
-    }
-    format!(
-        "{conversation}\n\nFelix used a tool: <tool>{asked}</tool>\n<tool_result name=\"{}\">\n{}\n</tool_result>\n\nContinue: use another tool, or reply to the user.",
-        call.name,
-        inert(&done.result)
-    )
-}
-
 #[cfg(test)]
 mod tests {
 
@@ -3182,7 +3167,11 @@ mod tests {
         assert_eq!(all.clone().count() + 1, before.len());
         for (name, notes, organizes_it, board, routed) in before {
             assert_eq!(changes_notes(name), notes, "{name} changes_notes");
-            assert_eq!(organizes(name), organizes_it, "{name} organizes");
+            assert_eq!(
+                kind_of(name) == Some(Kind::Organizes),
+                organizes_it,
+                "{name} organizes"
+            );
             assert_eq!(crate::board_tools::changes(name), board, "{name} board");
             assert_eq!(answered_by_organize(name), routed, "{name} routed");
         }

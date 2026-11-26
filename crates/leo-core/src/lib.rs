@@ -79,7 +79,7 @@ mod tests {
         assert_eq!(writing_said(&said), said);
         for auth in [
             "openai rejected the key stored in leo (401).",
-            "claude ended. If it is not signed in, run it",
+            "claude ended. If it is not signed in, choose Claude Code in Writing AI and press Sign in.",
             "ollama: model 'x' not found",
             "claude: claude is not installed",
         ] {

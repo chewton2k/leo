@@ -84,8 +84,8 @@
   function preflight(checks) {
     const c = checks || {};
     return [
-      c.speech === false && { text: 'No speech model yet. The audio is kept and written up once you choose one.', href: '#/settings/models', link: 'Choose a speech model' },
-      c.writing === false && { text: 'No writing AI is ready, so you\u2019ll get a transcript.', href: '#/settings/writing', link: 'Set up writing AI' },
+      c.speech === false && { name: 'Speech model', text: 'Needed to turn audio into text. The audio is kept until you choose one.', href: '#/settings/models', link: 'Choose model' },
+      c.writing === false && { name: 'Writing AI', text: 'Without one you get a transcript, not notes.', href: '#/settings/writing', link: 'Set up' },
     ].filter(Boolean);
   }
 
@@ -153,12 +153,28 @@
     return i < 0 ? 'var(--faint)' : TONES[i % TONES.length];
   }
 
-  function transcriptFlow(passages, points, speakers) {
+  function pausesOf(trace) {
+    const pauses = [];
+    let paused = null;
+    for (const t of trace || []) {
+      const secs = Number(t.detail);
+      if (t.stage === 'paused' && Number.isFinite(secs)) paused = { at: secs, from: Date.parse(t.at) };
+      else if (t.stage === 'resumed' && paused) {
+        pauses.push({ at: paused.at, mins: Math.round((Date.parse(t.at) - paused.from) / 60000) || 0 });
+        paused = null;
+      }
+    }
+    return pauses;
+  }
+
+  function transcriptFlow(passages, points, speakers, pauses = []) {
     const meeting = speakersOf(speakers).length > 0;
-    const rows = [
+    const said = [
       ...(passages || []).map((row) => ({ at: row[1].start_secs || 0, passage: row })),
       ...(points || []).map((row) => ({ at: row[1].at_secs || 0, point: row })),
-    ].sort((a, b) => a.at - b.at || Boolean(a.point) - Boolean(b.point));
+    ];
+    const between = (p) => said.some((r) => r.at < p.at) && said.some((r) => r.at >= p.at);
+    const rows = [...said, ...pauses.filter(between).map((p) => ({ at: p.at, pause: p }))].sort((a, b) => a.at - b.at || Boolean(b.pause) - Boolean(a.pause) || Boolean(a.point) - Boolean(b.point));
     const groups = [];
     let group = null;
     const open = (at, speaker, key) => {
@@ -166,6 +182,11 @@
       groups.push(group);
     };
     for (const row of rows) {
+      if (row.pause) {
+        groups.push({ at: row.at, pause: row.pause });
+        group = null;
+        continue;
+      }
       if (row.point) {
         if (!group || (!meeting && group.key !== Math.floor(row.at / 60))) open(row.at, '', meeting ? null : Math.floor(row.at / 60));
         group.items.push({ point: row.point });
@@ -242,7 +263,6 @@
   function create(deps) {
     const { api, esc, toast, go, noteHash, felix, icons, noteReady, encodePicture, choiceCards, syncChoiceCards, bytes } = deps;
     const folderOptions = deps.folderOptions || (() => '<option value="">Top level</option>');
-    const settingsSwitch = deps.settingsSwitch || ((attrs, on) => `<input type="checkbox" class="switch" role="switch" ${attrs}${on ? ' checked' : ''}>`);
     const s = {
       view: null,
       dismissed: (() => { try { return root.sessionStorage.getItem('leo-record-dismissed'); } catch (e) { return null; } })(),
@@ -442,29 +462,14 @@
       screen: { title: 'Screen', about: 'Records what this computer plays' },
       call: { title: 'Call', about: 'You and others, on two tracks' },
     };
-    const WAVE = [4, 9, 14, 7, 11, 16, 9, 5, 10, 13, 7, 4, 9, 12, 6];
-
-    function track(icon, y) {
-      const bars = WAVE.map((h, i) => `M${36 + i * 5} ${y - h / 2}v${h}`).join('');
-      return `${icon.replace('<svg ', `<svg x="12" y="${y - 8}" width="16" height="16" `)}<path class="d-wave" d="${bars}"/>`;
-    }
-
     function kindChoices(current = 'microphone') {
-      const art = {
-        microphone: track(icons.mic, 26),
-        screen: track(icons.screen, 26),
-        call: track(icons.mic, 16) + track(icons.screen, 36),
-      };
-      const choices = Object.keys(KINDS).map((kind) => [kind, KINDS[kind].title, KINDS[kind].about, `<svg viewBox="0 0 120 52">${art[kind]}</svg>`]);
-      return choiceCards({ label: 'What to record', name: 'rec-kind', className: 'rec-kinds', current, choices });
+      const choices = Object.keys(KINDS).map((kind) => [kind, KINDS[kind].title, '', '', kind === 'screen' ? icons.screen : icons.mic]);
+      return choiceCards({ label: 'What to record', name: 'rec-kind', className: 'rec-kinds', current, choices }) + `<p class="hint rec-kind-line" id="rec-kind-line">${esc((KINDS[current] || KINDS.microphone).about)}</p>`;
     }
 
     function speakersOn() {
-      try {
-        const saved = root.localStorage.getItem('leo-label-speakers');
-        if (saved !== null) return saved === 'on';
-      } catch (e) {}
-      return s.speakers === true;
+      const picked = s.container && s.container.querySelector('input[name="rec-kind"]:checked');
+      return Boolean(picked) && picked.value === 'call';
     }
 
     function speakersReady() {
@@ -476,12 +481,11 @@
       const model = s.speakerModel;
       const job = model && model.progress;
       const getting = job && job.state === 'downloading';
-      const missing = speakersOn() && model && !model.verified;
-      const note = !missing ? '' : getting
+      if (!speakersOn() || !model || model.verified) return '';
+      const note = getting
         ? `Downloading the speaker model… ${Math.floor((100 * job.bytes) / Math.max(1, job.total))}%`
-        : `${job && job.state === 'failed' ? 'The download failed. ' : ''}Labels need the speaker model (${bytes(model.size)}, stays on this computer).`;
-      return `<label class="set-row rec-speakers"><span class="grow">Label speakers<span class="set-desc">For meetings: the transcript says who said what. Leave it off for lectures.</span></span>${settingsSwitch('id="rec-speakers"', speakersOn())}</label>`
-        + (missing ? `<p class="set-note" id="rec-speakers-model">${esc(note)}${getting ? '' : ' <button type="button" class="btn plain sm" id="rec-speakers-get">Download</button>'}</p>` : '');
+        : `${job && job.state === 'failed' ? 'The download failed. ' : ''}Calls say who spoke, which needs the speaker model (${bytes(model.size)}, stays on this computer).`;
+      return `<p class="set-note" id="rec-speakers-model">${esc(note)}${getting ? '' : ' <button type="button" class="btn plain sm" id="rec-speakers-get">Download</button>'}</p>`;
     }
 
     async function speakerModel(box) {
@@ -498,19 +502,8 @@
       if (!holder) return;
       const html = speakersRow();
       if (holder.dataset.drawn === html) return;
-      const focused = holder.contains(root.document.activeElement) ? root.document.activeElement.id : '';
       holder.dataset.drawn = html;
       holder.innerHTML = html;
-      const toggle = holder.querySelector('#rec-speakers');
-      toggle.addEventListener('change', () => {
-        s.speakers = toggle.checked;
-        try {
-          root.localStorage.setItem('leo-label-speakers', toggle.checked ? 'on' : 'off');
-        } catch (e) {}
-        redrawSpeakers(box);
-        const again = holder.querySelector('#rec-speakers');
-        if (again) again.focus();
-      });
       const get = holder.querySelector('#rec-speakers-get');
       if (get) {
         get.addEventListener('click', async () => {
@@ -519,8 +512,6 @@
           speakerModel(box);
         });
       }
-      const back = focused && holder.querySelector(`#${focused}`);
-      if (back) back.focus();
     }
 
     function chip(icon, text) {
@@ -540,9 +531,12 @@
         ? selectChip(icons.calendar, 'rec-event', 'Calendar event', `<option value="">No calendar event</option>${upcoming.map((e, i) => `<option value="${i}"${i === s.event ? ' selected' : ''}>${esc(whenOf(e))} · ${esc(e.title)}</option>`).join('')}`)
         : '';
       const folder = selectChip(icons.folder, 'rec-dir', 'Folder', folderOptions(folders, here));
-      const connect = s.calendar && !s.calendar.connected ? '<p class="hint rec-calendar"><a href="#/settings/calendar">Connect a calendar</a> to name recordings after your classes or meetings.</p>' : '';
-      const gaps = preflight(ov.checks).map((g) => `<p class="set-note">${esc(g.text)} <a href="${g.href}">${esc(g.link)}</a></p>`).join('')
-        + (micDenied('microphone') ? '<p class="set-note">leo can’t hear: microphone access is off. <button class="btn plain sm" data-action="app-command" data-app-action="microphone">' + (desktopNow()?.platform === 'windows' ? 'Open Settings' : 'Open System Settings') + '</button></p>' : '')
+      const missing = preflight(ov.checks);
+      const calendarRow = s.calendar && !s.calendar.connected ? [{ name: 'Calendar', text: 'Optional: names recordings after your classes or meetings.', href: '#/settings/calendar', link: 'Connect', optional: true }] : [];
+      const rows = [...missing, ...calendarRow];
+      const ready = ov.checks && !missing.length ? '<p class="rec-ready"><span class="pencil-tick" aria-hidden="true"></span>Ready · the speech model and writing AI are set up</p>' : '';
+      const connect = rows.length ? `<div class="rec-checks">${rows.map((g) => `<div class="rec-check${g.optional ? ' optional' : ''}"><span class="rec-check-dot" aria-hidden="true"></span><span class="rec-check-text"><b>${esc(g.name)}</b><span>${esc(g.text)}</span></span><a class="btn plain sm" href="${g.href}">${esc(g.link)}</a></div>`).join('')}</div>` : '';
+      const gaps = (micDenied('microphone') ? '<p class="set-note">leo can’t hear: microphone access is off. <button class="btn plain sm" data-action="app-command" data-app-action="microphone">' + (desktopNow()?.platform === 'windows' ? 'Open Settings' : 'Open System Settings') + '</button></p>' : '')
         + (ov.checks && ov.checks.headset ? `<p class="set-note" id="rec-headset" hidden>${esc(HEADSET)}</p>` : '');
       const recover = pending.length
         ? `<div class="rec-recover">${pending.map((p) => `<div class="rec-recover-item"><div class="rec-recover-row">${icons.restore}<span class="grow">${esc(p.title || 'Interrupted recording')}<span class="sub">${esc(pendingLine(p))}</span></span></div><button type="button" class="btn plain sm" data-action="rec-recover" data-id="${esc(p.id)}">Recover</button><button type="button" class="btn plain sm" data-action="rec-discard" data-id="${esc(p.id)}" aria-label="Delete ${esc(p.title || 'interrupted recording')}">Delete</button></div>`).join('')}${ov.more ? '<button type="button" class="btn plain sm" data-action="rec-older">Show older</button>' : ''}</div>`
@@ -559,11 +553,11 @@
           <label class="field field-area"><textarea id="rec-wants" rows="2" data-reads="4000" aria-label="What you want from it (optional)" placeholder="What do you want from it? e.g. the main ideas, step by step"></textarea></label>
           <p class="set-desc" id="rec-wants-hint" hidden>Felix reads the first 4,000 characters of this.</p>
           <div id="rec-speakers-box">${speakersRow()}</div>
+          ${ready}
           ${connect}
           ${gaps}
           <div class="rec-start">
-            <button class="rec-go" data-action="rec-start" aria-label="Start recording" ${ov.available === false ? 'disabled' : ''}><span class="rec-go-dot"></span></button>
-            <span class="rec-start-label">Start recording</span>
+            <button class="rec-go" data-action="rec-start" ${ov.available === false ? 'disabled' : ''}>Start recording</button>
             <p class="hint rec-tip">${esc(tipWords(desktopNow()?.platform))}</p>
             <div class="rec-ask" id="rec-ask" hidden><div class="chat-starters">${askChips('before', esc)}</div></div>
           </div>
@@ -573,6 +567,11 @@
 
     const PAUSE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/></svg>';
     const RESUME_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l12 7-12 7z" fill="currentColor"/></svg>';
+
+    function recBar(v, lead) {
+      const word = v.state === 'paused' ? 'Resume' : 'Pause';
+      return `<div class="rec-bar" role="group" aria-label="Recorder">${lead}<span class="rec-wave-box"><canvas class="rec-wave" id="rec-wave" aria-hidden="true"></canvas></span><button type="button" class="rec-pause" id="rec-pause" data-keep data-action="rec-pause" aria-label="${word}" title="${word}">${v.state === 'paused' ? RESUME_ICON : PAUSE_ICON}<span class="said">${word}</span></button><button type="button" class="rec-stop" id="rec-stop" data-keep data-action="rec-stop"><span class="rec-square"></span>Stop and save</button></div>`;
+    }
 
     function liveTab(tab, text, panel, on, extra = '') {
       return `<button type="button" role="tab" class="kanban-tab${on === tab ? ' on' : ''}" id="rec-tab-${tab}" data-rec-tab="${tab}" aria-controls="${panel}" aria-selected="${on === tab}" tabindex="${on === tab ? 0 : -1}">${text}${extra}</button>`;
@@ -591,7 +590,7 @@
       const event = s.liveEvent && s.liveEvent.id === v.id ? s.liveEvent.event : null;
       const chips = [event ? chip(icons.calendar, whenOf(event)) : '', chip(icons.folder, v.directory || 'Top level'), chip(kind === 'Screen' ? icons.screen : icons.mic, kind)].join('');
       const denied = micDenied(v.source);
-      const bar = writing ? '' : `<div class="rec-bar" role="group" aria-label="Recorder"><span class="rec-dot"></span><span class="said" id="rec-word">${esc(stateWord(v))}</span><span class="rec-time" id="rec-time">${clock(v.secs)}</span><span class="rec-wave-box"><canvas class="rec-wave" id="rec-wave" aria-hidden="true"></canvas></span><button type="button" class="rec-pause" id="rec-pause" data-keep data-action="rec-pause" aria-label="${paused ? 'Resume' : 'Pause'}" title="${paused ? 'Resume' : 'Pause'}">${paused ? RESUME_ICON : PAUSE_ICON}<span class="said">${paused ? 'Resume' : 'Pause'}</span></button><button type="button" class="rec-stop" id="rec-stop" data-keep data-action="rec-stop"><span class="rec-square"></span>Stop and save</button></div>`;
+      const bar = writing ? '' : recBar(v, `<span class="rec-dot"></span><span class="said" id="rec-word">${esc(stateWord(v))}</span><span class="rec-time" id="rec-time">${clock(v.secs)}</span>`);
       const hear = writing ? '' : `<p class="rec-hear" id="rec-hear" role="status">${esc(hearingWords(hearing(s.wave, WAVE_STEP_MS), v.source, paused, denied))}</p>${denied ? `<button class="btn plain sm" data-action="app-command" data-app-action="microphone">${(desktopNow()?.platform === 'windows' ? 'Open Settings' : 'Open System Settings')}</button>` : ''}`;
       const wanted = s.wantsDraft !== null ? s.wantsDraft : v.wants || '';
       const count = v.points_total ?? listed.length;
@@ -603,7 +602,7 @@
             <p class="set-desc" id="rec-wants-live-hint"${Array.from(wanted.trim()).length > 4000 ? '' : ' hidden'}>Felix reads the first 4,000 characters of this.</p>
           </section>`;
       return `<div class="rec rec-live${paused ? ' paused' : ''}${writing ? ' writing' : ''}">
-        <header class="rec-head note-head"><div class="rec-head-text"><h1>${esc(v.title || 'Untitled recording')}</h1><div class="rec-chips">${chips}</div>${hear}</div>${bar}</header>
+        <header class="rec-head note-head"><div class="rec-head-text"><h1>${esc(v.title || 'Untitled recording')}</h1><div class="rec-chips">${chips}</div>${hear}</div></header>
         ${writing ? drawWriting() : ''}
         <div class="rec-warnings">${warnings}</div>
         <div class="rec-body">
@@ -620,8 +619,9 @@
             </section>
             ${wants}
           </div>
-          ${writing ? '' : `<aside class="set-card rec-felix rec-ask" id="rec-ask" data-keep aria-label="Ask Felix"><header><h3>Felix</h3></header><div class="chat-starters">${askChips('live', esc)}</div></aside>`}
+          ${writing ? '' : `<aside class="set-card rec-felix rec-ask" id="rec-ask" data-keep aria-label="Ask Felix"><header><h3>Felix</h3></header><div class="chat-starters">${askChips('live', esc)}</div><form class="rec-ask-own" data-rec-ask-form><input id="rec-ask-text" class="set-input" placeholder="Ask about the recording…" aria-label="Ask Felix about the recording" autocomplete="off" maxlength="2000"><button type="submit" class="icon-btn" aria-label="Ask">${icons.send}</button></form></aside>`}
         </div>
+        ${bar ? `<div class="rec-bar-dock">${bar}</div>` : ''}
       </div>`;
     }
 
@@ -688,6 +688,9 @@
       if (fill && call && wants && !wants.value.trim()) wants.value = MEETING_WANTS;
       const group = box.querySelector('.rec-kinds');
       if (group) syncChoiceCards(group);
+      const line = box.querySelector('#rec-kind-line');
+      if (line && picked && KINDS[picked.value]) line.textContent = KINDS[picked.value].about;
+      redrawSpeakers(box);
     }
 
     function preselect(box, asked) {
@@ -776,6 +779,7 @@
       const text = live(v) ? liveAsk(earlierFirst(s.earlier, placed(v)).map(([, , said]) => said), v.transcript) : briefAsk(s.event !== null ? events[s.event] : null, wants ? wants.value.trim() : '');
       chat.attachSelection({ note: '', title: 'Live recording', text });
       chat.askNew(question);
+      return true;
     }
 
     function showTranscript(box) {
@@ -845,7 +849,9 @@
         return el;
       };
       const dot = make('span', 'tone-dot');
-      dot.style.setProperty('--tone', toneOf([speaker], speaker));
+      const order = s.toneOrder && s.toneOrder.id === (s.view && s.view.id) ? s.toneOrder : (s.toneOrder = { id: s.view && s.view.id, names: [] });
+      if (!order.names.includes(speaker)) order.names.push(speaker);
+      dot.style.setProperty('--tone', toneOf(order.names, speaker));
       const words = make('p', 'spoken');
       return { row: make('div', 'turn', make('div', 'turn-who', dot, make('span', 'turn-name', speaker)), words), words, text: '' };
     }
@@ -1026,13 +1032,31 @@
     }
 
 
+    function floatBar(show) {
+      let el = root.document.getElementById('rec-float');
+      if (!show) {
+        if (el) el.remove();
+        return;
+      }
+      if (!el) {
+        el = root.document.createElement('div');
+        el.id = 'rec-float';
+        el.className = 'rec-bar-dock rec-float';
+        root.document.body.appendChild(el);
+      }
+      if (el.dataset.state !== s.view.state) {
+        el.dataset.state = s.view.state;
+        const focused = root.document.activeElement?.closest?.('#rec-float') ? root.document.activeElement.id : '';
+        el.innerHTML = recBar(s.view, '<button type="button" class="rec-float-open" id="rec-float-open" data-action="record" title="Open the recording"><span class="rec-dot"></span><span class="rec-time" id="rec-time"></span></button>');
+        if (focused) el.querySelector(`#${focused}`)?.focus();
+      }
+      el.classList.toggle('paused', s.view.state === 'paused');
+      el.querySelector('#rec-time').textContent = clock(s.view.secs);
+      if (!s.raf) paintWaveNow();
+    }
+
     function pill() {
-      const show = s.view && live(s.view) && !(s.container && s.container.isConnected);
-      const paused = show && s.view.state === 'paused';
-      const label = show ? `${paused ? 'Paused' : 'Recording'} · ${clock(s.view.secs)}` : '';
-      if (label === (s.pilled || '')) return;
-      s.pilled = label;
-      root.dispatchEvent(new root.CustomEvent('leo-recording', { detail: show ? { paused, label } : null }));
+      floatBar(Boolean(s.view && live(s.view) && !(s.container && s.container.isConnected)));
     }
 
     async function refresh() {
@@ -1051,6 +1075,16 @@
       if (button && s.container && s.container.contains(button)) askFelix(button.dataset.recAsk);
       const tab = event.target && event.target.closest && event.target.closest('[data-rec-tab]');
       if (tab && s.container && s.container.contains(tab)) showTab(tab.dataset.recTab, false);
+    });
+
+    root.document.addEventListener('submit', (event) => {
+      const form = event.target && event.target.closest && event.target.closest('[data-rec-ask-form]');
+      if (!form || !s.container || !s.container.contains(form)) return;
+      event.preventDefault();
+      const input = form.querySelector('input');
+      const question = input.value.trim();
+      if (!question) return;
+      if (askFelix(question)) input.value = '';
     });
 
     root.document.addEventListener('keydown', (event) => {
@@ -1176,5 +1210,5 @@
     };
   }
 
-  root.leoRecording = { pastedScreenshot, saveScreenshot, eventNow, whenOf, MEETING_WANTS, ease, spread, freshLevels, sourceFor, create, clock, stateWord, failureOf, pendingLine, mergePages, earlierFirst, tailMerge, NOT_SPEAKERS, speakersOf, toneOf, transcriptFlow, askChips, liveAsk, briefAsk, FELIX_ASKS, MOST_ASK, unsavedLine, loudness, hearing, hearingWords, preflight, tipWords, HEADSET, QUIET };
+  root.leoRecording = { pastedScreenshot, saveScreenshot, eventNow, whenOf, MEETING_WANTS, ease, spread, freshLevels, sourceFor, create, clock, stateWord, failureOf, pendingLine, mergePages, earlierFirst, tailMerge, NOT_SPEAKERS, speakersOf, toneOf, pausesOf, transcriptFlow, askChips, liveAsk, briefAsk, FELIX_ASKS, MOST_ASK, unsavedLine, loudness, hearing, hearingWords, preflight, tipWords, HEADSET, QUIET };
 })(typeof window !== 'undefined' ? window : globalThis);

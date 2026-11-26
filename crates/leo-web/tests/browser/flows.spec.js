@@ -2166,7 +2166,7 @@ test.describe('pictures', () => {
     await expect.poll(body).toBe('Four ![Pasted picture](attachments/a.png)');
   });
 
-  test('the transcript pages through a long recording, finds a phrase and saves only the fixed line', async ({ page }) => {
+  test('the transcript pages through a long recording, finds a phrase, keeps the width marks and only shows', async ({ page }) => {
     const note = await (await page.request.post('/api/notes', { data: { title: `Lecture ${test.info().project.name}`, body: 'Notes from a recording.' } })).json();
     const folder = path.join(process.env.LEO_BROWSER_HOME, 'recording-sources', note.id);
     fs.mkdirSync(folder, { recursive: true });
@@ -2184,6 +2184,15 @@ test.describe('pictures', () => {
     await expect(page.locator('#note-aside-facts')).toContainText('Transcript');
     await expect(page.locator('#doc')).toBeHidden();
     await expect(page.locator('#title')).toBeVisible();
+    const mark = page.locator('.page-mark[data-edge="right"]');
+    await expect(mark, 'the width marks stay beside the transcript').toBeVisible();
+    const width = () => page.locator('article.note').evaluate((el) => el.getBoundingClientRect().width);
+    const wide = await width();
+    await mark.focus();
+    await page.keyboard.press('ArrowLeft');
+    await expect.poll(width, 'and still resize the page').toBeLessThan(wide);
+    await page.keyboard.press('Enter');
+    await expect.poll(width).toBe(wide);
     const rows = sheet.locator('.source-text');
     await expect(rows.first()).toHaveText(/^Passage 1 /);
     const first = await rows.count();
@@ -2200,24 +2209,54 @@ test.describe('pictures', () => {
     const match = sheet.locator('.source-match');
     await expect(match).toHaveCount(1);
     await match.click();
-    const fixed = rows.last();
-    await expect(fixed).toHaveText(/Passage 12 about the zebrafish/);
+    const last = rows.last();
+    await expect(last).toHaveText(/Passage 12 about the zebrafish/);
     await expect(sheet.locator('[data-action="source-earlier"]')).toBeVisible();
-    await fixed.evaluate((box) => {
-      box.textContent = `${box.textContent} Fixed.`;
-      box.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(await last.evaluate((box) => box.isContentEditable), 'a transcript line cannot be edited').toBe(false);
+    await expect(sheet.locator('textarea, [data-action="source-save"], [data-action="source-regenerate"]'), 'no wants box, Save fixes or Write the note again').toHaveCount(0);
+    const refused = await page.request.put(`/api/notes/${note.id}/recording`, { data: { source: 'browser-recording-1', base: 1, changes: [{ kind: 'passage', seq: 12, text: 'x' }] } });
+    expect(refused.ok(), 'the engine takes no line fixes').toBe(false);
+  });
+
+  test('a pause shows as a faint mark in the transcript, and how the recording went is not listed', async ({ page }) => {
+    const note = await (await page.request.post('/api/notes', { data: { title: `Paused lecture ${test.info().project.name}`, body: 'Notes.' } })).json();
+    const folder = path.join(process.env.LEO_BROWSER_HOME, 'recording-sources', note.id);
+    fs.mkdirSync(folder, { recursive: true });
+    const passages = [[0, 'Before the break.'], [65, 'After the break.']].map(([at, text]) => ({ start_secs: at, end_secs: at + 5, text, speaker: '' }));
+    const trace = [
+      { at: '2026-11-03T09:00:00Z', stage: 'capture', detail: 'Recording started' },
+      { at: '2026-11-03T09:01:00Z', stage: 'paused', detail: '60.0' },
+      { at: '2026-11-03T09:05:00Z', stage: 'resumed', detail: '60.0' },
+      { at: '2026-11-03T09:06:10Z', stage: 'saved', detail: 'Note saved' },
+    ];
+    fs.writeFileSync(path.join(folder, 'browser-recording-2.json'), JSON.stringify({ id: 'browser-recording-2', started: '2026-11-03T09:00:00Z', passages, points: [], context: '', wants: '', warnings: [], trace }));
+    await page.goto(`/#/n/${note.id}`);
+    await page.locator('#note-facts [data-action="note-sources"]').click();
+    const aside = page.locator('#note-aside');
+    const mark = aside.locator('.source-pause');
+    await expect(mark).toHaveText('Paused · 4 min');
+    const order = await aside.locator('.source-text, .source-pause').allTextContents();
+    expect(order).toEqual(['Before the break.', 'Paused · 4 min', 'After the break.']);
+    await expect(aside).not.toContainText('How this recording went');
+    await expect(aside).not.toContainText('Note saved');
+  });
+
+  test('a note no writing AI wrote up is written from its own card', async ({ page }) => {
+    const made = await (await page.request.post('/api/notes', { data: { title: `Unwritten ${test.info().project.name}`, body: 'The transcript as it was heard.' } })).json();
+    const pending = await page.request.patch(`/api/notes/${made.id}`, { data: { body: 'The transcript as it was heard.', base: made.version, written: false } });
+    expect(pending.ok()).toBe(true);
+    let asked = 0;
+    await page.route(`**/api/notes/${made.id}/regenerate`, (route) => {
+      asked += 1;
+      return route.fulfill({ json: { title: 'Lecture', body: '## Written up\n\nThe main ideas.', base: 'v' } });
     });
-    const sent = page.waitForRequest((r) => r.method() === 'PUT' && r.url().endsWith(`/api/notes/${note.id}/recording`));
-    await sheet.locator('[data-action="source-save"]').click();
-    const body = (await sent).postDataJSON();
-    expect(body.source).toBe('browser-recording-1');
-    expect(body.changes, 'only the fixed line is sent').toHaveLength(1);
-    expect(body.changes[0].kind).toBe('passage');
-    await expect(page.locator('.toast')).toContainText('Saved your fixes');
-    const after = await (await page.request.get(`/api/notes/${note.id}/recording?q=zebrafish`)).json();
-    expect(after.matches).toHaveLength(1);
-    expect(after.matches[0].passage.text.endsWith(' Fixed.')).toBe(true);
-    expect(after.list).toHaveLength(1);
+    await page.goto(`/#/n/${made.id}`);
+    const card = page.locator('.writeup-pending');
+    await expect(card).toBeVisible();
+    await card.getByRole('button', { name: 'Write the notes' }).click();
+    await expect(page.locator('.scrim:not(.scrim-gone) .sheet')).toContainText('Written up');
+    expect(asked).toBe(1);
+    await expect(page.locator('#note-aside-facts'), 'it writes straight away, without opening the transcript').toBeEmpty();
   });
 
   test('the Picture button adds a picture from the device', async ({ page }) => {
@@ -2963,13 +3002,14 @@ test.describe('recording', () => {
     await expect(page.locator('[data-action="rec-pause"]')).toHaveText('Pause');
 
     await page.keyboard.press('Escape');
-    const pill = page.locator('#activity .activity-row', { hasText: 'Recording' });
-    await expect(pill).toContainText(/Recording · \d+:\d\d/);
-    await pill.click();
+    const bar = page.locator('#rec-float .rec-float-open');
+    await expect(bar).toContainText(/\d+:\d\d/);
+    await expect(page.locator('#activity .activity-row', { hasText: 'Recording' }), 'the floating bar is the only recording row').toHaveCount(0);
+    await bar.click();
     await expect(page.locator('[data-action="rec-stop"]')).toBeVisible();
     await page.locator('[data-action="rec-stop"]').click();
     await expect(page).toHaveURL(new RegExp(`#/n/${made.id}$`), { timeout: 8000 });
-    await expect(pill).toHaveCount(0);
+    await expect(page.locator('#rec-float')).toHaveCount(0);
   });
 
   test('a wide window puts Felix in a column beside the tabs and keeps the transcript node across polls', async ({ page }) => {
@@ -3066,8 +3106,10 @@ test.describe('recording', () => {
     const seen = stubRecorder(page, { noteId: 'x', local: false });
     await page.goto('/#/record');
     await expect(page.locator('.rec-kinds .choice-title')).toHaveText(['Microphone', 'Screen', 'Call']);
-    await expect(page.locator('.rec-kinds .choice-pick', { hasText: 'Screen' })).toContainText('Records what this computer plays');
-    await expect(page.locator('.rec-kinds .choice-diagram > svg')).toHaveCount(3);
+    await expect(page.locator('.rec-kinds .choice-icon > svg')).toHaveCount(3);
+    await expect(page.locator('#rec-kind-line')).toHaveText('A lecture, meeting or your voice');
+    await page.locator('.rec-kinds .choice-pick', { hasText: 'Screen' }).click();
+    await expect(page.locator('#rec-kind-line')).toHaveText('Records what this computer plays');
     await expect(page.locator('.rec-start .rec-tip'), 'the tip sits with Start').toBeVisible();
     await expect(page.locator('.rec-head .rec-chips #rec-dir ~ .select-menu-button'), 'the folder uses the shared select menu inside its chip').toBeVisible();
     await page.locator('.rec-kinds .choice-pick', { hasText: 'Call' }).click();
@@ -3076,25 +3118,101 @@ test.describe('recording', () => {
     expect(seen.started.source).toBe('nativecall');
   });
 
-  test('Label speakers is chosen per recording, remembered, shown for calls and sent with Start once its model is ready', async ({ page }) => {
+  test('a call labels speakers on its own, microphone and screen never do, and Start sends it once the model is ready', async ({ page }) => {
     const seen = stubRecorder(page, { noteId: 'x', local: false });
     let model = { id: 'diar', size: 139310336, bytes: 0, verified: false, progress: null };
     await page.route('**/api/speech', (route) => route.fulfill({ json: { models: [], speakers: model } }));
     await page.goto('/#/record');
-    const toggle = page.locator('#rec-speakers');
-    await expect(toggle, 'off by default, so lectures stay as they are').not.toBeChecked();
-    await toggle.check();
+    await expect(page.locator('#rec-speakers'), 'no switch: leo decides from the source').toHaveCount(0);
+    await expect(page.locator('#rec-speakers-model'), 'a microphone recording never asks for the speaker model').toHaveCount(0);
+    await page.locator('.rec-kinds .choice-pick', { hasText: 'Call' }).click();
     await expect(page.locator('#rec-speakers-model')).toContainText('133 MB');
     await expect(page.locator('#rec-speakers-get')).toBeVisible();
+    await page.locator('.rec-kinds .choice-pick', { hasText: 'Screen' }).click();
+    await expect(page.locator('#rec-speakers-model')).toHaveCount(0);
     model = { ...model, bytes: model.size, verified: true };
     await page.reload();
-    await expect(page.locator('#rec-speakers'), 'the choice is remembered').toBeChecked();
-    await expect(page.locator('#rec-speakers-model')).toHaveCount(0);
     await page.locator('.rec-kinds .choice-pick', { hasText: 'Call' }).click();
-    await expect(page.locator('#rec-speakers-box'), 'calls tell the other voices apart').toBeVisible();
+    await expect(page.locator('#rec-speakers-model')).toHaveCount(0);
     await page.locator('[data-action="rec-start"]').click();
     await expect(page.locator('[data-action="rec-stop"]')).toBeVisible();
     expect(seen.started.profile.speakers).toBe(true);
+  });
+
+  test('Start is a plain red button, and the source switch spans the card in three equal parts whose highlight slides', async ({ page }) => {
+    await page.goto('/#/record');
+    const start = page.locator('.rec-go');
+    await expect(start).toHaveText('Start recording');
+    await expect(start.locator('svg'), 'no microphone icon on Start').toHaveCount(0);
+    const sizes = await page.evaluate(() => {
+      const box = document.querySelector('.rec-kinds').getBoundingClientRect();
+      const card = document.querySelector('.rec-card').getBoundingClientRect();
+      return { box: box.width, card: card.width, picks: [...document.querySelectorAll('.rec-kinds .choice-pick')].map((p) => p.getBoundingClientRect().width) };
+    });
+    expect(Math.abs(sizes.box - sizes.card), 'the switch spans the card').toBeLessThan(2);
+    expect(Math.max(...sizes.picks) - Math.min(...sizes.picks), 'Microphone, Screen and Call are the same width').toBeLessThan(1);
+    const ring = page.locator('.rec-kinds .choice-ring');
+    expect(await ring.evaluate((el) => getComputedStyle(el).transitionDuration)).not.toBe('0s');
+    const before = await ring.boundingBox();
+    await page.locator('.rec-kinds .choice-pick', { hasText: 'Call' }).click();
+    await expect(page.locator('#rec-kind-line')).toHaveText('You and others, on two tracks');
+    await expect.poll(async () => Math.round((await ring.boundingBox()).x - before.x), 'the highlight moves under Call').toBe(Math.round(sizes.picks[0] * 2 + 4));
+  });
+
+  test('setup gaps are rows with their own fix above Start, and all set is one line with the drawn tick', async ({ page }) => {
+    let checks = { speech: false, writing: false };
+    await page.route('**/api/record', (route) => route.fulfill({ json: { available: true, local: true, job: null, pending: [], checks } }));
+    await page.route('**/api/calendar', (route) => route.fulfill({ json: { connected: false, calendars: [], events: [] } }));
+    await page.goto('/#/record');
+    const rows = page.locator('.rec-check');
+    await expect(rows.locator('b')).toHaveText(['Speech model', 'Writing AI', 'Calendar']);
+    await expect(rows.locator('a')).toHaveText(['Choose model', 'Set up', 'Connect']);
+    await expect(page.locator('.rec-check.optional a')).toHaveAttribute('href', '#/settings/calendar');
+    await expect(page.locator('.rec-ready')).toHaveCount(0);
+    checks = { speech: true, writing: true };
+    await page.goto('/#/');
+    await page.goto('/#/record');
+    await expect(page.locator('.rec-ready')).toHaveText('Ready · the speech model and writing AI are set up');
+    await expect(page.locator('.rec-ready .pencil-tick'), 'the drawn tick, not a green badge').toHaveCount(1);
+    await expect(page.locator('.rec-check:not(.optional)')).toHaveCount(0);
+  });
+
+  test('while recording the transcript is its own tab, Felix takes your own question, and the recorder bar sits at the bottom', async ({ page }) => {
+    const seen = stubRecorder(page, { noteId: null });
+    await page.goto('/#/record');
+    await page.locator('[data-action="rec-start"]').click();
+    await expect(page.locator('#rec-tabs [role="tab"]')).toHaveText(['Your notes 0', 'Transcript', 'What you want']);
+    await page.locator('[data-rec-tab="heard"]').click();
+    await expect(page.locator('#rec-transcript')).toContainText('breadth first search');
+    const bar = await page.locator('#rec-box .rec-bar').boundingBox();
+    expect(Math.abs(page.viewportSize().height - (bar.y + bar.height) - 20), 'the bar sits 20 px above the window edge').toBeLessThan(3);
+    const asked = page.waitForRequest((r) => r.url().endsWith('/api/chat') && r.method() === 'POST');
+    await page.locator('#rec-ask-text').fill('What theorem did she name?');
+    await page.locator('#rec-ask-text').press('Enter');
+    const sent = (await asked).postData();
+    expect(sent).toContain('What theorem did she name?');
+    expect(sent).toContain('breadth first search');
+    await expect(page.locator('#rec-ask-text')).toHaveValue('');
+    expect(seen.started).toBeTruthy();
+  });
+
+  test('a recording follows you: off the Record page its bar floats with time, Pause and Stop, and opens the recording', async ({ page }) => {
+    const seen = stubRecorder(page, { noteId: null });
+    await page.goto('/#/record');
+    await page.locator('[data-action="rec-start"]').click();
+    await expect(page.locator('#rec-float')).toHaveCount(0);
+    await page.goto('/#/calendar');
+    const float = page.locator('#rec-float');
+    await expect(float).toBeVisible();
+    await expect(float.locator('.rec-time')).toHaveText('0:03');
+    await expect(float.locator('#rec-wave')).toBeVisible();
+    await expect(float.locator('.rec-stop')).toHaveText('Stop and save');
+    await float.locator('.rec-pause').click();
+    await expect.poll(() => seen.paused).toBe(true);
+    await expect(float.locator('.rec-pause')).toHaveAttribute('title', 'Resume');
+    await float.locator('.rec-float-open').click();
+    await expect(page).toHaveURL(/#\/record$/);
+    await expect(page.locator('#rec-float'), 'the Record page has its own bar').toHaveCount(0);
   });
 
   test('the class or meeting happening now names the recording and tells the AI who and what, without overwriting a typed title', async ({ page, context }) => {
@@ -3130,7 +3248,7 @@ test.describe('recording', () => {
     await page.route('**/api/record', (route) => route.fulfill({ json: { available: true, local: false, job: null, pending: [] } }));
     await page.route('**/api/calendar', (route) => route.fulfill({ json: { connected: false, calendars: [], events: [] } }));
     await page.goto('/#/record');
-    await expect(page.locator('.rec-idle a[href="#/settings/calendar"]')).toHaveText('Connect a calendar');
+    await expect(page.locator('.rec-idle .rec-check.optional a[href="#/settings/calendar"]')).toHaveText('Connect');
     await expect(page.locator('#rec-event')).toHaveCount(0);
     await page.unroute('**/api/calendar');
     await page.route('**/api/calendar', (route) => route.fulfill({ status: 500, json: { error: 'The calendars could not be read.' } }));
@@ -5060,7 +5178,7 @@ test.describe('calendar', () => {
     await page.goto('/#/calendar');
     await page.evaluate((id) => {
       const open = document.createElement('button');
-      open.dataset.action = 'task-open';
+      open.dataset.action = 'task-open-here';
       open.dataset.id = id;
       document.body.append(open);
       open.click();
@@ -6464,3 +6582,307 @@ for (const width of [1280, 390]) {
     }
   });
 }
+
+test.describe('round 2 redesign', () => {
+  const tagOf = () => `${test.info().project.name} ${test.info().repeatEachIndex}`;
+  const LECTURE = '## Key ideas\n\n- A problem has **optimal substructure** when its best answer is built from best answers to smaller problems.\n- Memoization works top down.\n\n## Knapsack\n\nLet `best[i][w]` be the most value using the first *i* items.\n\n| Item | Weight |\n| --- | --- |\n| Book | 1 |\n\n> If you can write the recurrence, the code writes itself.\n\n## To review\n\n- [ ] Redo problem 3\n';
+  const makeNote = async (page, title, body = LECTURE) => {
+    const response = await page.request.post('/api/notes', { data: { title, body } });
+    expect(response.status()).toBe(201);
+    return response.json();
+  };
+  const heading = (page, text) => page.locator('#doc :is(h2, h3)', { hasText: text });
+  const fold = async (page, text) => {
+    const h = heading(page, text);
+    await h.scrollIntoViewIfNeeded();
+    await h.hover();
+    await h.locator('.fold-btn').click();
+  };
+
+  test('a section folds from its heading, says what it hides, stays folded after a reload and never changes the file', async ({ page }) => {
+    const note = await makeNote(page, `Folding ${tagOf()}`);
+    await page.goto(`/#/n/${note.id}`);
+    await expect(heading(page, 'Knapsack').locator('.fold-btn')).toHaveAttribute('aria-expanded', 'true');
+    await fold(page, 'Knapsack');
+    await expect(page.locator('#doc .blk-folded table, #doc .blk-folded blockquote')).toHaveCount(2);
+    await expect(page.locator('#doc .blk table')).toBeHidden();
+    await expect(heading(page, 'Knapsack')).toHaveAttribute('data-fold-said', '5 lines');
+    await expect(heading(page, 'Knapsack').locator('.fold-btn')).toHaveAttribute('aria-expanded', 'false');
+    await expect(heading(page, 'To review'), 'the next section stays open').toBeVisible();
+    await page.reload();
+    await expect(page.locator('#doc .blk table'), 'the fold is remembered').toBeHidden();
+    expect((await (await page.request.get(`/api/notes/${note.id}`)).json()).body, 'folding never touches the file').toBe(LECTURE);
+    await fold(page, 'Knapsack');
+    await expect(page.locator('#doc .blk-folded')).toHaveCount(0);
+    await expect(page.locator('#doc .blk table')).toBeVisible();
+  });
+
+  test('folding a section while one of its lines is open closes the line and folds', async ({ page }) => {
+    const note = await makeNote(page, `Folding open ${tagOf()}`);
+    await page.goto(`/#/n/${note.id}`);
+    await page.locator('#doc .blk li', { hasText: 'Memoization' }).click();
+    await expect(page.locator('#doc .editing')).toHaveCount(1);
+    await fold(page, 'Key ideas');
+    await expect(page.locator('#doc .editing')).toHaveCount(0);
+    await expect(page.locator('#doc .blk li', { hasText: 'Memoization' })).toBeHidden();
+    expect((await (await page.request.get(`/api/notes/${note.id}`)).json()).body).toBe(LECTURE);
+  });
+
+  test('a line opened inside a folded section unfolds it, so the caret is never hidden', async ({ page }) => {
+    const note = await makeNote(page, `Folding reach ${tagOf()}`);
+    await page.goto(`/#/n/${note.id}`);
+    const area = page.locator('#doc textarea.line-edit');
+    const opened = async (text) => {
+      await expect(area).toBeVisible();
+      await expect(area).toBeFocused();
+      await expect(heading(page, text).locator('.fold-btn')).toHaveAttribute('aria-expanded', 'true');
+    };
+    await fold(page, 'Knapsack');
+    await heading(page, 'Knapsack').click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    await opened('Knapsack');
+    await page.keyboard.press('Escape');
+    await fold(page, 'Key ideas');
+    await heading(page, 'Key ideas').click();
+    await page.keyboard.press('ArrowDown');
+    await opened('Key ideas');
+    await page.keyboard.press('Escape');
+    await fold(page, 'To review');
+    await page.locator('#doc .doc-tail').click();
+    await opened('To review');
+  });
+
+  test('a chevron below a line that grew while open folds its own heading', async ({ page }) => {
+    const note = await makeNote(page, `Folding grown ${tagOf()}`);
+    await page.goto(`/#/n/${note.id}`);
+    await page.locator('#doc .blk li', { hasText: 'Memoization' }).click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Shift+Enter');
+    await page.keyboard.type('Tabulation works bottom up.');
+    await page.keyboard.press('Shift+Enter');
+    await page.keyboard.type('Both reuse answers.');
+    await fold(page, 'Knapsack');
+    await expect(page.locator('#doc .editing')).toHaveCount(0);
+    await expect(page.locator('#doc .blk table'), 'Knapsack folded, not a heading above or below it').toBeHidden();
+    await expect(heading(page, 'Knapsack').locator('.fold-btn')).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#doc .blk', { hasText: 'Both reuse answers.' })).toBeVisible();
+    await expect(page.locator('#doc .blk li', { hasText: 'Redo problem 3' })).toBeVisible();
+  });
+
+  test('a damaged remembered fold opens the note unfolded', async ({ page }) => {
+    const note = await makeNote(page, `Folding damaged ${tagOf()}`);
+    await page.goto('/#/');
+    await page.evaluate((id) => localStorage.setItem('leo-folds', JSON.stringify({ [id]: 5 })), note.id);
+    await page.goto(`/#/n/${note.id}`);
+    await expect(page.locator('#doc .blk table')).toBeVisible();
+    await expect(heading(page, 'Knapsack').locator('.fold-btn')).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  test('two sections with the same heading fold one at a time', async ({ page }) => {
+    const note = await makeNote(page, `Folding twins ${tagOf()}`, '## Notes\n\nFirst part.\n\n## Notes ##\n\nSecond part.\n');
+    await page.goto(`/#/n/${note.id}`);
+    await heading(page, 'Notes').first().hover();
+    await heading(page, 'Notes').first().locator('.fold-btn').click();
+    await expect(page.locator('#doc .blk p', { hasText: 'First part.' })).toBeHidden();
+    await expect(page.locator('#doc .blk p', { hasText: 'Second part.' })).toBeVisible();
+  });
+
+  test('margin notes in a folded section fold with it, are counted on its heading and come back', async ({ page }) => {
+    await page.setViewportSize({ width: 1700, height: 1000 });
+    const note = await makeNote(page, `Folding margin ${tagOf()}`);
+    for (const quote of ['Memoization works top down.', 'If you can write the recurrence, the code writes itself.']) {
+      const { version } = await (await page.request.get(`/api/notes/${note.id}`)).json();
+      expect((await page.request.post(`/api/notes/${note.id}/margin/threads`, { data: { version, quote, question: 'Why?' } })).ok()).toBe(true);
+    }
+    await page.goto(`/#/n/${note.id}`);
+    const shown = page.locator('.margin-note:visible');
+    await expect(shown).toHaveCount(2);
+    await fold(page, 'Knapsack');
+    await expect(shown).toHaveCount(1);
+    await expect(heading(page, 'Knapsack')).toHaveAttribute('data-fold-said', '5 lines · 1 margin note');
+    await fold(page, 'Knapsack');
+    await expect(shown).toHaveCount(2);
+    await expect(heading(page, 'Knapsack')).not.toHaveAttribute('data-fold-said', /./);
+  });
+
+  test("a recorded note ends with Felix's follow-up questions, which open his chat; other notes have none", async ({ page }) => {
+    const plain = await makeNote(page, `Plain ${tagOf()}`, 'Just text');
+    await page.goto(`/#/n/${plain.id}`);
+    await expect(page.locator('#title')).toHaveText(plain.title);
+    await expect(page.locator('.note-follow')).toHaveCount(0);
+    const recorded = await makeNote(page, `Recorded ${tagOf()}`, 'Lecture text');
+    await page.route(`**/api/notes/${recorded.id}`, async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      const response = await route.fetch();
+      return route.fulfill({ response, json: { ...(await response.json()), recorded: true } });
+    });
+    await page.goto(`/#/n/${recorded.id}`);
+    await expect(page.locator('.note-follow [data-action="search-ask"]')).toHaveText(['What was decided?', 'What are the open questions?', 'Action items as tasks']);
+    const asked = page.waitForRequest((r) => r.url().endsWith('/api/chat') && r.method() === 'POST');
+    await page.locator('.note-follow [data-action="search-ask"]', { hasText: 'Action items as tasks' }).click();
+    expect((await asked).postData()).toContain('Action items as tasks');
+  });
+
+  test("home lists today's timed classes with Record, skips ended and all-day ones, and previews are plain text", async ({ page }) => {
+    const now = new Date();
+    now.setHours(12, 0, 0, 0);
+    await page.clock.setFixedTime(now);
+    const at = (mins) => new Date(now.getTime() + mins * 60000).toISOString();
+    const raw = [
+      { id: 'cls:1', title: 'CS 161 — Lecture 13', start: at(30), end: at(90), all_day: false, location: 'Gates B01', context: '' },
+      { id: 'call-1', title: 'Lab meeting', start: at(60), end: at(120), all_day: false, location: '', context: 'Join: https://zoom.us/j/1' },
+      { id: 'gone-1', title: 'Breakfast', start: at(-120), end: at(-60), all_day: false, location: '', context: '' },
+      { id: 'day-1', title: 'Holiday', start: at(0), end: at(60), all_day: true, location: '', context: '' },
+    ];
+    const events = raw.map((e) => ({ ...e, id: `feed:a:${e.id}`, feed: 'feed:a', calendar: 'School' }));
+    await page.route('**/api/schedule?**', async (route) => {
+      const response = await route.fetch();
+      return route.fulfill({ response, json: { ...(await response.json()), events } });
+    });
+    await page.route('**/api/calendar', async (route) => {
+      const response = await route.fetch();
+      return route.fulfill({ response, json: { ...(await response.json()), events: raw } });
+    });
+    await makeNote(page, `Preview ${tagOf()}`, 'A problem has **optimal substructure** when it splits.');
+    await page.goto('/#/');
+    await page.reload();
+    const rows = page.locator('.home-event');
+    await expect(rows.locator('.tasks-title')).toHaveText(['CS 161 — Lecture 13', 'Lab meeting']);
+    await expect(rows.nth(0).locator('a')).toHaveAttribute('href', '#/record?event=cls%3A1&kind=microphone');
+    await expect(rows.nth(1).locator('a'), 'a meeting link in the description records as a call').toHaveAttribute('href', '#/record?event=call-1&kind=call');
+    const preview = page.locator('.home-recent-line', { hasText: 'optimal substructure' });
+    await expect(preview).toHaveText('A problem has optimal substructure when it splits.');
+    await rows.nth(1).locator('a').click();
+    await expect(page.locator('#rec-title'), 'Record opens on the event it was pressed for').toHaveValue('Lab meeting');
+  });
+
+  test('Quick Leo opens on recent notes, actions and Felix, and each row works from the keyboard', async ({ page }) => {
+    const pinned = [];
+    for (let i = 0; i < 3; i++) pinned.push(await makeNote(page, `Quick pinned ${i} ${tagOf()}`, 'x'));
+    for (const old of pinned) expect((await page.request.patch(`/api/notes/${old.id}`, { data: { pinned: true } })).ok()).toBe(true);
+    const note = await makeNote(page, `Quick recent ${tagOf()}`, 'x');
+    const box = page.locator('.scrim:not(.scrim-gone) .quick-leo');
+    try {
+      await page.goto('/#/');
+      await page.keyboard.press('ControlOrMeta+k');
+      await expect(box.locator('.quick-due-head').first()).toHaveText('Recent');
+      await expect(box.locator('.quick-row').first(), 'the last note written leads, ahead of older pinned ones').toContainText(note.title);
+    } finally {
+      for (const old of pinned) await page.request.patch(`/api/notes/${old.id}`, { data: { pinned: false } });
+    }
+    await expect(box.locator('.quick-row', { hasText: 'New note' }).locator('kbd')).toBeVisible();
+    const labels = await box.locator('.quick-row .quick-label').allTextContents();
+    expect(labels.slice(-4)).toEqual(['New note', 'Start recording', 'New task', 'Ask Felix']);
+    for (let i = 0; i < labels.indexOf('Start recording'); i++) await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/#\/record$/);
+    await page.keyboard.press('ControlOrMeta+k');
+    await box.locator('.quick-row', { hasText: 'Ask Felix' }).click();
+    await expect(page.locator('body')).toHaveClass(/chat-open/);
+  });
+
+  test('an empty week says so with New task, a busy one does not, and tray tasks read plainly with where they came from', async ({ page }) => {
+    const title = `Book the room ${tagOf()}`;
+    await makeNote(page, `Lab meeting ${tagOf()}`, `## Action items\n\n- [ ] ${title}\n`);
+    expect((await page.request.post('/api/tasks', { data: { title: `Today task ${tagOf()}`, date: new Date().toLocaleDateString('en-CA') } })).ok()).toBe(true);
+    await page.goto('/#/calendar');
+    await expect(page.locator('.cal-item').first()).toBeVisible();
+    await expect(page.locator('.cal-quiet'), 'this week has a task').toHaveCount(0);
+    const row = page.locator('.cal-tray-row', { hasText: title });
+    await expect(row.locator('.cal-from')).toHaveText(`From Lab meeting ${tagOf()}`);
+    expect(await row.locator('.cal-title').evaluate((el) => getComputedStyle(el).fontWeight)).toBe('400');
+    await expect(page.locator('.cal-connect a')).toHaveText('Connect');
+    await expect(page.locator('.cal-mini'), 'the month stays at the top right').toBeVisible();
+    for (let i = 0; i < 8; i++) await page.locator('[data-action="cal-next"]').click();
+    await expect(page.locator('.cal-quiet-title')).toHaveText('Nothing this week');
+    await expect(page.locator('.cal-hint'), 'the tray hint gives way to the empty week').toHaveCount(0);
+    await page.locator('.cal-quiet [data-action="task-new"]').click();
+    await expect(page.locator('.scrim:not(.scrim-gone) .sheet')).toBeVisible();
+  });
+
+  test("moving a note's task on the calendar asks once for a date leo cannot read, then dates it and replaces its one date", async ({ page }) => {
+    const title = `Book the study room for Dec 2 ${tagOf()}`;
+    const note = await makeNote(page, `Room ${tagOf()}`, `## Action items\n\n- [ ] ${title}\n`);
+    const find = async () => (await (await page.request.get(`/api/tasks?q=study`)).json()).tasks.find((t) => t.title.startsWith(title));
+    const today = new Date().toLocaleDateString('en-CA');
+    const task = await find();
+    const first = await page.request.patch(`/api/tasks/${encodeURIComponent(task.id)}`, { data: { date: today, time: '09:00', end: null } });
+    expect(first.status(), 'Dec 2 has no year, so the first move asks').toBe(409);
+    expect((await page.request.patch(`/api/tasks/${encodeURIComponent(task.id)}`, { data: { date: today, time: '09:00', end: null, confirm: true } })).ok()).toBe(true);
+    const dated = await find();
+    expect([dated.date, String(dated.time).slice(0, 5)], 'the task is dated, so it sits on the calendar').toEqual([today, '09:00']);
+    const again = await page.request.patch(`/api/tasks/${encodeURIComponent(dated.id)}`, { data: { date: today, time: '10:00', end: null } });
+    expect(again.status(), 'moving it again never asks').toBe(200);
+    const body = (await (await page.request.get(`/api/notes/${note.id}`)).json()).body;
+    expect(body.match(/ — due /g), 'one date, replaced').toHaveLength(1);
+    expect(body).toContain('at 10:00 am.');
+    await page.goto('/#/calendar');
+    await expect(page.locator('.cal-item', { hasText: 'study room' })).toBeVisible();
+  });
+
+  for (const reduce of [false, true]) {
+    test(`the calendar and card panels ${reduce ? 'open and close at once under Reduce motion' : 'slide in and out'}`, async ({ page }) => {
+      if (reduce) await page.emulateMedia({ reducedMotion: 'reduce' });
+      const count = () => {
+        if (window.leoSlid) return;
+        const animate = Element.prototype.animate;
+        window.leoSlid = {};
+        Element.prototype.animate = function (...args) {
+          if (this.id) window.leoSlid[this.id] = (window.leoSlid[this.id] || 0) + 1;
+          return animate.apply(this, args);
+        };
+      };
+      await page.addInitScript(count);
+      const slid = (id) => page.evaluate((i) => window.leoSlid[i] || 0, id);
+      const leaveMidway = (id) => page.evaluate((i) => {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        for (const run of document.getElementById(i).getAnimations()) run.pause();
+      }, id);
+      const tag = `${tagOf()} ${reduce}`;
+      expect((await page.request.post('/api/tasks', { data: { title: `Panel task ${tag}` } })).ok()).toBe(true);
+      await page.goto('/#/calendar');
+      await page.evaluate(count);
+      await page.locator('.cal-tray-row .cal-open', { hasText: `Panel task ${tag}` }).click();
+      await expect(page.locator('#cal-side .cal-peek-title')).toBeVisible();
+      expect(await slid('cal-side'), 'the peek slides in').toBe(reduce ? 0 : 1);
+      await page.keyboard.press('Escape');
+      await expect(page.locator('#cal-side.peek')).toHaveCount(0);
+      await expect(page.locator('#cal-side .cal-mini')).toBeVisible();
+      expect(await slid('cal-side'), 'and slides out before it closes').toBe(reduce ? 0 : 2);
+      const board = await (await page.request.post('/api/boards', { data: { name: `Panels ${tag}` } })).json();
+      const column = board.columns[0].id;
+      expect((await page.request.post(`/api/boards/${board.id}/cards`, { data: { title: `Card ${tag}`, column } })).ok()).toBe(true);
+      await page.goto(`/#/boards/${board.id}`);
+      await page.locator('.kanban-card', { hasText: `Card ${tag}` }).click();
+      await expect(page.locator('#kanban-panel')).toBeVisible();
+      expect(await slid('kanban-panel')).toBe(reduce ? 0 : 1);
+      const open = page.locator('.kanban-card.open');
+      expect(await open.evaluate((el) => getComputedStyle(el).boxShadow), 'the open card is outlined').toContain('inset');
+      expect(await open.evaluate((el) => getComputedStyle(el).borderLeftWidth), 'no bar on its left').toBe('0px');
+      await page.keyboard.press('Escape');
+      await expect(page.locator('#kanban-panel')).toBeHidden();
+      expect(await slid('kanban-panel')).toBe(reduce ? 0 : 2);
+      await page.locator('.kanban-card', { hasText: `Card ${tag}` }).click();
+      await expect(page.locator('#kanban-panel')).toBeVisible();
+      await leaveMidway('kanban-panel');
+      await page.locator('.kanban-card', { hasText: `Card ${tag}` }).click();
+      await expect(page.locator('#kanban-panel'), 'reopening during the slide keeps the panel').toBeVisible();
+      expect(await page.evaluate(() => document.getElementById('kanban-panel').inert), 'and it takes clicks again').toBe(false);
+      await expect(page.locator('#kanban-card-title')).toHaveValue(`Card ${tag}`);
+    });
+  }
+
+  test('starting a new task while the calendar peek slides out puts the tray back', async ({ page }) => {
+    const title = `Peek then new ${tagOf()}`;
+    expect((await page.request.post('/api/tasks', { data: { title } })).ok()).toBe(true);
+    await page.goto('/#/calendar');
+    await page.locator('.cal-tray-row .cal-open', { hasText: title }).click();
+    await expect(page.locator('#cal-side .cal-peek-title')).toBeVisible();
+    const grid = await page.locator('#cal-scroll').boundingBox();
+    await page.mouse.click(grid.x + grid.width - 40, grid.y + grid.height / 2);
+    await expect(page.locator('.cal-compose')).toBeVisible();
+    await expect(page.locator('#cal-side .cal-peek-title'), 'the peek is gone while the new task is typed').toHaveCount(0);
+    await expect(page.locator('#cal-side .cal-mini')).toBeVisible();
+  });
+});

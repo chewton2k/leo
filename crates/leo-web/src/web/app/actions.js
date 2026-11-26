@@ -29,7 +29,6 @@ const actions = {
   home: () => go('#/'),
   'side-fold': foldSide,
   'toggle-picker': togglePicker,
-  'ask-selection': () => askAboutSelection(),
   calendar: () => {
     closeSheet();
     go('#/calendar');
@@ -91,7 +90,6 @@ const actions = {
   },
   'task-new': (el) => newTaskSheet(el.dataset.day || null),
   'tasks-more': () => tasksMore(),
-  'task-open': (el) => taskSheet(el.dataset.id, el.dataset.on || null),
   'task-open-here': (el) => openTaskAnywhere(el.dataset.id, el.dataset.on || null),
   'task-done': (el) => {
     const id = el.dataset.id;
@@ -105,7 +103,6 @@ const actions = {
   'task-google': (el) => addToGoogle(el.dataset.id),
   'task-delete': (el) => deleteTask(el.dataset.id),
   'task-promote': (el) => promoteTask(el.dataset.line),
-  'note-tasks': () => noteTasksSheet(),
   'note-tasks-more': () => noteTasksMore(),
   'set-model': (el) => changeSetting({ set: 'model', task: el.dataset.task, value: el.dataset.model }),
   'set-effort': (el) => changeSetting({ set: 'effort', value: el.dataset.effort === 'default' ? '' : el.dataset.effort }),
@@ -129,8 +126,7 @@ const actions = {
   },
   'note-back': () => closeAside(),
   'note-sources': () => showRecordingSources(window.getSelection().toString().trim().slice(0,200)).catch(fail),
-  'source-save': () => saveSource().catch(fail),
-  'source-regenerate': () => regenerateSource().catch(fail),
+  'source-regenerate': (el) => regenerateSource(el).catch(fail),
   'source-back': () => closeSheet(),
   'source-earlier': () => sourceEarlier().catch(fail),
   'source-later': () => sourceLater().catch(fail),
@@ -202,7 +198,6 @@ const actions = {
   'set-key': (el) => saveKey(el.dataset.account),
   'remove-key': confirmRemoveKey,
   'test-ai': testAi,
-  'note-picture': () => choosePictures(),
   'view-original': (el) => {
     el.focus({ preventScroll: true });
     return viewOriginal(el.dataset.id, el.dataset.name);

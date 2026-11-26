@@ -5,6 +5,7 @@ pub mod provider;
 pub mod secret;
 pub mod tidy;
 
+use crate::stamp::Stamp;
 use std::collections::BTreeMap;
 
 use anyhow::{Context, Result};
@@ -249,37 +250,13 @@ kind = "parakeet"
 const RECHECK: std::time::Duration = std::time::Duration::from_secs(10);
 const RACY: std::time::Duration = std::time::Duration::from_secs(2);
 
-#[derive(Clone, PartialEq, Eq)]
-struct Stamp {
-    len: u64,
-    modified: std::time::SystemTime,
-    #[cfg(unix)]
-    changed: (i64, i64),
-    #[cfg(unix)]
-    file: (u64, u64),
-}
-
 type Held = std::collections::HashMap<std::path::PathBuf, (Stamp, std::time::Instant, Config)>;
 
 static LOADED: std::sync::LazyLock<std::sync::Mutex<Held>> =
     std::sync::LazyLock::new(Default::default);
 
 fn stamp(path: &std::path::Path) -> Option<Stamp> {
-    let meta = std::fs::metadata(path).ok()?;
-    Some(Stamp {
-        len: meta.len(),
-        modified: meta.modified().ok()?,
-        #[cfg(unix)]
-        changed: {
-            use std::os::unix::fs::MetadataExt;
-            (meta.ctime(), meta.ctime_nsec())
-        },
-        #[cfg(unix)]
-        file: {
-            use std::os::unix::fs::MetadataExt;
-            (meta.ino(), meta.dev())
-        },
-    })
+    Stamp::of(&std::fs::metadata(path).ok()?)
 }
 
 fn load_at(path: &std::path::Path, now: std::time::Instant) -> Config {

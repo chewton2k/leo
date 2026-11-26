@@ -22,6 +22,7 @@ test('coding accounts distinguish signed in, signed out, unknown and unavailable
     assert.ok(!html.includes('<img>'));
     assert.ok(!html.includes('data-action="use-plan"'));
   }
+  assert.match(value.codingPlans({ plans: [{ provider: 'codex', name: 'Codex', installed: true, signed_in: false, refused: true }] }), />Sign in needed</);
   assert.equal(value.codingPlans({ tasks: [] }), '');
 });
 

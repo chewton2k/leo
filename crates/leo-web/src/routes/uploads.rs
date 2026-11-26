@@ -33,7 +33,6 @@ fn count_chars<S: serde::Serializer>(section: &Option<String>, out: S) -> Result
 }
 
 pub(crate) const IMPORT_JSON_BYTES: usize = 8 * 1024 * 1024;
-const ORIGINAL_PIECE: usize = 64 * 1024;
 const MOST_IMPORTS: usize = 2;
 const KEPT_IMPORTS: usize = 40;
 const UPLOAD_IDLE: std::time::Duration = std::time::Duration::from_secs(60);
@@ -1105,19 +1104,8 @@ pub(crate) async fn get_original(
                 })
                 .filter(|c| *c != '"')
                 .collect();
-            let stream = futures_util::stream::try_unfold(
-                (tokio::fs::File::from_std(file), vec![0u8; ORIGINAL_PIECE]),
-                |(mut file, mut piece)| async move {
-                    use tokio::io::AsyncReadExt;
-                    let read = file.read(&mut piece).await?;
-                    Ok::<_, std::io::Error>(
-                        (read > 0).then(|| (piece[..read].to_vec(), (file, piece))),
-                    )
-                },
-            );
-            let mut response = axum::body::Body::from_stream(stream).into_response();
+            let mut response = crate::reply::streamed(file, size);
             let headers = response.headers_mut();
-            headers.insert(header::CONTENT_LENGTH, HeaderValue::from(size));
             if let Ok(value) = HeaderValue::from_str(mime_for(&name)) {
                 headers.insert(header::CONTENT_TYPE, value);
             }

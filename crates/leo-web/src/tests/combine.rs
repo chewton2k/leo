@@ -26,7 +26,7 @@ fn bodies(state: &AppState, ids: &[String], texts: [&str; 2]) {
     .unwrap();
 }
 
-fn transcript(id: &str) -> leo_core::recording::Archive {
+pub(crate) fn transcript(id: &str) -> leo_core::recording::Archive {
     leo_core::recording::Archive {
         id: id.into(),
         started: chrono::Utc::now(),

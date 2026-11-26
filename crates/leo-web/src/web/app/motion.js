@@ -227,4 +227,30 @@ function liftedRect(el) {
   return { left: r.left + (r.width - el.offsetWidth) / 2, top: r.top + (r.height - el.offsetHeight) / 2, tilt: parseFloat(getComputedStyle(el).getPropertyValue('--tilt')) || 0 };
 }
 
+function panelArrive(el) {
+  if (!el || stillMotion() || typeof el.animate !== 'function') return;
+  el.animate([{ opacity: 0, transform: 'translateX(16px)' }, { opacity: 1, transform: 'none' }], { duration: OPEN_MS, easing: EASE_OUT });
+}
+
+function panelLeave(el, done) {
+  if (!el?.isConnected || el.hidden || stillMotion() || typeof el.animate !== 'function') return done();
+  for (const running of el.getAnimations()) running.cancel();
+  el.inert = true;
+  const run = el.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateX(16px)' }], { duration: OPEN_MS * EXIT_SHARE, easing: EASE_EXIT, fill: 'forwards' });
+  const end = () => {
+    el.inert = false;
+    try {
+      done();
+    } finally {
+      run.cancel();
+    }
+  };
+  run.finished.then(end, () => { el.inert = false; });
+}
+
+function panelStay(el) {
+  for (const run of el?.getAnimations?.() || []) run.cancel();
+  if (el) el.inert = false;
+}
+
 window.leoMotion = { unfold, fold, slide: slideHeight, cascade, pulse, rubber, iconSwap, overlapOut, stillMotion, dock: dockPanel };

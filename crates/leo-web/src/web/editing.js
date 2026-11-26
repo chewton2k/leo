@@ -89,20 +89,6 @@
     return tree;
   }
 
-  function boxesBefore(lines, index) {
-    let count = 0;
-    for (let i = 0; i < index && i < lines.length; i++) if (isBox(lines[i])) count++;
-    return count;
-  }
-
-  function boxLine(lines, number) {
-    let count = 0;
-    for (let i = 0; i < lines.length; i++) {
-      if (isBox(lines[i]) && ++count === number) return i;
-    }
-    return -1;
-  }
-
   const ITEM = new RegExp(String.raw`^(?<lead>[^\S\n]*)(?<marker>${MARKER})(?<gap>[^\S\n]+)(?<box>\[[ xX]\](?:[^\S\n]+|$))?`);
   const HEAD = /^\s{0,3}#{1,6}[^\S\n]+/;
 
@@ -579,7 +565,7 @@
     return { lines: [lead + mark + text], line: 0, caret: lead.length + mark.length + caret };
   }
 
-  const api = { SLASH, slash, restyle, stylePair, cellEnd, nextCell, addRow, listPrefix, listPrefixAt, itemHead, listed, listLevels, renumber, closeList, stepBack, headingTree, headings, setPictureWidth, removePicture, pictureSource, withoutPictures, onlyPictures, stored, ownCopy, splitBlocks, boxesBefore, boxLine, continueLine, toggleBox, indent, outdent, rawOffset, isBox, snapshotOf, lineAtOffset, MOST_PASSAGE };
+  const api = { SLASH, slash, restyle, stylePair, cellEnd, nextCell, addRow, listPrefix, listPrefixAt, itemHead, listed, listLevels, renumber, closeList, stepBack, headingTree, headings, setPictureWidth, removePicture, pictureSource, withoutPictures, onlyPictures, stored, ownCopy, splitBlocks, continueLine, toggleBox, indent, outdent, rawOffset, isBox, snapshotOf, lineAtOffset, MOST_PASSAGE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoEditing = api;
 })(typeof window !== 'undefined' ? window : globalThis);

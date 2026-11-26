@@ -233,34 +233,23 @@ fn keeping_never_drops_a_combine_record_replaced_while_it_looked() {
     );
 }
 
-fn archive(id: &str) -> leo_core::recording::Archive {
-    leo_core::recording::Archive {
-        id: id.into(),
-        started: chrono::Utc::now(),
-        passages: vec![leo_core::recording::Passage {
-            start_secs: 0,
-            end_secs: 5,
-            text: format!("said in {id}"),
-            speaker: String::new(),
-            echo: false,
-            turns: Vec::new(),
-        }],
-        points: vec![],
-        context: String::new(),
-        wants: String::new(),
-        warnings: vec![],
-        trace: vec![],
-        from: String::new(),
-    }
-}
-
 #[test]
 fn undo_keeps_copies_that_changed_since_the_combine() {
     let (state, _d, ids) = state_with(&[("Notes", ""), ("Slides", "")]);
     original(&state, &ids[1], "slides.pdf", "%PDF slides");
     original(&state, &ids[1], "handout.pdf", "%PDF handout");
-    leo_core::recording::save(&state.notes_dir, &ids[1], &archive("session-one01")).unwrap();
-    leo_core::recording::save(&state.notes_dir, &ids[1], &archive("session-two02")).unwrap();
+    leo_core::recording::save(
+        &state.notes_dir,
+        &ids[1],
+        &super::combine::transcript("session-one01"),
+    )
+    .unwrap();
+    leo_core::recording::save(
+        &state.notes_dir,
+        &ids[1],
+        &super::combine::transcript("session-two02"),
+    )
+    .unwrap();
     assert_eq!(combined(&state, &ids[0], &ids[1]).status(), StatusCode::OK);
     let folder = originals_dir(&state.notes_dir, &ids[0]).unwrap();
     std::fs::remove_file(folder.join("slides.pdf")).unwrap();
@@ -301,8 +290,18 @@ fn undo_keeps_copies_that_changed_since_the_combine() {
 fn undo_keeps_a_copy_corrected_while_the_combine_was_still_copying() {
     let (state, _d, ids) = state_with(&[("Notes", ""), ("Slides", "")]);
     original(&state, &ids[1], "slides.pdf", "%PDF slides");
-    leo_core::recording::save(&state.notes_dir, &ids[1], &archive("session-one01")).unwrap();
-    leo_core::recording::save(&state.notes_dir, &ids[1], &archive("session-two02")).unwrap();
+    leo_core::recording::save(
+        &state.notes_dir,
+        &ids[1],
+        &super::combine::transcript("session-one01"),
+    )
+    .unwrap();
+    leo_core::recording::save(
+        &state.notes_dir,
+        &ids[1],
+        &super::combine::transcript("session-two02"),
+    )
+    .unwrap();
     let sources = leo_core::recording::folder(&state.notes_dir, &ids[0]).unwrap();
     let corrected = std::sync::Arc::new(std::sync::Mutex::new(None));
     let noted = corrected.clone();
