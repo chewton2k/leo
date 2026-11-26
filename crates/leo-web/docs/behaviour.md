@@ -441,9 +441,12 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   own subfolder, or a taken name), files dropped open the upload sheet.
   Focus on this folder (2026-11-26, the user's call, in a folder's menu): `side.root`, saved per
   device as `leo-focus`, makes the explorer start at that folder (its children at the root
-  indentation, so guide lines align as unfocused), with a "Show all notes" row above the tree only
-  while focused. New note, New folder and the top-level drop target (`data-drop-dir=""`, `dirOf`)
-  stay inside it (`creationDir` falls back to the folder for anything outside); an in-leo rename or
+  indentation, so guide lines align as unfocused), with a row above the tree only while focused
+  that names the folder behind a × (a click shows all notes; a right click, Shift+F10 or the menu key
+  opens that folder's own menu, so it can still be renamed, moved or trashed, and the edit box sits
+  over the row's name). New note, New folder and the top-level drop target (`data-drop-dir=""`,
+  `dirOf`; a drag over the top level marks the New note row, as unfocused, and its title names the
+  folder) stay inside it (`creationDir` falls back to the folder for anything outside); an in-leo rename or
   move rewrites it (`moveOpenFolders`), and a load that no longer finds the folder clears it with
   one toast. Search, Felix, Calendar and Boards still see every note.
   Dropping a note on another opens Combine (`combine.rs`: the AI writes one
@@ -1498,11 +1501,12 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
   repeating tasks ask Only this one / Every time (Every time shifts `date` and
   the weekdays by the day moved). Polls that land mid-drag or mid-compose wait
   (`cal.stale`), and so does every redraw while the pointer is down or a new task is being typed
-  (`cal.redraw`). A right click, Shift+F10 or the menu key opens a `popupMenu` (`calMenu`, skipped
-  during a drag): empty time (New task at its time, Go to today, Day, Week, Month), a month or
+  (`cal.redraw`). A right click or a Control-click opens a `popupMenu` (`calMenu`, skipped
+  during a drag; a press that has not started dragging is let go first), and Shift+F10 or the menu
+  key opens it on a focused task, event or month day number: empty time (New task at its time, Go to today, Day, Week, Month), a month or
   all-day cell (New task on that date and the same rows), a task wherever it shows (grid, All day row,
   month, tray: Open, Mark done or Mark not done, Delete task with its Undo) and an event (Details,
-  and Record this event until it has ended). Clicking anywhere on an item but its checkbox opens a side peek in the tray's place
+  and, for a timed event, Record this event until it has ended). Clicking anywhere on an item but its checkbox opens a side peek in the tray's place
   (`#cal-side.peek`, 340 px): title, done, date/start/end with a This one /
   Every time scope for repeats, repeat days, type, a description that autosaves
   600 ms after typing and on blur, note, Google, .ics, Delete; events are

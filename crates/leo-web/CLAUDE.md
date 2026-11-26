@@ -199,7 +199,7 @@ Decided: one app, window only (2026-10-31).
   on a dark page. A picture alone (clicked, or the only thing selected) is copied with `navigator.clipboard.write` as
   `image/png` and that html (a JPEG there when the PNG passes 15 MB; halved in size until the PNG is under 60 MB, since
   WebKit refuses over about 100 MB), called inside the copy event and never with `clipboardData.setData`, which WebKit
-  refuses together. A picture not loaded yet is loaded first the same way, alone or with text. Text with exactly one drawn picture from a copy (2026-11-26, the owner's call: pasting into T3 Code lost the picture) goes the same way with `text/plain`, `text/html` and `image/png` (the PNG built lazily inside the `ClipboardItem`); two or more pictures get no PNG. Every leo paste site (doc.js `onLeoPaste` and `onPaste`, chat.js's input, events.js, recording.js) skips the clipboard's files when `leoEditing.leoCopied(html, text)` says it is leo's own copy, so pasting one back never uploads the PNG. Cut always uses the plain path.
+  refuses together. A picture not loaded yet is loaded first the same way, alone or with text. Text with exactly one drawn picture from a copy (2026-11-26, the owner's call: pasting into T3 Code lost the picture) goes the same way with `text/plain`, `text/html` and `image/png` (the PNG built lazily inside the `ClipboardItem`); two or more pictures get no PNG. Every leo paste site that takes files (doc.js `onPaste`, chat.js's input, events.js, recording.js) skips them when `leoEditing.ownTextCopy(clipboardData)` says the clipboard is leo's own copy of text with pictures (`leoCopied` with `alone === false`), so pasting one back never uploads the PNG; a picture copied alone keeps its files, which `onLeoPaste` turns back into markdown (or a new picture from another folder). If the clipboard refuses the PNG, the text and html are written again without it. Cut always uses the plain path.
   A selection that names an outside picture (`https:`, `//`) keeps its markdown as the text and gets no wrapper.
   `onLeoPaste` (doc.js, capture) puts the markdown back, with no upload, only when `leoEditing.ownCopy` says
   it is leo's: its text without pictures equals `text/plain` (pictures only when there is none) and no picture is
@@ -539,7 +539,7 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   are 32 px with an 8 px icon gap and a 16 px indent per level, and the current row keeps
   its weight: the pill alone marks it.
   A folder's menu has Focus on this folder (2026-11-26, the user's call): `side.root`, saved as
-  `leo-focus`, starts the explorer at that folder, with a Show all notes row only while focused;
+  `leo-focus`, starts the explorer at that folder, with a row naming it (× shows all notes, its context menu is the folder's) only while focused;
   New note and the top-level drop stay inside it. Details in `docs/behaviour.md`.
 - Cmd/Ctrl+F on a note page opens find in note (2026-11-21, the user's call; nothing
   new on other pages): `noteFind` in `core.js` puts a `.note-find` bar in the note and
