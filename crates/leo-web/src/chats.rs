@@ -241,42 +241,11 @@ pub fn rename(dir: &Path, id: &str, title: &str) -> bool {
         .unwrap_or(false)
 }
 
-pub fn name_prompt(chat: &Chat) -> (String, String) {
-    let asked = clipped(
-        &one_line(first_text(&chat.messages, "user").unwrap_or("")),
-        600,
-    );
-    let answered = clipped(
-        &one_line(first_text(&chat.messages, "assistant").unwrap_or("")),
-        900,
-    );
-    let system = "You name a conversation for a list of past chats. Reply with a title of 3 to 7 words that says what it is about, so it stands apart from other chats on similar subjects: name the topic, not the request (\"Dijkstra vs BFS on weighted graphs\", not \"Explain this simply\"). Use interpretable language. Plain text only: no quotes, no full stop, no preamble.".to_string();
-    let user = format!(
-        "<question>\n{asked}\n</question>\n<answer>\n{answered}\n</answer>\n\nWrite the title only."
-    );
-    (system, user)
-}
-
-pub fn clean_name(reply: &str) -> Option<String> {
-    let line = reply.lines().map(str::trim).find(|l| !l.is_empty())?;
-    let line = line
-        .trim_start_matches(|c: char| c == '#' || c.is_whitespace())
-        .trim_start_matches("Title:")
-        .trim()
-        .trim_matches(['"', '\'', '*', '“', '”', '`'])
-        .trim_end_matches('.')
-        .trim();
-    let words = line.split_whitespace().count();
-    (1..=12)
-        .contains(&words)
-        .then(|| clipped(&one_line(line), MOST_TITLE))
-}
-
 fn stamp(at: DateTime<Utc>) -> String {
     at.to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
 }
 
-fn when(text: &str) -> DateTime<Utc> {
+pub(crate) fn when(text: &str) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(text).map_or_else(|_| Utc::now(), |t| t.with_timezone(&Utc))
 }
 
@@ -1336,9 +1305,6 @@ mod tests {
         )
         .unwrap();
         assert!(answered.wants_name());
-        let (system, user) = name_prompt(&answered);
-        assert!(system.contains("Use interpretable language"));
-        assert!(user.contains("BFS uses a queue."));
 
         assert!(rename(
             &dir,
@@ -1360,24 +1326,6 @@ mod tests {
         assert!(!later.wants_name());
         assert!(!rename(&dir, "chat-nope-1", "x"));
         assert!(!rename(&dir, "chat-eeee-1", "   "));
-    }
-
-    #[test]
-    fn an_ai_reply_is_trimmed_to_a_title_or_refused() {
-        assert_eq!(
-            clean_name("\"Heaps and priority queues.\"\n").as_deref(),
-            Some("Heaps and priority queues")
-        );
-        assert_eq!(
-            clean_name("Title: **BFS vs DFS**").as_deref(),
-            Some("BFS vs DFS")
-        );
-        assert_eq!(
-            clean_name("# Graph search\nmore").as_deref(),
-            Some("Graph search")
-        );
-        assert_eq!(clean_name(""), None);
-        assert_eq!(clean_name(&"word ".repeat(30)), None);
     }
 
     #[test]

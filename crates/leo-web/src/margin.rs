@@ -1125,26 +1125,6 @@ pub(crate) fn finish_held_rows(chats: &Path, note: &str, ticket: &str, delete: b
         .is_ok()
 }
 
-pub fn forget_notes(chats: &Path, notes: &[String]) -> usize {
-    db_of(chats)
-        .with(|c| {
-            let tx = c.transaction()?;
-            let mut removed = 0;
-            for note in notes {
-                for (table, owner, _) in DEPENDENT_ROWS {
-                    let count =
-                        tx.execute(&format!("DELETE FROM {table} WHERE {owner}"), [note])?;
-                    if *table == "margin_threads" {
-                        removed += count;
-                    }
-                }
-            }
-            tx.commit()?;
-            Ok(removed)
-        })
-        .unwrap_or(0)
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub(crate) struct Missing {
     pub(crate) since: DateTime<Utc>,
@@ -1190,6 +1170,7 @@ pub fn reset_missing(chats: &Path) {
     set_state(chats, "missing", &BTreeMap::<String, Missing>::new());
 }
 
+#[cfg(test)]
 pub fn sweep(chats: &Path, kept: &HashSet<String>, now: DateTime<Utc>) -> Vec<String> {
     sweep_with(chats, kept, None, BTreeSet::new(), now, None)
 }
@@ -1991,8 +1972,17 @@ pub const PROBLEM: &str = "Felix could not read your note just now. Try again in
 mod tests {
     use super::*;
 
+    fn forget(chats: &Path, note: &str) -> bool {
+        let (ticket, _) = record_held_rows(chats, note).unwrap();
+        finish_held_rows(chats, note, &ticket, true)
+    }
+
     fn swept(chats: &Path, kept: &HashSet<String>, now: DateTime<Utc>) -> usize {
-        forget_notes(chats, &sweep(chats, kept, now))
+        let before = every(chats).len();
+        for note in sweep(chats, kept, now) {
+            assert!(forget(chats, &note));
+        }
+        before - every(chats).len()
     }
 
     fn about(quote: &str, prefix: &str, suffix: &str) -> Thread {
@@ -2841,7 +2831,7 @@ mod tests {
         for note in ["gone", "held", "trashed", "vanished"] {
             place(note);
         }
-        forget_notes(&chats, &["gone".into()]);
+        assert!(forget(&chats, "gone"));
         assert_eq!(
             places(),
             BTreeSet::from(["held", "trashed", "vanished"].map(String::from))
@@ -2865,7 +2855,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let chats = dir.path().join("chats");
         assert!(set_persona(&chats, "gone", "critic"));
-        forget_notes(&chats, &["gone".into()]);
+        assert!(forget(&chats, "gone"));
         assert_eq!(persona_of(&chats, "gone"), "reader");
         assert!(set_persona(&chats, "held", "critic"));
         let held: BTreeSet<String> = db_of(&chats)
@@ -2903,7 +2893,7 @@ mod tests {
         let told = instructed(READ_SYSTEM, "Check sources.");
         assert!(told.find("Instruction: Check sources.") < told.find("Reply with JSON only"));
         set_instructions(&chats, "gone", "Keep it short.");
-        forget_notes(&chats, &["gone".into()]);
+        assert!(forget(&chats, "gone"));
         assert_eq!(instructions_of(&chats, "gone"), "");
     }
 
@@ -3103,8 +3093,7 @@ mod tests {
                     c.execute_batch(&format!("CREATE TRIGGER no_forget BEFORE DELETE ON {table} BEGIN SELECT RAISE(ABORT, 'refused'); END;"))
                 })
                 .unwrap();
-            let removed = forget_notes(&chats, &["gone-note".to_string()]);
-            assert_eq!(removed, 0, "{table}");
+            assert!(!forget(&chats, "gone-note"), "{table}");
             assert!(
                 one(&chats, "gone-note", &thread.id).is_some(),
                 "the threads were deleted although forgetting failed at {table}"

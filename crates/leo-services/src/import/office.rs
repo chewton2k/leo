@@ -117,7 +117,7 @@ struct Link {
     external: bool,
 }
 
-fn joined(parent: &str, target: &str) -> Result<String> {
+pub(crate) fn joined(parent: &str, target: &str) -> Result<String> {
     if target.contains(['\\', ':', '\0', '?', '#']) {
         bail!("this Office file has an invalid internal link; export it again");
     }

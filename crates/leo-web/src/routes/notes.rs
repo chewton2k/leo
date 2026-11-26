@@ -101,7 +101,7 @@ pub(crate) struct NoteResponse {
 pub(crate) fn version_of(note: &leo_core::notes::Note) -> String {
     let parts = [note.title.as_str(), note.body.as_str(), ""];
     let bytes = parts.iter().flat_map(|part| part.bytes().chain([0u8]));
-    format!("{:016x}", crate::vectors::fnv64(bytes))
+    crate::vectors::fnv(bytes)
 }
 
 impl NoteResponse {
@@ -795,7 +795,7 @@ pub(crate) async fn get_rev(
         .chain(stamps)
         .flat_map(u64::to_le_bytes);
     Ok(Json(
-        serde_json::json!({ "rev": format!("{:016x}", crate::vectors::fnv64(bytes)) }),
+        serde_json::json!({ "rev": crate::vectors::fnv(bytes) }),
     ))
 }
 

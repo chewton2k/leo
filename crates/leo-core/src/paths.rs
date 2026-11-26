@@ -320,6 +320,26 @@ pub fn parse_digest(text: &str) -> Option<FileDigest> {
     Some(digest)
 }
 
+pub type FileStamp = (u64, u128, i64);
+
+pub fn file_stamp(meta: &std::fs::Metadata) -> FileStamp {
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |since| since.as_nanos());
+    #[cfg(unix)]
+    let changed = {
+        use std::os::unix::fs::MetadataExt;
+        meta.ctime()
+            .saturating_mul(1_000_000_000)
+            .saturating_add(meta.ctime_nsec())
+    };
+    #[cfg(not(unix))]
+    let changed = 0;
+    (meta.len(), modified, changed)
+}
+
 pub type EntryStamp = (bool, u64, u128, u128, u64, u128);
 
 pub type FolderStamps = Vec<(String, EntryStamp)>;
@@ -750,11 +770,11 @@ pub mod own {
         at.format("%Y%m%dT%H%M%SZ").to_string()
     }
 
-    pub fn damaged_copy(database: &str, stamp: &str, n: usize) -> String {
+    pub fn damaged_end(stamp: &str, n: usize) -> String {
         if n > 1 {
-            format!("{database}.damaged-{stamp}-{n}")
+            format!(".damaged-{stamp}-{n}")
         } else {
-            format!("{database}.damaged-{stamp}")
+            format!(".damaged-{stamp}")
         }
     }
 
@@ -943,7 +963,7 @@ mod tests {
         let stamp = own::damaged_stamp(chrono::Utc::now());
         for n in [1, 2, 3, 12] {
             for side in ["", "-wal", "-shm"] {
-                let name = own::damaged_copy("leo.db", &stamp, n) + side;
+                let name = format!("leo.db{}{side}", own::damaged_end(&stamp, n));
                 assert!(own::listed(&name), "{name}");
             }
         }

@@ -19,5 +19,6 @@ pub mod web;
 pub mod web_settings;
 
 pub(crate) mod private_file;
+pub(crate) mod stamp;
 
 pub mod dictation;

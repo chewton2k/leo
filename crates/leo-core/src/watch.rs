@@ -117,10 +117,6 @@ impl Watch {
         Arc::clone(&self.leo)
     }
 
-    pub fn take_leo(&self) -> LeoChanged {
-        self.leo.take()
-    }
-
     pub fn take(&self) -> bool {
         self.touched.swap(false, Ordering::Relaxed)
     }
@@ -197,11 +193,11 @@ mod tests {
         let watch = Watch::start(root.path()).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(300));
         let _ = watch.take();
-        let _ = watch.take_leo();
+        let _ = watch.leo().take();
         std::fs::write(cards.join("c0000001.json"), "{}").unwrap();
         let start = std::time::Instant::now();
         let paths = loop {
-            match watch.take_leo() {
+            match watch.leo().take() {
                 LeoChanged::Paths(paths) => break paths,
                 LeoChanged::All => break Vec::new(),
                 LeoChanged::Nothing => {}
@@ -236,7 +232,7 @@ mod tests {
         }
         std::thread::sleep(std::time::Duration::from_millis(300));
         assert!(!watch.take(), "a change in the trash marked the notes");
-        assert_eq!(watch.take_leo(), LeoChanged::Nothing);
+        assert_eq!(watch.leo().take(), LeoChanged::Nothing);
     }
 
     #[test]

@@ -304,19 +304,20 @@ impl Serialize for WholeChat<'_> {
     }
 }
 
-fn each_chat(chats: &Path, mut visit: impl FnMut(&str) -> Result<()>) -> Result<()> {
+fn paged(
+    chats: &Path,
+    sql: &str,
+    owner: &[&dyn rusqlite::ToSql],
+    mut visit: impl FnMut(&str) -> Result<()>,
+) -> Result<()> {
     let mut after: Option<(String, String)> = None;
     loop {
         let (stamp, id) = after.clone().unwrap_or_default();
         let page: Vec<(String, String)> = crate::chats::db_of(chats).with(|connection| {
-            let mut query = connection.prepare(
-                "SELECT id, updated_at FROM chats
-                 WHERE ?1 = '' OR updated_at < ?1 OR (updated_at = ?1 AND id > ?2)
-                 ORDER BY updated_at DESC, id LIMIT ?3",
-            )?;
-            let rows = query.query_map(rusqlite::params![stamp, id, IDS_AT_A_TIME], |row| {
-                Ok((row.get(0)?, row.get(1)?))
-            })?;
+            let mut query = connection.prepare(sql)?;
+            let mut given: Vec<&dyn rusqlite::ToSql> = vec![&stamp, &id, &IDS_AT_A_TIME];
+            given.extend(owner);
+            let rows = query.query_map(given.as_slice(), |row| Ok((row.get(0)?, row.get(1)?)))?;
             rows.collect()
         })?;
         for (id, _) in &page {
@@ -331,36 +332,26 @@ fn each_chat(chats: &Path, mut visit: impl FnMut(&str) -> Result<()>) -> Result<
     }
 }
 
-fn each_document(
-    chats: &Path,
-    chat: &str,
-    mut visit: impl FnMut(&str) -> Result<()>,
-) -> Result<()> {
-    let mut after: Option<(String, String)> = None;
-    loop {
-        let (stamp, id) = after.clone().unwrap_or_default();
-        let page: Vec<(String, String)> = crate::chats::db_of(chats).with(|connection| {
-            let mut query = connection.prepare(
-                "SELECT id, added_at FROM chat_docs
-                 WHERE chat = ?1 AND (?2 = '' OR added_at > ?2 OR (added_at = ?2 AND id > ?3))
-                 ORDER BY added_at, id LIMIT ?4",
-            )?;
-            let rows = query
-                .query_map(rusqlite::params![chat, stamp, id, IDS_AT_A_TIME], |row| {
-                    Ok((row.get(0)?, row.get(1)?))
-                })?;
-            rows.collect()
-        })?;
-        for (id, _) in &page {
-            visit(id)?;
-        }
-        match page.last() {
-            Some((id, stamp)) if page.len() as i64 == IDS_AT_A_TIME => {
-                after = Some((stamp.clone(), id.clone()));
-            }
-            _ => return Ok(()),
-        }
-    }
+fn each_chat(chats: &Path, visit: impl FnMut(&str) -> Result<()>) -> Result<()> {
+    paged(
+        chats,
+        "SELECT id, updated_at FROM chats
+         WHERE ?1 = '' OR updated_at < ?1 OR (updated_at = ?1 AND id > ?2)
+         ORDER BY updated_at DESC, id LIMIT ?3",
+        &[],
+        visit,
+    )
+}
+
+fn each_document(chats: &Path, chat: &str, visit: impl FnMut(&str) -> Result<()>) -> Result<()> {
+    paged(
+        chats,
+        "SELECT id, added_at FROM chat_docs
+         WHERE chat = ?4 AND (?1 = '' OR added_at > ?1 OR (added_at = ?1 AND id > ?2))
+         ORDER BY added_at, id LIMIT ?3",
+        &[&chat],
+        visit,
+    )
 }
 
 fn add_chat<W: Write + Seek>(
@@ -552,6 +543,7 @@ pub fn write_zip<W: Write + Seek>(
     Ok(walk.packed)
 }
 
+#[cfg(test)]
 pub fn write_folder<W: Write + Seek>(out: W, folder: &Path, under: &str) -> Result<Packed> {
     write_folder_from(out, folder.parent().unwrap_or(folder), folder, under)
 }

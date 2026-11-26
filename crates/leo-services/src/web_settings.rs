@@ -111,7 +111,7 @@ fn task_view(
             "installed": installed,
             "missing": !located,
             "text": if installed {
-                format!("Uses {}. Sign in with the Sign in button if leo asks.", agent.plan())
+                format!("Uses {}.", agent.plan())
             } else if located {
                 format!("{} needs an update before leo can use it.", chosen.map(|c| c.name).unwrap_or(provider.as_str()))
             } else {
@@ -191,7 +191,7 @@ pub fn describe(
     })
 }
 
-fn agents(cfg: &Config, probe: bool) -> Vec<(choice::Choice, Agent, bool, Option<bool>)> {
+fn agents(cfg: &Config, probe: bool) -> Vec<(choice::Choice, AgentCli, bool, Option<bool>)> {
     choice::WRITING
         .iter()
         .filter_map(|choice| {
@@ -202,7 +202,7 @@ fn agents(cfg: &Config, probe: bool) -> Vec<(choice::Choice, Agent, bool, Option
             let signed_in = (probe && installed)
                 .then(|| agent_cli::signed_in(agent, cli.bin()))
                 .flatten();
-            Some((*choice, agent, installed, signed_in))
+            Some((*choice, cli, installed, signed_in))
         })
         .collect()
 }
@@ -210,12 +210,14 @@ fn agents(cfg: &Config, probe: bool) -> Vec<(choice::Choice, Agent, bool, Option
 pub fn coding_plans(cfg: &Config, usage: &crate::usage::Seen) -> Vec<Value> {
     agents(cfg, true)
         .into_iter()
-        .map(|(choice, _, installed, signed_in)| {
+        .map(|(choice, cli, installed, signed_in)| {
+            let refused = installed && agent_cli::refused(cli.bin());
             json!({
                 "provider": choice.provider,
                 "name": choice.name,
                 "installed": installed,
-                "signed_in": signed_in,
+                "signed_in": if refused { Some(false) } else { signed_in },
+                "refused": refused,
                 "limits": usage.get(choice.provider),
             })
         })
@@ -496,6 +498,76 @@ mod tests {
                 assert!(plan["signed_in"].is_null());
             }
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_login_asks_for_sign_in_although_the_probe_says_signed_in() {
+        use crate::ai::provider::ChatRequest;
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("codex");
+        let state = dir.path().join("state");
+        std::fs::write(
+            &bin,
+            format!(
+                r##"#!/bin/sh
+[ "$1" = features ] && {{ echo 'shell_tool stable true'; exit 0; }}
+[ "$1 $2" = "exec --help" ] && {{ echo '--ignore-user-config --ignore-rules'; exit 0; }}
+now=$(cat '{state}')
+if [ "$1" = login ]; then
+  [ "$now" = out ] && echo 'Not logged in' || echo 'Logged in using ChatGPT'
+  exit 0
+fi
+cat >/dev/null
+if [ "$now" = refused ]; then
+  printf '%s\n' '{{"type":"turn.failed","error":{{"message":"Your access token could not be refreshed. Please log out and sign in again."}}}}'
+  exit 1
+fi
+printf '%s\n' '{{"type":"item.completed","item":{{"type":"agent_message","text":"ok"}}}}'
+printf '%s\n' '{{"type":"turn.completed","usage":{{"input_tokens":3,"output_tokens":1}}}}'
+"##,
+                state = state.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut cfg = Config::default();
+        let pc = cfg.providers.get_mut("codex").unwrap();
+        pc.bin = Some(bin.to_string_lossy().into());
+        cfg.providers.get_mut("claude_code").unwrap().bin = Some("leo-missing-coding-app".into());
+        let cli = AgentCli::new("codex".into(), Agent::Codex, cfg.provider("codex").unwrap());
+        let run = || {
+            cli.complete(&ChatRequest {
+                system: None,
+                prompt: "hello".into(),
+                temperature: 0.0,
+                max_tokens: 16,
+            })
+            .map_err(|e| e.to_string())
+        };
+        let set = |now: &str| std::fs::write(&state, now).unwrap();
+        let plan = || {
+            let plan = coding_plans(&cfg, &Default::default()).remove(0);
+            (plan["signed_in"].clone(), plan["refused"].clone())
+        };
+        let probed = || candidates(&cfg, &Local::default(), true)[0]["signed_in"].clone();
+        set("refused");
+        assert_eq!(plan(), (json!(true), json!(false)));
+        let message = run().unwrap_err();
+        assert!(message.contains("press Sign in"), "{message}");
+        assert_eq!(plan(), (json!(false), json!(true)));
+        assert_eq!(probed(), json!(true));
+        set("in");
+        assert_eq!(plan(), (json!(false), json!(true)));
+        assert_eq!(run().unwrap(), "ok");
+        assert_eq!(plan(), (json!(true), json!(false)));
+        set("refused");
+        run().unwrap_err();
+        set("out");
+        assert_eq!(plan(), (json!(false), json!(false)));
+        set("in");
+        assert_eq!(plan(), (json!(true), json!(false)));
     }
 
     #[cfg(unix)]

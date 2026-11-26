@@ -466,8 +466,8 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   tasks (2026-11-21, the user's call). A selection over `MOST_ASKED` shows "Select
   less to ask Felix" in the Felix bar.
 - `markdown.js` escapes first and numbers checkboxes exactly like
-  `Note::toggle_checkbox`; `MARKER` is the one list-marker definition and
-  `listLevels` the one forward pass; leo-core's `Note::checkbox_line` stays
+  `notes::checkbox_line`; `MARKER` is the one list-marker definition and
+  `listLevels` the one forward pass; leo-core's `notes::checkbox_line` stays
   context-free and counts the same lines (a box always makes an item).
   `interactive: false` makes boxes read-only. ```svg is a sandboxed
   `<img src="data:…">`; outside images stay links.
@@ -896,7 +896,7 @@ Felix (2026-10-19).
   closing) redraws at once (`marginPage.watch`, a childList observer on `#doc`), so a passage's slot
   is back before its blot is drawn.
 - Deletes: a trashed note keeps its threads; deleting from the trash removes them
-  (`forget_notes`) and its reading place, task details, recording sources and original uploads
+  (`finish_held_rows`) and its reading place, task details, recording sources and original uploads
   (`dependents::clear`), and so do trash expiry and the hourly sweep of notes gone
   outside leo (the sweep also tracks kept audio and the originals and transcript
   folders, counts only notes `Store::confirmed_gone` names, starts its clock again

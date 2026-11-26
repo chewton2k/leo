@@ -236,7 +236,7 @@ age past `STALE_AFTER`, a window past its reset reads 0%); the Usage action in
 Settings asks Codex. Never `--bare` (it skips the
 OAuth login). Usable = program on PATH (`locate`, `.cmd` on Windows), else
 the copy the Claude or ChatGPT app keeps; failures are retryable and name the sign-in step
-when the program's own words say it is signed out (or it said nothing); `health::writing` is SignInNeeded only from
+when the program's own words say it is signed out; `health::writing` is SignInNeeded only from
 the last sign-in probe's result (`agent_cli::last_signed_in`, ten minutes), never a new probe; settings shows a sign-in fact row,
 no key row.
 
@@ -253,7 +253,8 @@ key; `apply` validates every change against `choice`, writes through
 `toml_edit` (creating the commented default file when missing).
 
 `coding_plans` detects both configured coding CLIs without changing the selected
-writer. It returns only availability, tri-state sign-in and saved usage windows;
+writer. It returns only availability, tri-state sign-in, whether a run was refused for sign-in
+since the program last answered or its probe last said signed out (which makes sign-in false) and saved usage windows;
 auth probes use the same cleaned plan environment as writing and never expose
 their raw output or make a model call. An installed CLI alone is not sign-in.
 Availability and sign-in use the same normalized `AgentCli::bin`, including

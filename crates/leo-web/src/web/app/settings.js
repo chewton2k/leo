@@ -251,6 +251,7 @@ function providerCard(c) {
 
 const SIGN_IN_POLL_MS = 3000, SIGN_IN_WAIT_MS = 120000;
 const SIGN_IN_LATE = 'Still waiting. Finish signing in, then press Check again.';
+const SIGN_IN_REFUSED = 'Sign in, then press Test connection.';
 const INSTALL_URL = { claude_code: 'https://claude.com/claude-code', codex: 'https://github.com/openai/codex' };
 const IN_APP = { claude_code: ' Opening Code in the Claude app once also works.', codex: ' Installing the ChatGPT app also works.' };
 function inApp(id) { return ON_MAC && IN_APP[id] || ''; }
@@ -259,8 +260,9 @@ function signInLate(id) { return signInWait?.provider === id && signInWait.late;
 function signInControl(c, action) {
   if (!INSTALL_URL[c.id]) return '';
   if (!c.installed) return `<a class="btn plain sm" href="${INSTALL_URL[c.id]}" target="_blank" rel="noopener noreferrer">Install ${providerCard(c)[1]}</a>`;
-  if (signInWait?.provider === c.id && !signInWait.late) return '<button class="btn plain sm" disabled>Waiting for sign-in…</button>';
-  return `<button class="btn plain sm" data-action="${action}" data-provider="${c.id}"${signInLate(c.id) ? ' data-check="1">Check again' : c.signed_in === true ? '>Sign in again' : '>Sign in'}</button>`;
+  const wait = !c.refused && signInWait?.provider === c.id ? signInWait : null;
+  if (wait && !wait.late) return '<button class="btn plain sm" disabled>Waiting for sign-in…</button>';
+  return `<button class="btn plain sm" data-action="${action}" data-provider="${c.id}"${wait ? ' data-check="1">Check again' : '>Sign in'}</button>`;
 }
 async function signIn(el, here, draw) {
   const provider = el.dataset.provider, check = el.dataset.check === '1';
@@ -291,10 +293,11 @@ async function signIn(el, here, draw) {
 }
 function writingSignIn(el) {
   const mine = seq, provider = el.dataset.provider;
+  if (state.settings.plans?.find((p) => p.provider === provider)?.refused) return appChange({ action: 'sign_in', provider });
   return signIn(el, () => mine === seq && state.view === 'settings' && state.section === 'writing' && !!state.settings, (view) => {
     const found = view?.candidates?.find((c) => c.id === provider);
     const plan = state.settings.plans?.find((p) => p.provider === provider);
-    if (found && plan) Object.assign(plan, { installed: found.installed, signed_in: found.signed_in });
+    if (found && plan && !plan.refused) Object.assign(plan, { installed: found.installed, signed_in: found.signed_in });
     if (view?.writing) state.settings.writing = view.writing;
     drawSettings(state.settings);
   });
@@ -319,7 +322,7 @@ function taskCard(t) {
     key = `<div class="set-row column" data-find="writing-key"><div class="set-line"><span class="set-label">${esc(t.key.name)} key</span><span class="set-value">${has ? '' : '<span class="set-status missing">Not added</span>'}${has ? `<button class="btn plain sm" data-action="remove-key" data-account="${esc(t.key.account)}" data-name="${esc(t.key.name)}">Remove</button>` : ''}</span></div>${form}${t.key.ignored ? `<p class="hint">leo does not read $${esc(t.key.ignored)}; add the key here instead.</p>` : ''}</div>`;
   }
   const signin = t.signin ? `<p class="set-note${t.signin.installed ? '' : ' warn'}">${esc(t.signin.text).replace(/`([^`]+)`/g, '<code>$1</code>')}${t.signin.missing ? inApp(t.provider) : ''}</p>` : '';
-  const signInRow = plan && (plan.installed || plan.signed_in !== true) && INSTALL_URL[plan.provider] ? `<div class="set-row"><span class="grow hint">${signInLate(plan.provider) ? SIGN_IN_LATE : ''}</span>${signInControl({ id: plan.provider, installed: plan.installed, signed_in: plan.signed_in }, 'writing-sign-in')}</div>` : '';
+  const signInRow = plan && plan.signed_in !== true && INSTALL_URL[plan.provider] ? `<div class="set-row"><span class="grow hint">${plan.refused ? SIGN_IN_REFUSED : signInLate(plan.provider) ? SIGN_IN_LATE : ''}</span>${signInControl({ id: plan.provider, installed: plan.installed, refused: plan.refused }, 'writing-sign-in')}</div>` : '';
   const usage = t.usage && !plan ? `<p class="set-note">Plan used: ${esc(t.usage)}</p>` : '';
   const ollama = t.task === 'writing' && t.provider === 'ollama';
   const note = t.note && !(ollama && state.ollama && !state.ollama.installed) ? `<p class="set-note warn">${esc(t.note)}</p>` : '';
@@ -451,7 +454,7 @@ function codingPlans(page) {
   if (!page.plans?.length) return '';
   return `<div class="coding-plans">${page.plans.map(plan => {
     const connected = plan.installed && plan.signed_in === true;
-    const status = !plan.installed ? 'Not available' : connected ? 'Signed in' : plan.signed_in === false ? 'Signed out' : 'Sign-in unknown';
+    const status = !plan.installed ? 'Not available' : connected ? 'Signed in' : plan.refused ? 'Sign in needed' : plan.signed_in === false ? 'Signed out' : 'Sign-in unknown';
     const updated = planUpdated(plan);
     return `<section class="coding-plan" data-provider="${esc(plan.provider)}" aria-label="${esc(plan.name)} account"><header><div class="plan-title"><h4>${esc(plan.name)}</h4>${updated ? `<span class="hint plan-updated">${esc(updated)}</span>` : ''}</div><span class="set-status${connected ? ' ok' : ' missing'}">${status}</span></header>${planLimits(plan)}${!connected ? `<p class="hint">${plan.installed ? `Choose ${esc(plan.name)} in Writing AI and press Sign in.` : 'Install or update this coding app, then refresh Usage.'}</p>` : ''}</section>`;
   }).join('')}</div>`;
@@ -1136,7 +1139,8 @@ function confirmRemoveKey(el) {
 }
 
 async function testAi(el) {
-  const out = $(`#test-${el.dataset.task}`);
+  const mine = seq, out = $(`#test-${el.dataset.task}`);
+  let recheck = state.settings.plans?.some((p) => p.installed && p.signed_in !== true);
   el.disabled = true;
   out.className = 'set-result';
   out.textContent = 'Asking…';
@@ -1147,9 +1151,16 @@ async function testAi(el) {
   } catch (e) {
     out.className = 'set-result bad';
     out.textContent = e.message;
+    recheck = true;
   } finally {
     el.disabled = false;
   }
+  const page = recheck && await api('/api/settings').catch(() => null);
+  if (!page || mine !== seq || state.view !== 'settings') return;
+  const { className, textContent } = out;
+  state.settings.plans = page.plans;
+  drawSettings(state.settings);
+  Object.assign($(`#${out.id}`), { className, textContent });
 }
 
 function speechCards(view) {

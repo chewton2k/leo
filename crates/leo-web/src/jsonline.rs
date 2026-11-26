@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
+use leo_core::paths::{file_stamp, FileStamp};
 use leo_core::watch::{Leo, LeoChanged};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -28,6 +29,36 @@ pub(crate) trait Line: Serialize + DeserializeOwned {
     fn deleted_at(&mut self, now: DateTime<Utc>);
 }
 
+macro_rules! json_line {
+    ($kind:ty, $dir:literal) => {
+        impl $crate::jsonline::Line for $kind {
+            const DIR: &'static str = $dir;
+            fn id(&self) -> &str {
+                &self.id
+            }
+            fn stamp(&self) -> chrono::DateTime<chrono::Utc> {
+                self.updated_at
+            }
+            fn deleted_at(&mut self, now: chrono::DateTime<chrono::Utc>) {
+                self.deleted = true;
+                self.updated_at = now;
+            }
+        }
+    };
+}
+pub(crate) use json_line;
+
+pub(crate) type PerFolder<T> = OnceLock<Mutex<HashMap<PathBuf, Arc<T>>>>;
+
+pub(crate) fn per_folder<T: Default>(all: &PerFolder<T>, chats: &Path) -> Arc<T> {
+    kept_at(all, root(chats))
+}
+
+fn kept_at<T: Default>(all: &PerFolder<T>, data: &Path) -> Arc<T> {
+    let mut all = lock(all.get_or_init(Default::default));
+    Arc::clone(all.entry(data.to_path_buf()).or_default())
+}
+
 pub fn valid_id(id: &str) -> bool {
     (8..=64).contains(&id.len()) && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
@@ -38,24 +69,6 @@ fn root(chats: &Path) -> &Path {
 
 pub(crate) fn checked_dir(chats: &Path, kind: &str) -> anyhow::Result<PathBuf> {
     leo_core::paths::contained_path(root(chats), &Path::new("notes/.leo").join(kind))
-}
-
-pub(crate) type Stamp = (u64, u128, i64);
-
-fn stamp_meta(meta: &std::fs::Metadata) -> Stamp {
-    let modified = meta
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-        .map_or(0, |since| since.as_nanos());
-    #[cfg(unix)]
-    let changed = {
-        use std::os::unix::fs::MetadataExt;
-        meta.ctime() * 1_000_000_000 + meta.ctime_nsec()
-    };
-    #[cfg(not(unix))]
-    let changed = 0;
-    (meta.len(), modified, changed)
 }
 
 #[derive(Default)]
@@ -145,17 +158,13 @@ impl Hub {
     }
 }
 
-fn hubs() -> &'static Mutex<HashMap<PathBuf, Arc<Hub>>> {
-    static HUBS: OnceLock<Mutex<HashMap<PathBuf, Arc<Hub>>>> = OnceLock::new();
-    HUBS.get_or_init(Default::default)
-}
-
 pub(crate) fn hub(chats: &Path) -> Arc<Hub> {
     hub_at(root(chats))
 }
 
 fn hub_at(data: &Path) -> Arc<Hub> {
-    Arc::clone(lock(hubs()).entry(data.to_path_buf()).or_default())
+    static HUBS: PerFolder<Hub> = OnceLock::new();
+    kept_at(&HUBS, data)
 }
 
 pub(crate) fn watched(notes: &Path, leo: Arc<Leo>) {
@@ -165,7 +174,7 @@ pub(crate) fn watched(notes: &Path, leo: Arc<Leo>) {
 }
 
 struct Held<T> {
-    items: HashMap<String, (Stamp, T)>,
+    items: HashMap<String, (FileStamp, T)>,
     full_at: Option<Instant>,
 }
 
@@ -190,7 +199,7 @@ impl<T: Line> Index<T> {
     pub(crate) fn view<R>(
         &self,
         chats: &Path,
-        look: impl FnOnce(&HashMap<String, (Stamp, T)>) -> R,
+        look: impl FnOnce(&HashMap<String, (FileStamp, T)>) -> R,
     ) -> R {
         let mut held = lock(&self.held);
         self.refresh(&mut held, chats);
@@ -250,7 +259,7 @@ impl<T: Line> Index<T> {
                 continue;
             };
             seen.insert(id.to_string());
-            changed |= self.keep(held, dir, id, &entry.path(), stamp_meta(&meta));
+            changed |= self.keep(held, dir, id, &entry.path(), file_stamp(&meta));
         }
         let before = held.items.len();
         held.items.retain(|id, _| seen.contains(id));
@@ -269,12 +278,19 @@ impl<T: Line> Index<T> {
         };
         let path = dir.join(&name);
         match std::fs::symlink_metadata(&path) {
-            Ok(meta) if meta.is_file() => self.keep(held, dir, id, &path, stamp_meta(&meta)),
+            Ok(meta) if meta.is_file() => self.keep(held, dir, id, &path, file_stamp(&meta)),
             _ => held.items.remove(id).is_some(),
         }
     }
 
-    fn keep(&self, held: &mut Held<T>, dir: &Path, id: &str, path: &Path, stamp: Stamp) -> bool {
+    fn keep(
+        &self,
+        held: &mut Held<T>,
+        dir: &Path,
+        id: &str,
+        path: &Path,
+        stamp: FileStamp,
+    ) -> bool {
         if held.items.get(id).is_some_and(|(held, _)| *held == stamp) {
             return false;
         }
@@ -353,7 +369,7 @@ fn unchanged(path: &Path, digest: &sha2::digest::Output<Sha256>) -> Option<bool>
             return Some(false);
         }
     }
-    Some(after.is_file() && stamp_meta(&before) == stamp_meta(&after))
+    Some(after.is_file() && file_stamp(&before) == file_stamp(&after))
 }
 
 pub(crate) fn write_file<T: Line>(chats: &Path, item: &T) -> anyhow::Result<()> {

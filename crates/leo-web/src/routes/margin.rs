@@ -1038,9 +1038,7 @@ pub(crate) async fn reply(
     if text.is_empty() {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    let request = body
-        .request
-        .filter(|r| !r.is_empty() && r.len() <= insert::MOST_REQUEST);
+    let request = insert::requested(body.request);
     if let Some(found) = request.as_deref().and_then(|r| insert::remembered(&id, r)) {
         return Json(found).into_response();
     }
@@ -1106,9 +1104,7 @@ pub(crate) async fn weave(
     if !margin::valid_note(&thread) || !margin::valid_version(&body.base) {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    let request = body
-        .request
-        .filter(|r| !r.is_empty() && r.len() <= insert::MOST_REQUEST);
+    let request = insert::requested(body.request);
     if let Some(found) = request.as_deref().and_then(|r| insert::remembered(&id, r)) {
         return Json(found).into_response();
     }

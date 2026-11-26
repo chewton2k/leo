@@ -65,6 +65,7 @@
 .set-note { margin: 8px 0 0; font-size: var(--fs-base); color: var(--muted); }
 .set-note.warn { color: var(--danger); }
 .set-test { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.set-test .btn { flex: none; }
 .set-result { font-size: var(--fs-sm); color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
 .set-result.ok { color: var(--good); }
 .set-result.bad { color: var(--danger); }
@@ -462,7 +463,7 @@ textarea.set-input { width: 100%; resize: vertical; line-height: 1.5; }
 .quiz-hint > :last-child { margin-bottom: 0; }
 
 @media (forced-colors: active) {
-  .card, .set-card, .panel, .kanban-card, .kanban-col, .kanban-tab, .tasks-window, .activity, .cal-item, .cal-side.peek, .proposal-old, .proposal-new, .starter, .toast, .choice-pick, .segmented, .settings-search, .settings-result, .rec-kind-body, .chat-history, .chat-attach-menu, .chat-access-menu, .select-menu, .picker-menu, .sheet, .scrim .quick-leo, .popup-menu, .popup-menu-gone, .select-menu, .margin-mode-menu, .picker-menu, .outline-preview, .note-outline nav, .float-act, .home-ask, .side-filter, .chat-compose, .margin-add, .margin-mode:not(.note-more), .toast button, .icon-act, .fa-tile, .hc-tile, .hc-fix, .hc-fix .btn.ink, .fa-lg, .fa-run-bar { border: 1px solid CanvasText; }
+  .card, .set-card, .panel, .kanban-card, .kanban-col, .kanban-tab, .tasks-window, .activity, .cal-item, .cal-side.peek, .proposal-old, .proposal-new, .starter, .toast, .choice-pick, .segmented, .settings-search, .settings-result, .chat-history, .chat-attach-menu, .chat-access-menu, .select-menu, .picker-menu, .sheet, .scrim .quick-leo, .popup-menu, .popup-menu-gone, .select-menu, .margin-mode-menu, .picker-menu, .outline-preview, .note-outline nav, .float-act, .home-ask, .side-filter, .chat-compose, .margin-add, .margin-mode:not(.note-more), .toast button, .icon-act, .fa-tile, .hc-tile, .hc-fix, .hc-fix .btn.ink, .fa-lg, .fa-run-bar { border: 1px solid CanvasText; }
   .rec-card { border: 0; }
   .fa-stack i, .fa-lg-bar, .fa-track i, .fa-run-bar i, .fa-rm i, .fa-lg i, .fa-one i, .kanban-col-head::before { forced-color-adjust: none; }
   .settings-section .segmented { border: 1px solid CanvasText; }
@@ -474,7 +475,7 @@ textarea.set-input { width: 100%; resize: vertical; line-height: 1.5; }
   .choice-ring { box-shadow: none; outline: 3px solid Highlight; outline-offset: 2px; }
   .side-folder.on:has(> .side-pill), .side-note.on:has(> .side-pill) { background: Highlight; color: HighlightText; }
   .side-note.open { outline: 1px dotted CanvasText; outline-offset: -1px; }
-  .kanban-card.open { border-color: Highlight; border-left-width: 4px; }
+  .kanban-card.open { border: 2px solid Highlight; }
   .settings-nav:has(.settings-nav-pill.placed) .settings-link.on { background: Highlight; color: HighlightText; }
   .segment-pill, .side-pill, .settings-nav-pill { display: none; }
   .side-row:hover:not(.on), .side-folder:hover:not(.on), .settings-link:hover:not(.on) { outline: 1px solid Highlight; }

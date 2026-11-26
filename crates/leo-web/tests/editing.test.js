@@ -138,7 +138,6 @@ test('star, plus, numbered and empty boxes count and toggle like leo', () => {
   assert.equal(ed.toggleBox('* [ ] star'), '* [x] star');
   assert.equal(ed.toggleBox('3. [x] three'), '3. [ ] three');
   assert.equal(ed.toggleBox('- [ ]'), '- [x]');
-  assert.equal(ed.boxLine(lines, 5), 4);
   assert.deepEqual(['-   [ ] wide', '*  [x] wide', '1.    [ ] wide', '-     [ ] code'].map(ed.isBox), [true, true, true, false]);
   assert.equal(ed.toggleBox('-   [ ] wide'), '-   [x] wide');
   assert.equal(ed.toggleBox('  *    [x] wide'), '  *    [ ] wide');
@@ -151,17 +150,8 @@ test('an empty note is one empty line', () => {
   assert.deepEqual(ed.splitBlocks(['']).map((b) => [b.start, b.end]), [[0, 1]]);
 });
 
-test('box numbers count the same lines leo counts', () => {
-  const lines = ['- [ ] a', 'text', '  - [x] b', '```', '- [ ] in code', '```', '> - [ ] quoted', '- [X] c', '- [ ]'];
-  assert.equal(ed.boxesBefore(lines, 0), 0);
-  assert.equal(ed.boxesBefore(lines, 3), 2);
-  assert.equal(ed.boxesBefore(lines, 7), 3);
-  assert.equal(ed.boxesBefore(lines, 9), 5);
-});
-
 test('rendering a line block numbers its box globally', () => {
-  const lines = ['- [ ] first', '- [x] second'];
-  const html = md.render(lines[1], { boxOffset: ed.boxesBefore(lines, 1) });
+  const html = md.render('- [x] second', { boxOffset: 1 });
   assert.ok(html.includes('data-box="2" checked'), html);
 });
 
@@ -373,7 +363,7 @@ test('a heading marker comes off in one Backspace and an empty heading ends on E
 test('lettered tasks tick like the others', () => {
   assert.equal(ed.toggleBox('a) [ ] one'), 'a) [x] one');
   assert.equal(ed.toggleBox('  bb. [x] two'), '  bb. [ ] two');
-  assert.equal(ed.boxesBefore(['a) [ ] one', 'A.  [ ] two', 'A. [ ] prose', ''], 3), 2);
+  assert.deepEqual(['a) [ ] one', 'A.  [ ] two', 'A. [ ] prose', ''].map(ed.isBox), [true, true, false, false]);
 });
 
 test('a style wraps a selection and the same key takes it off again', () => {

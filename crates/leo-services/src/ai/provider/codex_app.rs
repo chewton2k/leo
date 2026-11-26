@@ -19,6 +19,7 @@ pub struct Tokens {
 
 pub struct CodexThread {
     name: String,
+    bin: String,
     child: Process,
     stdin: Option<std::process::ChildStdin>,
     messages: Receiver<std::io::Result<Value>>,
@@ -120,6 +121,7 @@ impl CodexThread {
         });
         let mut thread = CodexThread {
             name: name.clone(),
+            bin: agent.bin().to_string(),
             child,
             stdin,
             messages,
@@ -166,6 +168,10 @@ impl CodexThread {
             thread.effort = started["reasoningEffort"].as_str().map(str::to_string);
         }
         Ok(thread)
+    }
+
+    fn said(&self, text: &str) -> String {
+        super::agent_cli::with_sign_in(Agent::Codex, &self.bin, text)
     }
 
     fn send(&mut self, message: Value) -> ProviderResult<()> {
@@ -226,9 +232,8 @@ impl CodexThread {
                 }
                 Err(RecvTimeoutError::Disconnected) => {
                     return Err(ProviderError::Retryable(format!(
-                        "{}: codex ended. If it is not signed in, {}.",
-                        self.name,
-                        Agent::Codex.sign_in()
+                        "{}: codex ended",
+                        self.name
                     )))
                 }
             }
@@ -258,7 +263,7 @@ impl CodexThread {
                     return Err(ProviderError::Retryable(format!(
                         "{}: codex refused {method}: {}",
                         self.name,
-                        error["message"].as_str().unwrap_or("unknown error")
+                        self.said(error["message"].as_str().unwrap_or("unknown error"))
                     )));
                 }
                 return Ok(message["result"].clone());
@@ -340,7 +345,7 @@ impl CodexThread {
                     return Err(ProviderError::Retryable(format!(
                         "{}: codex refused the message: {}",
                         self.name,
-                        error["message"].as_str().unwrap_or("unknown error")
+                        self.said(error["message"].as_str().unwrap_or("unknown error"))
                     )));
                 }
                 continue;
@@ -388,17 +393,20 @@ impl CodexThread {
                     return Err(ProviderError::Retryable(format!(
                         "{}: codex failed: {}",
                         self.name,
-                        params["error"]["message"]
-                            .as_str()
-                            .or_else(|| params["message"].as_str())
-                            .unwrap_or("unknown error")
+                        self.said(
+                            params["error"]["message"]
+                                .as_str()
+                                .or_else(|| params["message"].as_str())
+                                .unwrap_or("unknown error")
+                        )
                     )));
                 }
                 "turn/completed" if params["threadId"] == self.thread.as_str() => {
                     if let Some(error) = params["turn"]["error"]["message"].as_str() {
                         return Err(ProviderError::Retryable(format!(
-                            "{}: codex failed: {error}",
-                            self.name
+                            "{}: codex failed: {}",
+                            self.name,
+                            self.said(error)
                         )));
                     }
                     break;
@@ -412,6 +420,7 @@ impl CodexThread {
             output: self.total.output.saturating_sub(before.output),
         };
         let estimated = used == Tokens::default();
+        super::agent_cli::answered(&self.bin);
         Ok((
             answer.trim().to_string(),
             Spent {
@@ -611,6 +620,71 @@ done
             )
             .unwrap();
         assert_eq!(answer, "Heaps keep the minimum on top.");
+    }
+
+    #[test]
+    fn a_codex_thread_remembers_a_refused_login_until_it_answers() {
+        use crate::ai::provider::agent_cli::refused;
+        let dir = tempfile::TempDir::new().unwrap();
+        let bin = fake(dir.path());
+        let turn = r#"    *'"method":"turn/start"'*)"#;
+        let refusing = r#"    *'"method":"turn/start"'*refuse*)
+      printf '%s\n' '{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"Your access token could not be refreshed. Please log out and sign in again.","codexErrorInfo":"unauthorized"},"willRetry":false}}' ;;
+    *'"method":"turn/start"'*request*)
+      printf '%s\n' '{"jsonrpc":"2.0","id":4,"error":{"message":"not logged in"}}' ;;
+    *'"method":"turn/start"'*finish*)
+      printf '%s\n' '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"t1","turn":{"id":"u1","error":{"message":"Please try signing in again."}}}}' ;;
+    *'"method":"turn/start"'*silent*) ;;
+    *'"method":"turn/start"'*leave*) exit 1 ;;"#;
+        let body = std::fs::read_to_string(&bin).unwrap();
+        assert!(body.contains(turn));
+        std::fs::write(&bin, body.replacen(turn, &format!("{refusing}\n{turn}"), 1)).unwrap();
+        let cfg = ProviderConfig {
+            kind: Some(ProviderKind::Codex),
+            bin: Some(bin.clone()),
+            ..ProviderConfig::default()
+        };
+        let agent = AgentCli::new("codex".into(), Agent::Codex, &cfg);
+        fn say(thread: &mut CodexThread, text: &str) -> Result<String, String> {
+            thread
+                .say(
+                    text,
+                    CodexTurn {
+                        stopped: &|| false,
+                        tools_done: &|| false,
+                        most_calls: 12,
+                        sink: &mut |_| {},
+                        restart: &mut || {},
+                        call: &mut |_, _| String::new(),
+                    },
+                )
+                .map(|(answer, _)| answer)
+                .map_err(|e| e.to_string())
+        }
+        let mut thread = CodexThread::start(&agent, "x", &[]).unwrap();
+        for text in ["refuse", "request", "finish"] {
+            let message = say(&mut thread, text).unwrap_err();
+            assert!(message.contains("press Sign in"), "{text}: {message}");
+            assert!(refused(&bin), "{text}");
+            super::super::agent_cli::answered(&bin);
+        }
+        say(&mut thread, "refuse").unwrap_err();
+        assert!(say(&mut thread, "what is a heap?")
+            .unwrap()
+            .contains("Heaps"));
+        assert!(!refused(&bin));
+        assert_eq!(say(&mut thread, "leave").unwrap_err(), "codex: codex ended");
+        assert!(!refused(&bin));
+        for (quiet, total) in [(400, 30_000), (30_000, 400)] {
+            let agent = AgentCli::new("codex".into(), Agent::Codex, &cfg)
+                .with_limits(Duration::from_millis(quiet), Duration::from_millis(total));
+            let mut thread = CodexThread::start(&agent, "x", &[]).unwrap();
+            assert_eq!(
+                say(&mut thread, "silent").unwrap_err(),
+                "codex: codex stopped answering and was stopped"
+            );
+            assert!(!refused(&bin));
+        }
     }
 
     fn fallback_agent(dir: &std::path::Path, listing: &str) -> AgentCli {

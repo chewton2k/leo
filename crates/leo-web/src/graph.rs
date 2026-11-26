@@ -160,12 +160,8 @@ pub struct NoteLink {
     pub why: String,
 }
 
-fn fnv(bytes: impl IntoIterator<Item = u8>) -> String {
-    format!("{:016x}", crate::vectors::fnv64(bytes))
-}
-
 fn hash_of(source: &Source) -> String {
-    fnv(source.title.bytes().chain([0]).chain(source.body.bytes()))
+    crate::vectors::fnv(source.title.bytes().chain([0]).chain(source.body.bytes()))
 }
 
 fn key(label: &str) -> String {
@@ -436,7 +432,7 @@ fn group_count_at(notes: usize, group_notes: usize) -> usize {
 }
 
 fn link_key(source: &Source, read: &Read) -> String {
-    fnv(note_line(0, source, Some(read)).bytes())
+    crate::vectors::fnv(note_line(0, source, Some(read)).bytes())
 }
 
 pub struct Work<'a> {

@@ -5061,7 +5061,7 @@ test.describe('calendar', () => {
     await page.goto('/#/calendar');
     await page.evaluate((id) => {
       const open = document.createElement('button');
-      open.dataset.action = 'task-open';
+      open.dataset.action = 'task-open-here';
       open.dataset.id = id;
       document.body.append(open);
       open.click();
