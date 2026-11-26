@@ -1117,7 +1117,7 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   where speaker data exists; Start and the live controls stay red). Before Start: the title
   field first (`#rec-title`, note-title type, "Untitled recording"), then the event and folder
   selects as chips (`.rec-chip`, still `.select-control` selects), the Microphone/Screen/Call
-  picture cards, What you want, Label speakers, the red Start and Felix's before-start questions
+  picture cards, What you want, the red Start and Felix's before-start questions
   under it. While recording and after Stop the page keeps one shell (`drawLive`): a note-like
   header (title, chips for event time, folder and kind, the hearing line) with one recorder bar
   on the right (`.rec-bar`: pulsing dot, clock, the wave at 120×24, Pause, red Stop and save);
@@ -1597,17 +1597,17 @@ The note API preserves the preexisting version hash for ordinary notes after rem
 Config and data file paths use the same `leo_core::paths::own` names as uninstall.
 - Round 2 redesign (2026-11-25, the owner's approvals): home's Today rows add today's timed
   events with a Record link (`homeEvents`, `#/record?event=<id>&kind=microphone|call`, call when
-  the place or description holds a link; ended and all-day events are left out) and Recently
+  the place or description (`context`) holds a link; the event id is the feed's uid; ended and all-day events are left out) and Recently
   written previews are plain text (`md.plain`). Quick Leo opens, before any typing, on the three
-  notes edited last, then New note, Start recording, New task and Ask Felix (`quickStart`), then
+  notes edited last (`recentNotes`, home's own list), then New note, Start recording, New task and Ask Felix (`quickStart`), then
   Due today. Note headings fold (`doc.js` `applyFolds`: a `.fold-btn` inside the heading, the
   heading's `data-fold-said` drawn by `::after` so no text node reaches the caret or margin
-  maths; folds per note in `leo-folds`, at most 40 notes; the note file never changes; a line
-  being edited inside a fold unfolds it, and folding closes an open line first); margin notes
+  maths; folds per note in `leo-folds`, at most 40 notes; same-text headings fold apart; the note
+  file never changes; opening a line inside a fold unfolds it, and folding closes an open line first); margin notes
   inside a fold are hidden with it and counted on the heading (`doc.foldedHeading`,
   `doc.foldNotes`, from `marginDraw`). A note made from a recording ends with Felix's three
   follow-ups (`.note-follow`, `NOTE_FOLLOW_ASKS`, each `chat.askNew`). The Calendar shows "Nothing
   this week/day" with New task when no visible day holds anything (`calQuiet`), tray tasks read at
   normal weight with the note they came from (`.cal-from`), and Google Calendar is a row with
   Connect. The calendar peek and the card panel slide in (`panelArrive`) and out
-  (`panelLeave`, a `ghostOf` copy), none under `stillMotion()`.
+  (`panelLeave`, the panel itself, inert while it leaves), none under `stillMotion()`.

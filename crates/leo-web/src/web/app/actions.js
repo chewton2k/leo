@@ -163,9 +163,6 @@ const actions = {
     closeSheet(true);
     go(dir ? `#/new/${enc(dir)}` : '#/new');
   },
-  'note-follow': (el) => {
-    if (!chat.askNew(el.dataset.q)) toast('Felix is still answering. Try again in a moment.', { bad: true });
-  },
   'search-ask': (el) => {
     if (!chat.askNew(el.dataset.query)) toast('Felix is still answering. Try again in a moment.', { bad: true });
   },

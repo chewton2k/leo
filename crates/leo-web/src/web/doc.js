@@ -881,6 +881,7 @@
 
     function open(first, last, from, to, reveal = true) {
       if (editing) stop();
+      unfoldAt(first);
       const block = blocks[first];
       const end = blocks[last];
       if (!block || !end) return;
@@ -2046,8 +2047,10 @@
     const FOLDS_KEPT = 40;
     const FOLD_MS = 160;
     const foldChevron = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
-    const folded = new Set(foldKey ? readFolds()[foldKey] || [] : []);
+    const keptFolds = foldKey ? readFolds()[foldKey] : null;
+    const folded = new Set(Array.isArray(keptFolds) ? keptFolds : []);
     let foldNotes = new Map();
+    let foldShown = [];
 
     function readFolds() {
       try {
@@ -2068,17 +2071,23 @@
       try { localStorage.setItem('leo-folds', JSON.stringify(all)); } catch (e) {}
     }
 
-    function headingAt(i) {
-      const block = blocks[i];
-      const found = block && block.kind === 'line' && lines[block.start].match(/^\s*(#{1,6})\s+(.+?)\s*$/);
-      return found ? { level: found[1].length, key: `${found[1].length}:${found[2]}`, text: found[2] } : null;
+    function headings() {
+      const seen = new Map();
+      return blocks.map((block) => {
+        const found = block.kind === 'line' && lines[block.start].match(/^\s*(#{1,6})\s+(.+?)(?:\s+#+)?\s*$/);
+        if (!found) return null;
+        const base = `${found[1].length}:${found[2]}`;
+        const n = seen.get(base) || 0;
+        seen.set(base, n + 1);
+        return { level: found[1].length, key: n ? `${base}:${n}` : base, text: found[2] };
+      });
     }
 
-    function foldRanges() {
+    function foldRanges(heads) {
       const ranges = [];
       let open = null;
       blocks.forEach((block, i) => {
-        const head = headingAt(i);
+        const head = heads[i];
         if (head && open && head.level <= open.level) open = null;
         if (open) open.to = block.end;
         if (head && !open && folded.has(head.key)) {
@@ -2090,26 +2099,19 @@
     }
 
     function applyFolds(moving = null) {
-      const ranges = foldRanges();
+      const heads = headings();
+      const ranges = foldRanges(heads);
       const hidden = new Map();
       for (const range of ranges) {
-        for (let i = range.owner + 1; i < blocks.length && blocks[i].start < range.to; i++) {
-          if (rendered[i] && rendered[i].el.classList.contains('editing')) {
-            folded.delete(headingAt(range.owner).key);
-            saveFolds();
-            return applyFolds();
-          }
-          hidden.set(i, range.owner);
-        }
+        for (let i = range.owner + 1; i < blocks.length && blocks[i].start < range.to; i++) hidden.set(i, range.owner);
       }
+      foldShown = ranges;
+      const moves = [];
       rendered.forEach((r, i) => {
         const { el } = r;
         const hide = hidden.has(i);
-        if (el.classList.contains('blk-folded') !== hide) {
-          if (moving !== null && (hidden.get(i) === moving || (!hide && i > moving))) foldMove(el, hide);
-          el.classList.toggle('blk-folded', hide);
-        }
-        const head = headingAt(i);
+        if (el.classList.contains('blk-folded') !== hide) moves.push({ el, hide, move: moving !== null && (hidden.get(i) === moving || (!hide && i > moving)) });
+        const head = heads[i];
         const editingNow = el.classList.contains('editing');
         if (!head || editingNow) {
           if (r.fold) {
@@ -2148,14 +2150,15 @@
         if (said) h.dataset.foldSaid = said;
         else delete h.dataset.foldSaid;
       });
+      foldMoves(moves);
     }
 
-    function foldMove(el, hide) {
-      const still = !el.animate || (window.leoMotion && window.leoMotion.stillMotion && window.leoMotion.stillMotion());
-      if (still) return;
-      const ease = getComputedStyle(document.documentElement).getPropertyValue('--ease-move').trim() || 'ease';
-      if (hide) {
-        const height = el.offsetHeight;
+    function foldMoves(moves) {
+      const moved = moves.filter((m) => m.move && m.el.animate);
+      const still = !moved.length || (window.leoMotion && window.leoMotion.stillMotion && window.leoMotion.stillMotion());
+      const ease = still ? '' : getComputedStyle(document.documentElement).getPropertyValue('--ease-move').trim() || 'ease';
+      const leaving = still ? [] : moved.filter((m) => m.hide).map(({ el }) => ({ el, height: el.offsetHeight }));
+      for (const { el, height } of leaving) {
         const clone = el.cloneNode(true);
         clone.classList.remove('blk-folded', 'blk');
         clone.classList.add('blk-leaving');
@@ -2164,18 +2167,30 @@
         clone.setAttribute('aria-hidden', 'true');
         el.before(clone);
         clone.animate([{ height: `${height}px`, opacity: 1 }, { height: '0px', opacity: 0 }], { duration: FOLD_MS, easing: ease }).finished.finally(() => clone.remove());
-      } else {
-        requestAnimationFrame(() => {
-          const height = el.offsetHeight;
-          el.animate([{ height: '0px', opacity: 0, overflow: 'hidden' }, { height: `${height}px`, opacity: 1, overflow: 'hidden' }], { duration: FOLD_MS, easing: ease });
-        });
+      }
+      for (const { el, hide } of moves) el.classList.toggle('blk-folded', hide);
+      const arriving = still ? [] : moved.filter((m) => !m.hide).map(({ el }) => el);
+      if (!arriving.length) return;
+      requestAnimationFrame(() => {
+        const heights = arriving.map((el) => el.offsetHeight);
+        arriving.forEach((el, k) => el.animate([{ height: '0px', opacity: 0, overflow: 'hidden' }, { height: `${heights[k]}px`, opacity: 1, overflow: 'hidden' }], { duration: FOLD_MS, easing: ease }));
+      });
+    }
+
+    function unfoldAt(i) {
+      let range;
+      while ((range = foldShown.find((r) => i > r.owner && blocks[i] && blocks[i].start < r.to))) {
+        folded.delete(headings()[range.owner].key);
+        saveFolds();
+        applyFolds();
+        container.dispatchEvent(new CustomEvent('leo-folds'));
       }
     }
 
     function toggleFold(button) {
       const blk = button.closest('.blk');
       const i = rendered.findIndex((r) => r.el === blk);
-      const head = i >= 0 && headingAt(i);
+      const head = i >= 0 && headings()[i];
       if (!head) return;
       if (folded.has(head.key)) folded.delete(head.key);
       else {
@@ -2185,15 +2200,6 @@
       saveFolds();
       applyFolds(i);
       container.dispatchEvent(new CustomEvent('leo-folds'));
-    }
-
-    function lineOfOffset(offset) {
-      let at = 0;
-      for (let i = 0; i < lines.length; i++) {
-        at += lines[i].length + 1;
-        if (offset < at) return i;
-      }
-      return lines.length - 1;
     }
 
     const stopFoldPress = (e) => {
@@ -2248,15 +2254,17 @@
 
     return {
       foldedHeading(offset) {
-        const line = lineOfOffset(offset);
-        const range = foldRanges().find((r) => line >= r.from && line < r.to);
+        if (!foldShown.length) return null;
+        let line = lineOf(offset);
+        if (editing && line >= editing.end) line -= editing.end - editing.originalEnd;
+        const range = foldShown.find((r) => line >= r.from && line < r.to);
         return range ? blocks[range.owner].start : null;
       },
       foldNotes(counts) {
         const next = counts instanceof Map ? counts : new Map();
         if (next.size === foldNotes.size && [...next].every(([k, v]) => foldNotes.get(k) === v)) return;
         foldNotes = next;
-        applyFolds();
+        if (!editing) applyFolds();
       },
       destroy: () => {
         for (const type of ['pointerdown', 'mousedown', 'click', 'dblclick']) container.removeEventListener(type, stopFoldPress, true);

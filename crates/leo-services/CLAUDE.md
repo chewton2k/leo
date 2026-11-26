@@ -133,7 +133,8 @@ call names and echo levels): none for part 0, 1 s for every later part (every
 capture starts at part 0; an older manifest's unused `fresh` list is ignored and
 not written back).
 
-Speaker labels (2026-11-16, per recording: `Profile.speakers`, off by default;
+Speaker labels (2026-11-16, per recording: `Profile.speakers`, sent only for a Call since
+2026-11-25 (no switch);
 omitted from JSON when off, so old cache keys hold; on a call, 2026-11-22, the
 owner's call, only the Others track gets it, You is always You, and leo-host's
 `merged` names its voices Others 1, Others 2… by first appearance; a voice's

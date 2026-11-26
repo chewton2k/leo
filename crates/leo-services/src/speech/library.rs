@@ -348,7 +348,7 @@ impl Library {
 
     pub fn speaker_model(&self) -> Result<PathBuf> {
         self.verify(DIARIZER)
-            .context("the speaker model is not downloaded yet (Download it beside Label speakers on the Record page)")
+            .context("the speaker model is not downloaded yet (choose Call on the Record page to download it)")
     }
 
     pub fn view(&self) -> Result<Value> {

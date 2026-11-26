@@ -276,7 +276,7 @@ pub fn due_in(text: &str) -> Option<Due> {
     let last = text[at..]
         .rfind(" — due ")
         .map(|i| at + i + " — due ".len())?;
-    let part = text[last..].trim_end().trim_end_matches('.');
+    let part = phrase_of(&text[last..]);
     due_plain(part).map(|due| Due {
         start: last + due.start,
         end: last + due.end,
@@ -284,11 +284,15 @@ pub fn due_in(text: &str) -> Option<Due> {
     })
 }
 
+fn phrase_of(part: &str) -> &str {
+    part.trim_end().trim_end_matches('.')
+}
+
 fn own_due_tail(text: &str) -> Option<usize> {
     const MARK: &str = " — due ";
     text.match_indices(MARK).map(|(at, _)| at).find(|&at| {
         text[at..].split(MARK).skip(1).all(|part| {
-            let part = part.trim_end().trim_end_matches('.');
+            let part = phrase_of(part);
             due_plain(part).is_some_and(|due| due.start == 0 && due.end == part.len())
         })
     })
@@ -341,7 +345,7 @@ pub fn with_due(text: &str, date: Option<NaiveDate>, time: Option<NaiveTime>) ->
             }
         }
         (None, Some(date)) => {
-            let base = text.trim_end().trim_end_matches('.');
+            let base = phrase_of(text);
             Redated {
                 text: format!("{base} — due {}.", date_phrase(date, time)),
                 exact: !has_vague,

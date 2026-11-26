@@ -239,8 +239,11 @@ function panelLeave(el, done) {
   const run = el.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateX(16px)' }], { duration: OPEN_MS * EXIT_SHARE, easing: EASE_EXIT, fill: 'forwards' });
   const end = () => {
     el.inert = false;
-    done();
-    run.cancel();
+    try {
+      done();
+    } finally {
+      run.cancel();
+    }
   };
   run.finished.then(end, () => { el.inert = false; });
 }

@@ -1054,9 +1054,18 @@ function calClosePeek() {
   if (flush) flush();
   panelLeave($('#cal-side'), () => {
     if (cal.peek) return;
-    $('#cal-side')?.classList.remove('peek');
     drawCalendar();
+    if (cal.redraw) calShowTray();
   });
+}
+
+function calShowTray() {
+  const side = $('#cal-side');
+  if (!side) return;
+  const today = S.dayKey(new Date());
+  const days = calDays();
+  side.classList.remove('peek');
+  side.innerHTML = calTray(calPlan(days.includes(today) ? days : [...days, today].sort()), today);
 }
 
 function calPeekRefresh(id) {
@@ -1948,8 +1957,9 @@ function homeEvents(now) {
 
 function homeEventRow(e) {
   const at = new Date(e.start).toLocaleTimeString(calLocale(), { hour: 'numeric', minute: '2-digit' });
-  const kind = /https?:\/\//.test(`${e.location || ''} ${e.description || ''}`) ? 'call' : 'microphone';
-  return `<div class="tasks-row home-event" style="--tone: var(${toneOfEvent(e)})"><span class="tasks-when home-event-at">${esc(at)}</span><span class="tasks-title">${esc(e.title || 'Untitled event')}</span>${e.location && !/^https?:/.test(e.location) ? `<span class="home-recent-line">${esc(e.location)}</span>` : ''}<a class="btn plain sm home-event-rec" href="#/record?event=${enc(e.id)}&kind=${kind}" aria-label="${esc(`Record ${e.title || 'this event'}`)}">${ICON.mic}Record</a></div>`;
+  const kind = /https?:\/\//.test(`${e.location || ''} ${e.context || ''}`) ? 'call' : 'microphone';
+  const uid = e.feed && e.id.startsWith(`${e.feed}:`) ? e.id.slice(e.feed.length + 1) : e.id;
+  return `<div class="tasks-row home-event" style="--tone: var(${toneOfEvent(e)})"><span class="tasks-when home-event-at">${esc(at)}</span><span class="tasks-title">${esc(e.title || 'Untitled event')}</span>${e.location && !/^https?:/.test(e.location) ? `<span class="home-recent-line">${esc(e.location)}</span>` : ''}<a class="btn plain sm home-event-rec" href="#/record?event=${enc(uid)}&kind=${kind}" aria-label="${esc(`Record ${e.title || 'this event'}`)}">${ICON.mic}Record</a></div>`;
 }
 
 function homeTally(today) {
@@ -2014,6 +2024,12 @@ function homeWeekKeys(e) {
 
 const homeRecent = { notes: null, busy: 0, again: false };
 
+async function recentNotes() {
+  const pinned = (await api('/api/notes?show=pinned&limit=1', { total: true })).total;
+  const notes = await api(`/api/notes?sort=updated&brief=true&limit=${Math.min(pinned + 3, 1000)}`);
+  return (Array.isArray(notes) ? notes : []).filter((n) => typeof n.id === 'string').sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)).slice(0, 3);
+}
+
 async function loadHomeRecent() {
   if (!document.getElementById('home-recent')) return;
   if (homeRecent.busy && Date.now() - homeRecent.busy < HOME_RECENT_WAIT) {
@@ -2022,10 +2038,9 @@ async function loadHomeRecent() {
   }
   const mine = (homeRecent.busy = Date.now());
   try {
-    const pinned = (await api('/api/notes?show=pinned&limit=1', { total: true })).total;
-    const notes = await api(`/api/notes?sort=updated&brief=true&limit=${Math.min(pinned + 3, 1000)}`);
+    const notes = await recentNotes();
     if (homeRecent.busy !== mine) return;
-    homeRecent.notes = (Array.isArray(notes) ? notes : []).filter((n) => typeof n.id === 'string').sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)).slice(0, 3);
+    homeRecent.notes = notes;
   } catch (e) {
     if (!homeRecent.notes) homeRecent.notes = [];
   } finally {

@@ -3066,9 +3066,10 @@ test.describe('recording', () => {
     const seen = stubRecorder(page, { noteId: 'x', local: false });
     await page.goto('/#/record');
     await expect(page.locator('.rec-kinds .choice-title')).toHaveText(['Microphone', 'Screen', 'Call']);
-    await expect(page.locator('.rec-kinds .choice-pick', { hasText: 'Screen' })).toContainText('Records what this computer plays');
     await expect(page.locator('.rec-kinds .choice-icon > svg')).toHaveCount(3);
     await expect(page.locator('#rec-kind-line')).toHaveText('A lecture, meeting or your voice');
+    await page.locator('.rec-kinds .choice-pick', { hasText: 'Screen' }).click();
+    await expect(page.locator('#rec-kind-line')).toHaveText('Records what this computer plays');
     await expect(page.locator('.rec-start .rec-tip'), 'the tip sits with Start').toBeVisible();
     await expect(page.locator('.rec-head .rec-chips #rec-dir ~ .select-menu-button'), 'the folder uses the shared select menu inside its chip').toBeVisible();
     await page.locator('.rec-kinds .choice-pick', { hasText: 'Call' }).click();
@@ -6587,6 +6588,40 @@ test.describe('round 2 redesign', () => {
     expect((await (await page.request.get(`/api/notes/${note.id}`)).json()).body).toBe(LECTURE);
   });
 
+  test('a line opened inside a folded section unfolds it, so the caret is never hidden', async ({ page }) => {
+    const note = await makeNote(page, `Folding reach ${tagOf()}`);
+    await page.goto(`/#/n/${note.id}`);
+    const area = page.locator('#doc textarea.line-edit');
+    const opened = async (text) => {
+      await expect(area).toBeVisible();
+      await expect(area).toBeFocused();
+      await expect(heading(page, text).locator('.fold-btn')).toHaveAttribute('aria-expanded', 'true');
+    };
+    await fold(page, 'Knapsack');
+    await heading(page, 'Knapsack').click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    await opened('Knapsack');
+    await page.keyboard.press('Escape');
+    await fold(page, 'Key ideas');
+    await heading(page, 'Key ideas').click();
+    await page.keyboard.press('ArrowDown');
+    await opened('Key ideas');
+    await page.keyboard.press('Escape');
+    await fold(page, 'To review');
+    await page.locator('#doc .doc-tail').click();
+    await opened('To review');
+  });
+
+  test('two sections with the same heading fold one at a time', async ({ page }) => {
+    const note = await makeNote(page, `Folding twins ${tagOf()}`, '## Notes\n\nFirst part.\n\n## Notes\n\nSecond part.\n');
+    await page.goto(`/#/n/${note.id}`);
+    await heading(page, 'Notes').first().hover();
+    await heading(page, 'Notes').first().locator('.fold-btn').click();
+    await expect(page.locator('#doc .blk p', { hasText: 'First part.' })).toBeHidden();
+    await expect(page.locator('#doc .blk p', { hasText: 'Second part.' })).toBeVisible();
+  });
+
   test('margin notes in a folded section fold with it, are counted on its heading and come back', async ({ page }) => {
     await page.setViewportSize({ width: 1700, height: 1000 });
     const note = await makeNote(page, `Folding margin ${tagOf()}`);
@@ -6617,44 +6652,59 @@ test.describe('round 2 redesign', () => {
       return route.fulfill({ response, json: { ...(await response.json()), recorded: true } });
     });
     await page.goto(`/#/n/${recorded.id}`);
-    await expect(page.locator('.note-follow [data-action="note-follow"]')).toHaveText(['What was decided?', 'What are the open questions?', 'Action items as tasks']);
+    await expect(page.locator('.note-follow [data-action="search-ask"]')).toHaveText(['What was decided?', 'What are the open questions?', 'Action items as tasks']);
     const asked = page.waitForRequest((r) => r.url().endsWith('/api/chat') && r.method() === 'POST');
-    await page.locator('[data-action="note-follow"]', { hasText: 'Action items as tasks' }).click();
+    await page.locator('.note-follow [data-action="search-ask"]', { hasText: 'Action items as tasks' }).click();
     expect((await asked).postData()).toContain('Action items as tasks');
   });
 
   test("home lists today's timed classes with Record, skips ended and all-day ones, and previews are plain text", async ({ page }) => {
     const now = new Date();
-    test.skip(now.getHours() >= 22, 'needs two hours left in the day');
+    now.setHours(12, 0, 0, 0);
+    await page.clock.setFixedTime(now);
     const at = (mins) => new Date(now.getTime() + mins * 60000).toISOString();
-    const events = [
-      { id: 'cls-1', title: 'CS 161 — Lecture 13', start: at(30), end: at(90), all_day: false, location: 'Gates B01', calendar: 'School' },
-      { id: 'call-1', title: 'Lab meeting', start: at(60), end: at(120), all_day: false, location: 'https://zoom.us/j/1', calendar: 'School' },
-      { id: 'gone-1', title: 'Breakfast', start: at(-120), end: at(-60), all_day: false, location: '', calendar: 'School' },
-      { id: 'day-1', title: 'Holiday', start: at(0), end: at(60), all_day: true, location: '', calendar: 'School' },
+    const raw = [
+      { id: 'cls:1', title: 'CS 161 — Lecture 13', start: at(30), end: at(90), all_day: false, location: 'Gates B01', context: '' },
+      { id: 'call-1', title: 'Lab meeting', start: at(60), end: at(120), all_day: false, location: '', context: 'Join: https://zoom.us/j/1' },
+      { id: 'gone-1', title: 'Breakfast', start: at(-120), end: at(-60), all_day: false, location: '', context: '' },
+      { id: 'day-1', title: 'Holiday', start: at(0), end: at(60), all_day: true, location: '', context: '' },
     ];
+    const events = raw.map((e) => ({ ...e, id: `feed:a:${e.id}`, feed: 'feed:a', calendar: 'School' }));
     await page.route('**/api/schedule?**', async (route) => {
       const response = await route.fetch();
       return route.fulfill({ response, json: { ...(await response.json()), events } });
+    });
+    await page.route('**/api/calendar', async (route) => {
+      const response = await route.fetch();
+      return route.fulfill({ response, json: { ...(await response.json()), events: raw } });
     });
     await makeNote(page, `Preview ${tagOf()}`, 'A problem has **optimal substructure** when it splits.');
     await page.goto('/#/');
     await page.reload();
     const rows = page.locator('.home-event');
     await expect(rows.locator('.tasks-title')).toHaveText(['CS 161 — Lecture 13', 'Lab meeting']);
-    await expect(rows.nth(0).locator('a')).toHaveAttribute('href', '#/record?event=cls-1&kind=microphone');
-    await expect(rows.nth(1).locator('a'), 'an online meeting records as a call').toHaveAttribute('href', '#/record?event=call-1&kind=call');
+    await expect(rows.nth(0).locator('a')).toHaveAttribute('href', '#/record?event=cls%3A1&kind=microphone');
+    await expect(rows.nth(1).locator('a'), 'a meeting link in the description records as a call').toHaveAttribute('href', '#/record?event=call-1&kind=call');
     const preview = page.locator('.home-recent-line', { hasText: 'optimal substructure' });
     await expect(preview).toHaveText('A problem has optimal substructure when it splits.');
+    await rows.nth(1).locator('a').click();
+    await expect(page.locator('#rec-title'), 'Record opens on the event it was pressed for').toHaveValue('Lab meeting');
   });
 
   test('Quick Leo opens on recent notes, actions and Felix, and each row works from the keyboard', async ({ page }) => {
+    const pinned = [];
+    for (let i = 0; i < 3; i++) pinned.push(await makeNote(page, `Quick pinned ${i} ${tagOf()}`, 'x'));
+    for (const old of pinned) expect((await page.request.patch(`/api/notes/${old.id}`, { data: { pinned: true } })).ok()).toBe(true);
     const note = await makeNote(page, `Quick recent ${tagOf()}`, 'x');
-    await page.goto('/#/');
-    await page.keyboard.press('ControlOrMeta+k');
     const box = page.locator('.scrim:not(.scrim-gone) .quick-leo');
-    await expect(box.locator('.quick-due-head').first()).toHaveText('Recent');
-    await expect(box.locator('.quick-row').first()).toContainText(note.title);
+    try {
+      await page.goto('/#/');
+      await page.keyboard.press('ControlOrMeta+k');
+      await expect(box.locator('.quick-due-head').first()).toHaveText('Recent');
+      await expect(box.locator('.quick-row').first(), 'the last note written leads, ahead of older pinned ones').toContainText(note.title);
+    } finally {
+      for (const old of pinned) await page.request.patch(`/api/notes/${old.id}`, { data: { pinned: false } });
+    }
     await expect(box.locator('.quick-row', { hasText: 'New note' }).locator('kbd')).toBeVisible();
     const labels = await box.locator('.quick-row .quick-label').allTextContents();
     expect(labels.slice(-4)).toEqual(['New note', 'Start recording', 'New task', 'Ask Felix']);
@@ -6708,36 +6758,65 @@ test.describe('round 2 redesign', () => {
   for (const reduce of [false, true]) {
     test(`the calendar and card panels ${reduce ? 'open and close at once under Reduce motion' : 'slide in and out'}`, async ({ page }) => {
       if (reduce) await page.emulateMedia({ reducedMotion: 'reduce' });
+      const count = () => {
+        if (window.leoSlid) return;
+        const animate = Element.prototype.animate;
+        window.leoSlid = {};
+        Element.prototype.animate = function (...args) {
+          if (this.id) window.leoSlid[this.id] = (window.leoSlid[this.id] || 0) + 1;
+          return animate.apply(this, args);
+        };
+      };
+      await page.addInitScript(count);
+      const slid = (id) => page.evaluate((i) => window.leoSlid[i] || 0, id);
+      const leaveMidway = (id) => page.evaluate((i) => {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        for (const run of document.getElementById(i).getAnimations()) run.pause();
+      }, id);
       const tag = `${tagOf()} ${reduce}`;
       expect((await page.request.post('/api/tasks', { data: { title: `Panel task ${tag}` } })).ok()).toBe(true);
       await page.goto('/#/calendar');
+      await page.evaluate(count);
       await page.locator('.cal-tray-row .cal-open', { hasText: `Panel task ${tag}` }).click();
-      const moving = (sel) => page.evaluate((s) => document.querySelector(s)?.getAnimations().length || 0, sel);
-      expect(await moving('#cal-side')).toBe(reduce ? 0 : 1);
+      await expect(page.locator('#cal-side .cal-peek-title')).toBeVisible();
+      expect(await slid('cal-side'), 'the peek slides in').toBe(reduce ? 0 : 1);
       await page.keyboard.press('Escape');
-      expect(await moving('#cal-side'), 'the panel itself slides out').toBe(reduce ? 0 : 1);
-      expect(await page.locator('#cal-side.peek').count(), 'it closes once the slide ends').toBe(reduce ? 0 : 1);
       await expect(page.locator('#cal-side.peek')).toHaveCount(0);
       await expect(page.locator('#cal-side .cal-mini')).toBeVisible();
+      expect(await slid('cal-side'), 'and slides out before it closes').toBe(reduce ? 0 : 2);
       const board = await (await page.request.post('/api/boards', { data: { name: `Panels ${tag}` } })).json();
       const column = board.columns[0].id;
       expect((await page.request.post(`/api/boards/${board.id}/cards`, { data: { title: `Card ${tag}`, column } })).ok()).toBe(true);
       await page.goto(`/#/boards/${board.id}`);
       await page.locator('.kanban-card', { hasText: `Card ${tag}` }).click();
-      expect(await moving('#kanban-panel')).toBe(reduce ? 0 : 1);
+      await expect(page.locator('#kanban-panel')).toBeVisible();
+      expect(await slid('kanban-panel')).toBe(reduce ? 0 : 1);
       const open = page.locator('.kanban-card.open');
       expect(await open.evaluate((el) => getComputedStyle(el).boxShadow), 'the open card is outlined').toContain('inset');
       expect(await open.evaluate((el) => getComputedStyle(el).borderLeftWidth), 'no bar on its left').toBe('0px');
       await page.keyboard.press('Escape');
-      expect(await moving('#kanban-panel')).toBe(reduce ? 0 : 1);
-      expect(await page.evaluate(() => document.querySelector('#kanban-panel').hidden)).toBe(reduce);
       await expect(page.locator('#kanban-panel')).toBeHidden();
+      expect(await slid('kanban-panel')).toBe(reduce ? 0 : 2);
       await page.locator('.kanban-card', { hasText: `Card ${tag}` }).click();
-      await page.keyboard.press('Escape');
+      await expect(page.locator('#kanban-panel')).toBeVisible();
+      await leaveMidway('kanban-panel');
       await page.locator('.kanban-card', { hasText: `Card ${tag}` }).click();
-      await page.waitForTimeout(300);
       await expect(page.locator('#kanban-panel'), 'reopening during the slide keeps the panel').toBeVisible();
+      expect(await page.evaluate(() => document.getElementById('kanban-panel').inert), 'and it takes clicks again').toBe(false);
       await expect(page.locator('#kanban-card-title')).toHaveValue(`Card ${tag}`);
     });
   }
+
+  test('starting a new task while the calendar peek slides out puts the tray back', async ({ page }) => {
+    const title = `Peek then new ${tagOf()}`;
+    expect((await page.request.post('/api/tasks', { data: { title } })).ok()).toBe(true);
+    await page.goto('/#/calendar');
+    await page.locator('.cal-tray-row .cal-open', { hasText: title }).click();
+    await expect(page.locator('#cal-side .cal-peek-title')).toBeVisible();
+    const grid = await page.locator('#cal-scroll').boundingBox();
+    await page.mouse.click(grid.x + grid.width - 40, grid.y + grid.height / 2);
+    await expect(page.locator('.cal-compose')).toBeVisible();
+    await expect(page.locator('#cal-side .cal-peek-title'), 'the peek is gone while the new task is typed').toHaveCount(0);
+    await expect(page.locator('#cal-side .cal-mini')).toBeVisible();
+  });
 });

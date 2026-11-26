@@ -221,7 +221,7 @@ function quickLeo() {
   cascade(inQuick('#quick-results'));
   input.focus();
   loadQuickDue().catch(() => {});
-  api('/api/notes?sort=updated&brief=true&limit=3').then((notes) => { quick.recent = (Array.isArray(notes) ? notes : []).filter((n) => typeof n.id === 'string').slice(0, 3); drawQuick(); }).catch(() => {});
+  recentNotes().then((notes) => { quick.recent = notes; drawQuick(); }).catch(() => {});
   api('/api/folders').then((all) => { quick.folders = (all || []).map((f) => f.name); drawQuick(); }).catch(() => {});
 }
 

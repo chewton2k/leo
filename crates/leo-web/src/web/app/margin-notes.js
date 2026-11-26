@@ -905,7 +905,7 @@ function marginDraw() {
   const page = $('article.note', columns).getBoundingClientRect();
   const folds = new Map();
   const boxes = placed.map(({ t, at }) => ({ t, at, rects: s.doc.spanRects(at.from, at.to).map((r) => ({ ...r, left: r.left - origin.left, right: r.right - origin.left, top: r.top - origin.top, bottom: r.bottom - origin.top })) })).filter(({ t, at, rects }) => {
-    const head = s.doc.foldedHeading ? s.doc.foldedHeading(at.from) : null;
+    const head = s.doc.foldedHeading(at.from);
     if (head !== null) folds.set(head, (folds.get(head) || 0) + (t.status === 'resolved' ? 0 : 1));
     return rects.length && head === null;
   }).map((box) => {
@@ -913,7 +913,7 @@ function marginDraw() {
     if (el) marginFill(el, box.t, marginPage.arriving.has(box.t.id), box.at.how !== 'exact' || box.t.reworded);
     return { ...box, el };
   });
-  if (s.doc.foldNotes) s.doc.foldNotes(folds);
+  s.doc.foldNotes(folds);
   const cuts = marginCuts(boxes);
   const shown = new Set(boxes.map(({ t }) => t.id));
   for (const [id, el] of marginPage.els) if (!shown.has(id)) el.hidden = true;

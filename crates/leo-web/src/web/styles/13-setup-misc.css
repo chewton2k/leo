@@ -108,7 +108,6 @@
 .rec-kinds .choice-icon { display: grid; place-items: center; width: 16px; height: 16px; margin: 0; color: var(--muted); }
 .rec-kinds .choice-icon svg { width: 15px; height: 15px; }
 .rec-kinds .choice-title { padding: 0; font-weight: 500; }
-.rec-kinds .choice-about { display: none; }
 .rec-kind-line { margin: 6px 4px 12px; }
 .choice-pick:has(> input:disabled) { cursor: not-allowed; opacity: .55; }
 .choice-pick > input:disabled { cursor: not-allowed; }
@@ -186,6 +185,7 @@
 .rec-ask-own .icon-btn svg { width: 16px; height: 16px; }
 .rec-bar-dock { position: fixed; left: var(--side, 0px); right: var(--right, 0px); bottom: 20px; z-index: 30; display: flex; justify-content: center; pointer-events: none; }
 .rec-bar-dock .rec-bar { margin-top: 0; pointer-events: auto; box-shadow: var(--shadow-pop); }
+body:has(> .rec-float) { --bottom: calc(env(safe-area-inset-bottom, 0px) + 84px); }
 .rec-float-open { display: inline-flex; align-items: center; gap: 10px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 @media print { .rec-float { display: none; } }
 .rec-start .rec-ask { flex-basis: 100%; width: min(320px, 100%); margin-top: 4px; }

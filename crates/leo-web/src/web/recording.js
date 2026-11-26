@@ -442,7 +442,7 @@
       call: { title: 'Call', about: 'You and others, on two tracks' },
     };
     function kindChoices(current = 'microphone') {
-      const choices = Object.keys(KINDS).map((kind) => [kind, KINDS[kind].title, KINDS[kind].about, '', kind === 'screen' ? icons.screen : icons.mic]);
+      const choices = Object.keys(KINDS).map((kind) => [kind, KINDS[kind].title, '', '', kind === 'screen' ? icons.screen : icons.mic]);
       return choiceCards({ label: 'What to record', name: 'rec-kind', className: 'rec-kinds', current, choices }) + `<p class="hint rec-kind-line" id="rec-kind-line">${esc((KINDS[current] || KINDS.microphone).about)}</p>`;
     }
 
@@ -1025,7 +1025,9 @@
       }
       if (el.dataset.state !== s.view.state) {
         el.dataset.state = s.view.state;
+        const focused = root.document.activeElement?.closest?.('#rec-float') ? root.document.activeElement.id : '';
         el.innerHTML = recBar(s.view, '<button type="button" class="rec-float-open" data-action="record" title="Open the recording"><span class="rec-dot"></span><span class="rec-time" id="rec-time"></span></button>');
+        if (focused) el.querySelector(`#${focused}`)?.focus();
       }
       el.classList.toggle('paused', s.view.state === 'paused');
       el.querySelector('#rec-time').textContent = clock(s.view.secs);
