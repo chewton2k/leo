@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 function fixture({document = {}, ...extra} = {}) {
   const listeners = {};
-  const context = {folderLabel: value => value, felix:{NOTE_DRAG:'application/x-leo-note'},clearTimeout(){},document:{
+  const context = {side: {root: ''}, folderLabel: value => value, felix:{NOTE_DRAG:'application/x-leo-note'},clearTimeout(){},document:{
     addEventListener(type, fn) { listeners[type] = fn; }, querySelectorAll:() => [],
     body:{classList:{remove(){},add(){},toggle(){}}}, ...document
   }, ...extra};

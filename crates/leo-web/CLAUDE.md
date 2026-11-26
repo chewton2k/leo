@@ -538,6 +538,9 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   user's call) and note rows carry no icon, their labels keeping the folders' column. Rows
   are 32 px with an 8 px icon gap and a 16 px indent per level, and the current row keeps
   its weight: the pill alone marks it.
+  A folder's menu has Focus on this folder (2026-11-26, the user's call): `side.root`, saved as
+  `leo-focus`, starts the explorer at that folder, with a Show all notes row only while focused;
+  New note and the top-level drop stay inside it. Details in `docs/behaviour.md`.
 - Cmd/Ctrl+F on a note page opens find in note (2026-11-21, the user's call; nothing
   new on other pages): `noteFind` in `core.js` puts a `.note-find` bar in the note and
   searches `#doc` (Enter and Shift+Enter step, Esc closes and gives focus back, reopening

@@ -439,6 +439,13 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   (`/api/trash/restore {ids, dirs}`); rename `/api/dirs/rename`; drag and drop
   (`drag.js`) moves notes and folders (`Store::move_dir` refuses itself, its
   own subfolder, or a taken name), files dropped open the upload sheet.
+  Focus on this folder (2026-11-26, the user's call, in a folder's menu): `side.root`, saved per
+  device as `leo-focus`, makes the explorer start at that folder (its children at the root
+  indentation, so guide lines align as unfocused), with a "Show all notes" row above the tree only
+  while focused. New note, New folder and the top-level drop target (`data-drop-dir=""`, `dirOf`)
+  stay inside it (`creationDir` falls back to the folder for anything outside); an in-leo rename or
+  move rewrites it (`moveOpenFolders`), and a load that no longer finds the folder clears it with
+  one toast. Search, Felix, Calendar and Boards still see every note.
   Dropping a note on another opens Combine (`combine.rs`: the AI writes one
   note, leo puts back anything it dropped). In the explorer (2026-11-09, the user's call, after a 6-persona
   simulation) a note held on another note's row for `SPRING_MS` arms it (the folder spring's timer slot, keyed

@@ -3,14 +3,18 @@ const sideWide = () => Boolean(window.matchMedia && window.matchMedia('(min-widt
 const sideNarrow = () => Boolean(window.matchMedia && window.matchMedia('(min-width: 600px) and (max-width: 999px)').matches);
 const sideDrawerOpen = () => document.body.classList.contains('side-drawer');
 const sideActive = () => sideWide() && !side.mini || sideDrawerOpen() || Boolean(document.querySelector('#folders-sheet'));
-const creationDir = (explicit) => explicit ?? side.target ?? (state.view === 'note' ? state.dir || '' : '');
-const side = { sort: 'title', flip: false, tasks: false, filter: '', focusKey: '', folders: [], loaded: false, mini: false, open: new Set(), revealed: new Set(), shut: new Set(), here: null, target: null, twisted: null, notes: new Map(), pending: [], reading: 0, visible: [], automatic: new Set(), generation: 0, sig: [], lastSig: '', pill: '', closing: new Set(), growing: null, freshUntil: Infinity, freshTimer: 0, quietTimer: 0, making: null, frame: 0, rev: null, revAt: 0, unopened: new Map() };
+const creationDir = (explicit) => {
+  const dir = explicit ?? side.target ?? (state.view === 'note' ? state.dir || '' : '');
+  return !side.root || dir === side.root || dir.startsWith(`${side.root}/`) ? dir : side.root;
+};
+const side = { root: '', sort: 'title', flip: false, tasks: false, filter: '', focusKey: '', folders: [], loaded: false, mini: false, open: new Set(), revealed: new Set(), shut: new Set(), here: null, target: null, twisted: null, notes: new Map(), pending: [], reading: 0, visible: [], automatic: new Set(), generation: 0, sig: [], lastSig: '', pill: '', closing: new Set(), growing: null, freshUntil: Infinity, freshTimer: 0, quietTimer: 0, making: null, frame: 0, rev: null, revAt: 0, unopened: new Map() };
 // Folders the user opened with their own hands, kept across restarts. Folders
 // unfolded only to show the open note or folder (`side.revealed`) are not
 // kept, so the explorer reopens exactly as the user left it, closed by default.
 // A new key (2026-11-03): the old one also held every folder browsing had
 // unfolded, so starting from it would keep those open.
 const SIDE_OPEN_KEY = 'leo-side-folders';
+const SIDE_FOCUS_KEY = 'leo-focus';
 const SIDE_NOTES_PAGE = 100;
 const SIDE_NOTES_FOLDERS = 64;
 const SIDE_NOTES_AUTOMATIC = 32;
@@ -29,6 +33,7 @@ try {
 
 try {
   side.mini = localStorage.getItem(SIDE_KEY) === 'mini';
+  side.root = localStorage.getItem(SIDE_FOCUS_KEY) || '';
 } catch (e) {}
 
 const SIDE_ORDER_KEY = 'leo-side-order';
@@ -148,7 +153,7 @@ function drawSide() {
     <div class="side-explorer" id="side-explorer">
       <div class="side-group" data-drop-dir="" title="Drop a folder or note here to move it to the top level"><button class="side-row side-new" data-action="new" data-dir="${esc(actionDir)}" aria-label="New note" aria-keyshortcuts="${shortcutAria(shortcutKeys('new'))}" title="New note${actionDir ? ` in ${esc(folderLabel(actionDir))}` : ''} (${shortcutText(shortcutKeys('new'))})">${ICON.filePlus}<span class="side-label">New note</span><kbd aria-hidden="true">${shortcutText(shortcutKeys('new'))}</kbd></button><button class="side-add" data-action="new-folder" data-parent="${esc(actionDir)}" aria-label="New folder" title="New folder${actionDir ? ` in ${esc(folderLabel(actionDir))}` : ''}">${ICON.folderPlus}</button></div>
       <div class="side-filter-row"><label class="field side-filter">${ICON.search}<input id="side-filter" type="search" placeholder="Filter" aria-label="Filter loaded notes" autocomplete="off" spellcheck="false" value="${esc(side.filter || '')}"></label><button class="side-add side-sort${side.sort !== 'title' || side.flip || side.tasks ? ' on' : ''}" data-action="side-sort" aria-label="Sort notes" title="${esc(`Sorted by ${SIDE_SORTS[side.sort].text.toLowerCase()}, ${SIDE_SORTS[side.sort].ways[side.flip ? 1 : 0].toLowerCase()}${side.tasks ? ', open tasks only' : ''}`)}" aria-haspopup="menu" aria-expanded="${Boolean(popup?.owner.matches('[data-action="side-sort"]'))}">${ICON.sort}</button></div>
-      <nav class="side-nav side-tree" aria-label="Folders" data-drop-dir="" tabindex="0">
+      ${sideLeave()}<nav class="side-nav side-tree" aria-label="Folders" data-drop-dir="" tabindex="0">
         ${folders || '<p class="side-none">Folders you make show up here.</p>'}
       </nav>
     </div>`);
@@ -201,6 +206,23 @@ function revealNoteRow(tree) {
   else if (at.bottom > view.bottom) tree.scrollTop += Math.ceil(at.bottom - view.bottom);
 }
 
+function sideLeave() {
+  return side.root ? sideRow('side-unfocus', ICON.close, 'Show all notes', { hint: `Showing only ${folderLabel(side.root)}` }) : '';
+}
+
+function keepFocus() {
+  try {
+    if (side.root) localStorage.setItem(SIDE_FOCUS_KEY, side.root);
+    else localStorage.removeItem(SIDE_FOCUS_KEY);
+  } catch (e) {}
+}
+
+function sideFocus(path) {
+  side.root = path;
+  keepFocus();
+  drawSide();
+}
+
 function keepOpenFolders() {
   try {
     localStorage.setItem(SIDE_OPEN_KEY, JSON.stringify([...side.open]));
@@ -208,7 +230,7 @@ function keepOpenFolders() {
 }
 
 function folderTree(here) {
-  side.visible = [''];
+  side.visible = [side.root];
   side.sig = [];
   side.freshUntil = Infinity;
   const children = (parent) => side.folders.filter((d) => {
@@ -239,7 +261,7 @@ function folderTree(here) {
     }
     rows.push(sideNoteRows(parent, depth));
   };
-  walk('', 0);
+  walk(side.root, 0);
   return rows.join('');
 }
 
@@ -324,6 +346,10 @@ async function loadSideFolders() {
     if (unopened) side.unopened = new Map(Object.entries(unopened));
     side.unopened.delete(state.session?.note?.id);
     if (side.target && !folders.some((folder) => folder.name === side.target)) side.target = null;
+    if (side.root && !folders.some((folder) => folder.name === side.root)) {
+      sideFocus('');
+      toast('The focused folder is gone, so leo shows all your notes again.');
+    }
     side.loaded = true;
     for (const [path, entry] of side.notes) {
       if (path && !folders.some((folder) => folder.name === path)) side.notes.delete(path);
@@ -394,6 +420,8 @@ function moveOpenFolders(from, to) {
     for (const path of paths) set.add(moved(path));
   }
   keepOpenFolders();
+  side.root = moved(side.root);
+  keepFocus();
 }
 
 function revealFolder(path) {
@@ -576,7 +604,7 @@ function drawFoldersSheet() {
   const dir = creationDir();
   refreshPanel(box, `<div class="folders-sheet-head"><h3>Folders</h3><button class="icon-btn" data-action="close" aria-label="Close folders">${ICON.close}</button></div>
     <div class="folders-sheet-tools"><button class="btn sm plain" data-action="new" data-dir="${esc(dir)}">${ICON.filePlus}New note</button><button class="btn sm plain" data-action="new-folder" data-parent="${esc(dir)}">${ICON.folderPlus}New folder</button></div>
-    <nav class="side-nav side-tree" aria-label="Folders" data-drop-dir="" tabindex="0">${folderTree(sideHere()) || '<p class="side-none">Folders you make show up here.</p>'}</nav>`);
+    ${sideLeave()}<nav class="side-nav side-tree" aria-label="Folders" data-drop-dir="" tabindex="0">${folderTree(sideHere()) || '<p class="side-none">Folders you make show up here.</p>'}</nav>`);
   box.querySelector('.side-tree').scrollTop = scroll;
   sideRoving(box.querySelector('.side-tree'));
   revealNoteRow(box.querySelector('.side-tree'));
@@ -622,7 +650,7 @@ function explorerTarget(el) {
   const folder = el.closest('.side-folder');
   if (folder) return { kind: 'folder', dir: folder.dataset.dropDir };
   if (el.closest('.side-group')) return { kind: 'root', dir: creationDir() };
-  return { kind: 'root', dir: el.closest('.side-note-status, .side-kids')?.dataset.dropDir || '' };
+  return { kind: 'root', dir: el.closest('.side-note-status, .side-kids')?.dataset.dropDir || side.root };
 }
 
 function explorerMenu(el, event = null) {
@@ -631,7 +659,7 @@ function explorerMenu(el, event = null) {
   if (!owner) return;
   const rows = target.kind === 'note'
     ? [['open', 'Open', ICON.note], ['rename', 'Rename', ICON.pen], ['move', 'Move to…', ICON.move], ['combine', 'Combine into…', ICON.note], null, ['trash', 'Move to trash', ICON.trash, true]]
-    : [['new', target.dir ? 'New note here' : 'New note', ICON.filePlus, false, target.dir === creationDir() && !$('.scrim') ? `<kbd aria-hidden="true">${esc(shortcutText(shortcutKeys('new')))}</kbd>` : ''], ['folder', target.dir ? 'New folder here' : 'New folder', ICON.folderPlus], ...(target.kind === 'folder' && target.dir ? [null, ['rename', 'Rename', ICON.pen], ['move', 'Move to…', ICON.move], null, ['trash', 'Move to trash', ICON.trash, true]] : [])];
+    : [['new', target.dir ? 'New note here' : 'New note', ICON.filePlus, false, target.dir === creationDir() && !$('.scrim') ? `<kbd aria-hidden="true">${esc(shortcutText(shortcutKeys('new')))}</kbd>` : ''], ['folder', target.dir ? 'New folder here' : 'New folder', ICON.folderPlus], ...(target.kind === 'folder' && target.dir ? [['focus', 'Focus on this folder', ICON.search], null, ['rename', 'Rename', ICON.pen], ['move', 'Move to…', ICON.move], null, ['trash', 'Move to trash', ICON.trash, true]] : [])];
   popupMenu(owner, {
     label: target.kind === 'note' ? 'Note options' : 'Folder options',
     point: event && { x: event.clientX, y: event.clientY },
@@ -682,6 +710,7 @@ async function explorerAction(action, target) {
   }
   if (target.kind === 'folder') {
     if (!target.dir) return;
+    if (action === 'focus') return sideFocus(target.dir);
     if (action === 'rename') return renameFolder(target.dir);
     if (action === 'trash') return trashFolder(target.dir);
   }

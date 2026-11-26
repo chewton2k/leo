@@ -105,6 +105,7 @@ const actions = {
   'set-effort': (el) => changeSetting({ set: 'effort', value: el.dataset.effort === 'default' ? '' : el.dataset.effort }),
   'side-twist': (el) => twistFolder(el.dataset.dir, el),
   'side-sort': sideSortMenu,
+  'side-unfocus': () => sideFocus(''),
   'side-notes': (el) => loadSideNotes(el.dataset.dir, Number(el.dataset.offset || 0), true),
   'open-title': (el) => openTitle(el.dataset.title || ''),
   'toggle-search': () => toggleQuickLeo(),

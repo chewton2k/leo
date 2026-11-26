@@ -8,7 +8,7 @@ const dragging = { note: null, folder: null, filesTimer: 0, spring: null, armed:
 const carries = (e, type) => Boolean(e.dataTransfer && [...e.dataTransfer.types].includes(type));
 const parentOf = (path) => path.split('/').slice(0, -1).join('/');
 const dropTargetOf = (el) => (el && el.closest ? el.closest('[data-action="open-folder"][data-dir], [data-action="home"], [data-drop-dir]') : null);
-const dirOf = (target) => (Object.hasOwn(target.dataset, 'dropDir') ? target.dataset.dropDir : target.dataset.action === 'home' ? '' : target.dataset.dir);
+const dirOf = (target) => (Object.hasOwn(target.dataset, 'dropDir') ? target.dataset.dropDir || side.root : target.dataset.action === 'home' ? '' : target.dataset.dir);
 const noteCardOf = (el) => (el && el.closest ? el.closest('.card[data-id][data-action="open-note"]') : null);
 const armedRowOf = (el) => {
   const row = el && el.closest ? el.closest('.side-tree .side-note[data-id]') : null;
