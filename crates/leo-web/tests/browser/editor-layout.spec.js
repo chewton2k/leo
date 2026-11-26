@@ -456,6 +456,24 @@ test('a picture inserted into a checkbox or bullet stays in the item, and Enter,
   });
 });
 
+test('a fold chevron sits level with its heading text, first heading or not', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    await page.goto(url + '/?body=' + encodeURIComponent('## Key ideas\n\nText\n\n## Knapsack\n\nMore'));
+    await expect(page.locator('#doc .fold-btn')).toHaveCount(2);
+    const off = await page.evaluate(() => [...document.querySelectorAll('#doc .fold-btn')].map(b => {
+      const h = b.parentElement;
+      const range = document.createRange();
+      range.selectNodeContents([...h.childNodes].find(n => n.nodeType === 3));
+      const text = range.getBoundingClientRect();
+      const chevron = b.getBoundingClientRect();
+      return Math.abs(chevron.top + chevron.height / 2 - (text.top + text.height / 2));
+    }));
+    expect(off).toHaveLength(2);
+    for (const gap of off) expect(gap).toBeLessThan(2);
+  });
+});
+
 test('returning a drag to a list marker selects only the edited item text', async ({ browser }) => {
   await editorFixture(browser, async (context, url) => {
     const page = await context.newPage();
