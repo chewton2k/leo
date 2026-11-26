@@ -1133,7 +1133,16 @@
         return lineStart(editing.start) + editing.prefix.length + Math.min(range.toString().length, editing.area.value.length);
       }
       if (editing && blk.classList.contains('editing')) {
-        return lineStart(editing.start) + editing.prefix.length + (side === 'start' ? 0 : editing.area.value.length);
+        const around = document.createRange();
+        around.selectNode(editing.area);
+        const where = editing.run ? around.comparePoint(node, offset) : 0;
+        if (!where) return lineStart(editing.start) + editing.prefix.length + (side === 'start' ? 0 : editing.area.value.length);
+        const range = document.createRange();
+        if (where < 0) range.setStart(blk, 0);
+        else range.setStartAfter(editing.area);
+        range.setEnd(node, offset);
+        const shown = shownBefore(blk, range, side === 'start');
+        return lineStart(editing.start) + (where < 0 ? ed.rawOffset(editing.prefix, shown, ed.listed(lines, editing.start)) : lineValue().length - editing.suffix.length + ed.rawOffset(editing.suffix, shown, false));
       }
       const block = blocks[Number(blk.dataset.i)];
       const start = shifted(block.start);
@@ -1569,7 +1578,8 @@
         return;
       }
 
-      const pic = editing.run && collapsed && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && (['ArrowLeft', 'Backspace'].includes(e.key) && area.selectionStart === 0 ? editing.run.left : ['ArrowRight', 'Delete'].includes(e.key) && area.selectionStart === area.value.length ? editing.run.right : null);
+      const rtl = editing.run && getComputedStyle(area).direction === 'rtl';
+      const pic = editing.run && collapsed && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && ([rtl ? 'ArrowRight' : 'ArrowLeft', 'Backspace'].includes(e.key) && area.selectionStart === 0 ? editing.run.left : [rtl ? 'ArrowLeft' : 'ArrowRight', 'Delete'].includes(e.key) && area.selectionStart === area.value.length ? editing.run.right : null);
       if (pic) {
         e.preventDefault();
         const at = pictureAt(pic);
@@ -1932,12 +1942,15 @@
 
     function enterAfter(img, key) {
       const at = pictureAt(img);
-      const span = at && blocks[blockAtLine(at.start)]?.kind === 'line' && ed.pictureSpans(lines[at.start])[at.index];
+      const spans = at && blocks[blockAtLine(at.start)]?.kind === 'line' ? ed.pictureSpans(lines[at.start]) : [];
+      const span = spans[at?.index];
       if (!span) return;
       unframe();
-      const caret = lineStart(at.start) + span.at + span.length;
+      const end = span.at + span.length;
+      const next = spans[at.index + 1]?.at ?? lines[at.start].length;
+      const caret = lineStart(at.start) + (lines[at.start].slice(end, next).trim() ? end : next);
       editSpan(caret, caret, true);
-      if (editing) key ? typeIn(key) : enterLine();
+      if (editing && key !== '') key ? typeIn(key) : enterLine();
     }
 
     function pictureMarkdown(img) {
@@ -2058,9 +2071,12 @@
       if (!framed) return;
       if (!framed.img.isConnected || !framed.frame.isConnected) return unframe();
       const remove = (e.key === 'Backspace' || e.key === 'Delete') && noteFocused() && !selectedSpan();
+      const focus = document.activeElement;
+      const here = (!focus || focus === document.body || focus === container || Boolean(focus.closest?.('.pic-handle'))) && !selectedSpan();
       const sideways = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
-      const move = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(e.key) && !e.isComposing && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && noteFocused() && !selectedSpan() && !(sideways && e.target.closest?.('.pic-handle'));
-      const typed = e.key.length === 1 && !e.isComposing && !e.metaKey && !e.ctrlKey && !e.altKey && noteFocused() && !selectedSpan();
+      const move = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(e.key) && !e.isComposing && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && here && !(sideways && e.target.closest?.('.pic-handle'));
+      const typed = [...e.key].length === 1 && !e.isComposing && !e.metaKey && !e.ctrlKey && !e.altKey && here;
+      if (here && !e.metaKey && !e.ctrlKey && !e.altKey && (e.keyCode === 229 || e.key === 'Process')) return enterAfter(framed.img, '');
       if (typed) {
         e.preventDefault();
         e.stopPropagation();
@@ -2071,7 +2087,7 @@
         e.preventDefault();
         e.stopPropagation();
         if (e.key === 'Enter') enterAfter(framed.img);
-        else stepPast(framed.img, e.key === 'ArrowDown' || e.key === 'ArrowRight', !sideways);
+        else stepPast(framed.img, e.key === 'ArrowDown' || e.key === (getComputedStyle(container).direction === 'rtl' ? 'ArrowLeft' : 'ArrowRight'), !sideways);
         return;
       }
       if (e.key !== 'Escape' && !remove) return;
@@ -2369,8 +2385,7 @@
       if (editing && editing.selectionText) stop();
       if (editing) {
         const { area } = editing;
-        const at = area.selectionStart;
-        const before = area.value.slice(0, at);
+        const before = lineValue().slice(0, editing.prefix.length + area.selectionStart);
         const inline = editing.kind === 'line' && ed.listed(lines, editing.start);
         const lead = !inline && before && !before.endsWith('\n') ? '\n' : '';
         typeIn(`${lead}${text}${inline ? '' : '\n'}`);

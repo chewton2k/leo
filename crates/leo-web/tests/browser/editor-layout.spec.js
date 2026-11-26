@@ -435,7 +435,7 @@ test('a picture inserted into a checkbox or bullet stays in the item, and Enter,
     const picture = '![p](/api/image?inline=1)';
     const items = () => page.evaluate(() => doc.source().split('\n').filter(line => line.startsWith('- ')).length);
     for (const item of ['- [ ] ', '- ', '- foo']) {
-      for (const typed of ['', 'cat']) {
+      for (const typed of ['', 'cat', ' cat']) {
         await page.goto(url + '/?body=' + encodeURIComponent(item));
         await page.locator('#doc .blk').first().click();
         await page.keyboard.press('End');
