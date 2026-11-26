@@ -176,16 +176,20 @@ function idle(checks, platform, denied = false) {
   })([], '');
 }
 
-test('each missing piece is said above Start in a quiet line, and Start stays enabled', () => {
+test('each missing piece is a row with its own fix above Start, and Start stays enabled', () => {
   const html = idle({ speech: false, writing: false, headset: true }, 'macos');
-  assert.match(html, /<p class="set-note">No speech model yet\. The audio is kept and written up once you choose one\. <a href="#\/settings\/models">Choose a speech model<\/a><\/p>/);
-  assert.match(html, /<p class="set-note">No writing AI is ready, so you.ll get a transcript\. <a href="#\/settings\/writing">Set up writing AI<\/a><\/p>/);
+  assert.match(html, /<div class="rec-check"><span class="rec-check-dot" aria-hidden="true"><\/span><span class="rec-check-text"><b>Speech model<\/b><span>Needed to turn audio into text\. The audio is kept until you choose one\.<\/span><\/span><a class="btn plain sm" href="#\/settings\/models">Choose model<\/a><\/div>/);
+  assert.match(html, /<b>Writing AI<\/b><span>Without one you get a transcript, not notes\.<\/span><\/span><a class="btn plain sm" href="#\/settings\/writing">Set up<\/a>/);
+  assert.ok(html.indexOf('rec-checks') < html.indexOf('rec-start'));
+  assert.doesNotMatch(html, /rec-ready/);
   assert.match(html, /<p class="set-note" id="rec-headset" hidden>Your sound output is a headset, so leo can.t record only what this computer plays\. Switch to other speakers or headphones first\.<\/p>/);
   assert.ok(html.indexOf('set-note') < html.indexOf('rec-start'));
   assert.doesNotMatch(html, /warn/);
   assert.doesNotMatch(html, /rec-go"[^>]*disabled/);
   const ready = idle({ speech: true, writing: true, headset: false }, 'macos');
-  assert.doesNotMatch(ready, /set-note|rec-headset/);
+  assert.doesNotMatch(ready, /set-note|rec-headset|rec-checks/);
+  assert.match(ready, /<p class="rec-ready"><span class="pencil-tick" aria-hidden="true"><\/span>Ready · the speech model and writing AI are set up<\/p>/, 'all set is one quiet line with the drawn tick');
+  assert.match(ready, /<button class="rec-go" data-action="rec-start" >Start recording<\/button>/, 'Start is a plain red button with no icon');
 });
 
 test('a denied microphone is said above Start with a way to the system settings, and Start stays enabled', () => {
@@ -221,7 +225,7 @@ test('choosing Call fills an empty want and never overwrites typed text', () => 
     const wants = { value: typed };
     const headset = { hidden: true };
     const box = { querySelector: (at) => ({ 'input[name="rec-kind"]:checked': { value: kind }, '#rec-headset': headset, '#rec-wants': wants })[at] };
-    piece('pickKind', 'idleForm', 'pickKind', { MEETING_WANTS: L.MEETING_WANTS })(box, true);
+    piece('pickKind', 'idleForm', 'pickKind', { MEETING_WANTS: L.MEETING_WANTS, redrawSpeakers: () => {} })(box, true);
     return { wants: wants.value, headset: headset.hidden };
   };
   assert.deepEqual(pick('call', ''), { wants: L.MEETING_WANTS, headset: false });
@@ -236,7 +240,7 @@ test('a meeting prompt preselects Call and its event and fills the meeting wordi
     const radios = ['microphone', 'screen', 'call'].map((value) => ({ value, disabled: false, get checked() { return picked === value; }, set checked(on) { if (on) picked = value; } }));
     const fields = { '#rec-title': { value: '' }, '#rec-wants': { value: typed }, '#rec-headset': { hidden: true }, '.rec-idle': {} };
     const box = { querySelector: (at) => at === 'input[name="rec-kind"]:checked' ? radios.find((r) => r.checked) : fields[at] || radios.find((r) => at === `input[name="rec-kind"][value="${r.value}"]`) || null };
-    piece('chooseEvent', 'idleForm', 'preselect', { s, MEETING_WANTS: L.MEETING_WANTS, eventNow: () => -1 })(box, asked);
+    piece('chooseEvent', 'idleForm', 'preselect', { s, MEETING_WANTS: L.MEETING_WANTS, eventNow: () => -1, redrawSpeakers: () => {} })(box, asked);
     return { kind: radios.find((r) => r.checked).value, event: s.event, chosen: s.eventChosen, title: fields['#rec-title'].value, wants: fields['#rec-wants'].value };
   };
   assert.deepEqual(ask({ event: 'sync@2', kind: 'call' }), { kind: 'call', event: 1, chosen: true, title: 'Design sync', wants: L.MEETING_WANTS });
@@ -567,7 +571,7 @@ test('Felix\'s questions follow the stage: before Start, while recording, and on
     s: { view: { state: 'recording', source: 'microphone', points: [], warnings: [], secs: 3, transcript: '' }, earlier: [], wave: [], tab: 'points', wantsDraft: null, wantsState: '' },
     esc, icons, whenOf: L.whenOf, askChips: L.askChips, clock: L.clock, earlierFirst: L.earlierFirst, placed: () => [], stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => false, desktopNow: () => ({ platform: 'macos' }),
   })();
-  assert.match(live, /rec-notepad.*rec-wants-card.*<aside class="set-card rec-felix rec-ask" id="rec-ask" data-keep aria-label="Ask Felix"><header><h3>Felix<\/h3><\/header>.*What did I just miss\?/s, 'the questions sit in Felix\'s own column beside the tabs');
+  assert.match(live, /rec-notepad.*rec-wants-card.*<aside class="set-card rec-felix rec-ask" id="rec-ask" data-keep aria-label="Ask Felix"><header><h3>Felix<\/h3><\/header>.*What did I just miss\?.*data-rec-ask-form/s, 'the questions and a box for your own sit in Felix\'s column beside the tabs');
   assert.match(live, /id="rec-heard" role="tabpanel" data-keep/);
   assert.match(live, /id="rec-tab-points"/);
   assert.match(live, /id="rec-points-panel" role="tabpanel" aria-labelledby="rec-tab-points"/);
@@ -577,7 +581,7 @@ test('Felix\'s questions follow the stage: before Start, while recording, and on
   assert.match(live, /id="rec-stop" data-keep data-action="rec-stop"/);
   assert.match(live, /<textarea id="rec-wants-live"[^>]*data-keep/);
   assert.match(live, /data-rec-tab="points"[^>]*aria-selected="true"[^>]*>Your notes <span class="badge" id="rec-count">0<\/span><\/button>.*data-rec-tab="heard"[^>]*>Transcript<\/button>.*data-rec-tab="wants"[^>]*>What you want<\/button>/s, 'Your notes is the first tab and open by default');
-  assert.match(live, /<div class="rec-bar"[^>]*><span class="rec-dot"><\/span>.*id="rec-time">0:03<\/span>.*id="rec-wave".*data-action="rec-pause".*data-action="rec-stop"/s, 'one recorder bar: dot, clock, wave, Pause, Stop');
+  assert.match(live, /<div class="rec-bar-dock"><div class="rec-bar"[^>]*><span class="rec-dot"><\/span>.*id="rec-time">0:03<\/span>.*id="rec-wave".*data-action="rec-pause".*data-action="rec-stop"/s, 'one recorder bar at the bottom: dot, clock, wave, Pause, Stop');
 });
 
 test('a question asked while recording sends the newest transcript and the typed points within 8,000 characters', () => {

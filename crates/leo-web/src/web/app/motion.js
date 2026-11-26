@@ -227,4 +227,9 @@ function liftedRect(el) {
   return { left: r.left + (r.width - el.offsetWidth) / 2, top: r.top + (r.height - el.offsetHeight) / 2, tilt: parseFloat(getComputedStyle(el).getPropertyValue('--tilt')) || 0 };
 }
 
+function panelArrive(el) {
+  if (!el || stillMotion() || typeof el.animate !== 'function') return null;
+  return el.animate([{ opacity: 0, transform: 'translateX(16px)' }, { opacity: 1, transform: 'none' }], { duration: OPEN_MS, easing: EASE_OUT });
+}
+
 window.leoMotion = { unfold, fold, slide: slideHeight, cascade, pulse, rubber, iconSwap, overlapOut, stillMotion, dock: dockPanel };

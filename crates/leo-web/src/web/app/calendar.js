@@ -245,6 +245,10 @@ function calPlan(days) {
   return S.plan(withWindow((cal.data && cal.data.tasks) || []), (cal.data && cal.data.events) || [], today, { from: days[0], to: days[days.length - 1] });
 }
 
+function calQuiet(plan, days = calDays()) {
+  return !days.some((key) => { const day = plan.byDay.get(key); return day && (day.allDay.length || day.timed.length); });
+}
+
 function calLabel(item) {
   if (item.type === 'event') return item.event.title || 'Untitled';
   return item.task.title || 'Untitled';
@@ -452,19 +456,19 @@ function calMini(today) {
 
 function calTrayRow(task) {
   const when = task.date ? S.dayWord(task.date, new Date(), calLocale()) : '';
-  return `<div class="cal-tray-row" data-kind="task" data-id="${esc(task.id)}"${calMovable(task) ? ' data-drag="tray"' : ''} style="--tone: var(${task.date ? '--hue-red' : toneOfTask(task)})">${calCheck(task)}<button type="button" class="cal-open" data-action="cal-open" data-kind="task" data-id="${esc(task.id)}"><span class="cal-title">${esc(task.title)}</span>${when ? `<span class="cal-sub" aria-hidden="true" title="${esc(S.dayName(task.date, calLocale()))}">${esc(when)}</span><span class="said">, ${esc(S.dayName(task.date, calLocale()))}</span>` : ''}</button></div>`;
+  return `<div class="cal-tray-row" data-kind="task" data-id="${esc(task.id)}"${calMovable(task) ? ' data-drag="tray"' : ''} style="--tone: var(${task.date ? '--hue-red' : toneOfTask(task)})">${calCheck(task)}<button type="button" class="cal-open" data-action="cal-open" data-kind="task" data-id="${esc(task.id)}"><span class="cal-tray-text"><span class="cal-title">${esc(task.title)}</span>${task.note && task.note.title ? `<span class="cal-from">From ${esc(task.note.title)}</span>` : ''}</span>${when ? `<span class="cal-sub" aria-hidden="true" title="${esc(S.dayName(task.date, calLocale()))}">${esc(when)}</span><span class="said">, ${esc(S.dayName(task.date, calLocale()))}</span>` : ''}</button></div>`;
 }
 
 function calTray(plan, today) {
   const d = cal.data;
-  const connect = d && !d.connected ? '<p class="set-note cal-connect">Show your Google Calendar here · <a href="#/settings/calendar">Connect it in Settings</a></p>' : '';
+  const connect = d && !d.connected ? `<div class="cal-connect"><span class="cal-connect-text">Google Calendar<span>Your classes here</span></span><a class="btn plain sm" href="#/settings/calendar">Connect</a></div>` : '';
   const list = (title, tasks, late) => tasks.length ? `<section class="cal-tray-list"><h2${late ? ' class="late"' : ''}>${title} <span class="cal-count">${tasks.length}</span></h2>${tasks.slice(0, cal.trayRows || CAL_TRAY_ROWS).map(calTrayRow).join('')}</section>` : '';
   const undated = list('No date', plan.undated, false);
   const tasks = (d && d.tasks) || [];
   const rows = cal.trayRows || CAL_TRAY_ROWS;
   const more = Math.max(plan.overdue.length, plan.undated.length) > rows || (tasksWin.tasks || []).length < tasksWin.total ? '<button type="button" class="btn plain cal-tray-more" data-action="cal-tray-more">Show more</button>' : '';
   const toggle = tasks.some((t) => t.done || (t.done_on || []).length) ? `<button type="button" class="link-btn cal-done-toggle" data-action="cal-done">${cal.showDone ? 'Hide completed' : 'Show completed'}</button>` : '';
-  return `${calMini(today)}<div class="cal-tasks-head"><h2>Tasks</h2><button type="button" class="icon-btn" data-action="task-new" aria-label="New task" title="New task">${ICON.plus}</button></div>${list('Earlier', plan.overdue, true)}${undated}${!plan.overdue.length && !plan.undated.length ? `${DRAWN.tasks}<p class="hint cal-empty">Nothing from earlier. Tasks without a date land here, ready to drag onto the calendar.</p>` : ''}${plan.undated.length ? '<p class="hint cal-hint">Drag a task onto the calendar to give it a time</p>' : ''}${more}${toggle}${connect}`;
+  return `${calMini(today)}<div class="cal-tasks-head"><h2>Tasks</h2><button type="button" class="icon-btn" data-action="task-new" aria-label="New task" title="New task">${ICON.plus}</button></div>${list('Earlier', plan.overdue, true)}${undated}${!plan.overdue.length && !plan.undated.length ? `${DRAWN.tasks}<p class="hint cal-empty">Nothing from earlier. Tasks without a date land here, ready to drag onto the calendar.</p>` : ''}${plan.undated.length && !calQuiet(plan) ? '<p class="hint cal-hint">Drag a task onto the calendar to give it a time</p>' : ''}${more}${toggle}${connect}`;
 }
 
 async function calTrayMore() {
@@ -488,7 +492,7 @@ function drawCalendar() {
   const views = main.querySelector('.cal-views');
   const failed = cal.compose?.failed ? cal.compose.box : null;
   const typing = failed?.contains(document.activeElement);
-  main.innerHTML = `${calHead(days)}${body}`;
+  main.innerHTML = `${calHead(days)}${body}${cal.view !== 'month' && calQuiet(plan, days) ? `<div class="cal-quiet"><div class="cal-quiet-card"><p class="cal-quiet-title">Nothing this ${cal.view === 'day' ? 'day' : 'week'}</p><p class="hint">${plan.undated.length ? 'Drag a task from the right onto a day to give it a time.' : 'Add a task, then drag it onto a day to give it a time.'}</p><button type="button" class="btn plain sm" data-action="task-new">${ICON.plus}New task</button></div></div>` : ''}`;
   if (views?.querySelector('.segment.on')?.dataset.view === cal.view) main.querySelector('.cal-views').replaceWith(views);
   main.dataset.view = cal.view;
   settleNow('cal', (id) => app.querySelector(`.cal-item[data-id="${CSS.escape(id)}"], .cal-tray-row[data-id="${CSS.escape(id)}"]`));
@@ -1033,11 +1037,13 @@ closeOnOutsidePress('#cal-side, .cal-item, .cal-tray-row', () => {
 function calOpenPeek(kind, id, on = null) {
   const side = $('#cal-side');
   if (!side) return;
+  const fresh = !side.classList.contains('peek');
   cal.peek = { kind, id, on };
   side.classList.add('peek');
   if (kind === 'event') calPeekEvent(side, id);
   else calPeekTask(side, id, on);
   drawCalendar();
+  if (fresh) panelArrive(side);
 }
 
 function calClosePeek() {
@@ -1902,13 +1908,14 @@ function drawHomeToday() {
   const known = tasksWin.tasks || (cal.data && cal.data.tasks);
   const tasks = known ? withWindow(known) : [];
   const { earlier, today } = S.homeDay(tasks, now, new Set(tasksWin.finished.keys()));
+  const meets = homeEvents(now);
   const early = earlier.slice(0, Math.max(2, HOME_ROWS - today.length));
   const day = today.slice(0, HOME_ROWS - early.length);
   const more = earlier.length + today.length - early.length - day.length;
   const focus = tasksFocus(box);
   const said = `${today.filter((t) => t.done).length} of ${today.length} done`;
-  box.hidden = !early.length && !day.length;
-  box.innerHTML = `${early.length ? `<div class="tasks-group">Earlier</div>${early.map((t) => tasksRow(t)).join('')}` : ''}${day.length ? `<div class="tasks-group">Today<span class="home-tally" title="${said}">${homeTally(today)}<span class="home-tally-said">${said}</span></span></div>${day.map((t) => tasksRow(t)).join('')}` : ''}${more ? `<a class="home-more" href="#/calendar"><b>${more} more</b> in Calendar</a>` : ''}`;
+  box.hidden = !early.length && !day.length && !meets.length;
+  box.innerHTML = `${early.length ? `<div class="tasks-group">Earlier</div>${early.map((t) => tasksRow(t)).join('')}` : ''}${day.length || meets.length ? `<div class="tasks-group">Today${day.length ? `<span class="home-tally" title="${said}">${homeTally(today)}<span class="home-tally-said">${said}</span></span>` : ''}</div>${meets.map(homeEventRow).join('')}${day.map((t) => tasksRow(t)).join('')}` : ''}${more ? `<a class="home-more" href="#/calendar"><b>${more} more</b> in Calendar</a>` : ''}`;
   inkSettle(tasksInked);
   if (!box.hidden) refocusTasks(box, focus);
   const root = side.notes.get('');
@@ -1925,6 +1932,20 @@ function drawHomeToday() {
   drawHomeRecent();
   clearTimeout(homeMidnight);
   homeMidnight = setTimeout(() => { drawTasksWindow(); loadHomeWeek(); }, S.addDays(now, 1) - now + 1000);
+}
+
+function homeEvents(now) {
+  const today = S.dayKey(now);
+  return (tasksWin.events || [])
+    .filter((e) => !e.all_day && S.dayKey(new Date(e.start)) === today && new Date(e.end) > now)
+    .sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
+    .slice(0, HOME_ROWS);
+}
+
+function homeEventRow(e) {
+  const at = new Date(e.start).toLocaleTimeString(calLocale(), { hour: 'numeric', minute: '2-digit' });
+  const kind = /https?:\/\//.test(`${e.location || ''} ${e.description || ''}`) ? 'call' : 'microphone';
+  return `<div class="tasks-row home-event" style="--tone: var(${toneOfEvent(e)})"><span class="tasks-when home-event-at">${esc(at)}</span><span class="tasks-title">${esc(e.title || 'Untitled event')}</span>${e.location && !/^https?:/.test(e.location) ? `<span class="home-recent-line">${esc(e.location)}</span>` : ''}<a class="btn plain sm home-event-rec" href="#/record?event=${enc(e.id)}&kind=${kind}" aria-label="${esc(`Record ${e.title || 'this event'}`)}">${ICON.mic}Record</a></div>`;
 }
 
 function homeTally(today) {
@@ -2017,7 +2038,7 @@ function drawHomeRecent() {
   const box = document.getElementById('home-recent');
   if (!box || !homeRecent.notes) return;
   const at = box.contains(document.activeElement) ? document.activeElement.getAttribute('href') : null;
-  const html = homeRecent.notes.length ? `<div class="tasks-group">Recently written</div>${homeRecent.notes.map((n) => `<a class="tasks-row home-recent-row" href="${noteHash(n.id)}">${ICON.note}<span class="tasks-title">${esc(n.title || 'Untitled')}</span><span class="home-recent-line">${esc(n.summary || '')}</span><span class="tasks-when">${esc(rel(n.updated_at))}</span></a>`).join('')}` : '';
+  const html = homeRecent.notes.length ? `<div class="tasks-group">Recently written</div>${homeRecent.notes.map((n) => `<a class="tasks-row home-recent-row" href="${noteHash(n.id)}">${ICON.note}<span class="tasks-title">${esc(n.title || 'Untitled')}</span><span class="home-recent-line">${esc(md.plain(n.summary || ''))}</span><span class="tasks-when">${esc(rel(n.updated_at))}</span></a>`).join('')}` : '';
   box.hidden = !homeRecent.notes.length;
   if (box.drawn === html) return;
   box.drawn = html;

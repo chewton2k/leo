@@ -91,6 +91,16 @@ for (const colorScheme of ['light', 'dark']) {
   });
 }
 
+test('a live call gives each person their own colour, in the order they first spoke, and keeps it', async ({ browser }) => {
+  const named = [spoken(0, 'You', 'Hi all'), spoken(1, 'Sam', 'Morning'), spoken(2, 'Priya', 'Hello'), spoken(3, 'Sam', 'Shall we start?'), spoken(4, 'Others', 'Can you hear me?')];
+  await fixture(browser, async (page) => {
+    const tones = () => page.locator('#rec-transcript > .turn').evaluateAll((rows) => rows.map((row) => [row.querySelector('.turn-name').textContent, row.querySelector('.tone-dot').style.getPropertyValue('--tone')]));
+    expect(await tones()).toEqual([['You', 'var(--text)'], ['Sam', 'var(--hue-0)'], ['Priya', 'var(--hue-1)'], ['Sam', 'var(--hue-0)'], ['Others', 'var(--hue-4)']]);
+    await hear(page, [...named, spoken(5, 'Priya', 'Yes')]);
+    expect((await tones()).at(-1)).toEqual(['Priya', 'var(--hue-1)']);
+  }, { turns: named });
+});
+
 test('a live call streams under a selection and only the changed words are replaced', async ({ browser }) => {
   await fixture(browser, async (page) => {
     await page.evaluate(() => {

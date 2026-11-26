@@ -726,8 +726,10 @@ async function kanbanCardPanel(id) {
     <div class="prose doc kanban-description" id="kanban-card-description" role="group" aria-label="Description"></div>
     <p class="kanban-limit" id="kanban-card-problem" role="alert" hidden></p><button type="button" class="btn plain sm" id="kanban-card-discard" hidden>Discard these changes</button>
   </div>`;
+  const fresh = box.hidden;
   box.hidden = false;
   document.body.classList.add('kanban-panel-on');
+  if (fresh) panelArrive(box);
   for (const el of app.querySelectorAll('.kanban-card.open')) { el.classList.remove('open'); el.removeAttribute('aria-current'); }
   const el = app.querySelector(`.kanban-card[data-card="${CSS.escape(id)}"]`);
   if (el) { el.classList.add('open'); el.setAttribute('aria-current', 'true'); }

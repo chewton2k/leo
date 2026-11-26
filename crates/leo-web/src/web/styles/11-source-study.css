@@ -116,7 +116,7 @@
 .app-update-banner { max-width: 1080px; margin: 8px auto; padding: 10px 16px; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; background: var(--accent-soft); border-radius: var(--radius); }
 .app-update-banner .grow { flex: 1; }
 .note-aside, .note-aside-facts { display: none; }
-.note-layout.aside-open :is(#doc, .related, .note-outline, .margin-layer, #note-facts, .margin-instructions, .writeup-pending, .note-find, .page-marks) { display: none; }
+.note-layout.aside-open :is(#doc, .related, .note-outline, .margin-layer, #note-facts, .margin-instructions, .writeup-pending, .note-find, .page-marks, .note-follow) { display: none; }
 .note-layout.aside-open .note-aside { display: block; margin-top: 12px; }
 .note-layout.aside-open .note-aside-facts { display: block; }
 @media print {

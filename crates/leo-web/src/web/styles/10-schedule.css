@@ -51,7 +51,7 @@
 .task-acts .btn svg { width: 16px; height: 16px; }
 body.on-calendar main { max-width: none; margin: 0; padding: 0 0 var(--bottom); container: cal / inline-size; }
 .cal-page { --cal-line: var(--line); display: grid; grid-template-columns: minmax(0, 1fr) 248px; height: calc(100dvh - var(--top) - 62px - var(--bottom)); min-height: 420px; }
-.cal-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.cal-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .cal-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 16px 12px 20px; }
 .cal-name { font-size: var(--fs-xl); font-weight: 500; letter-spacing: -.01em; white-space: nowrap; margin-right: 4px; }
 .cal-name span { color: var(--muted); font-weight: 400; }
@@ -179,9 +179,19 @@ body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; user-selec
 .cal-tray-row[data-drag] { cursor: grab; }
 .cal-tray-row[data-drag]:hover { background: var(--wash); }
 .cal-tray-row .cal-open { flex-direction: row; align-items: baseline; gap: 8px; }
-.cal-tray-row .cal-title { flex: 1; font-weight: 550; }
+.cal-tray-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.cal-tray-row .cal-title { flex: 1; font-weight: 400; white-space: normal; overflow-wrap: anywhere; }
+.cal-from { font-size: var(--fs-xs); color: var(--muted); overflow-wrap: anywhere; }
+.cal-connect { display: flex; align-items: center; gap: 10px; margin-top: 16px; padding: 10px 12px; border-radius: var(--r-tile); background: var(--raised); box-shadow: var(--shadow); font-size: var(--fs-sm); }
+.cal-connect-text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; white-space: nowrap; }
+.cal-connect-text span { font-size: var(--fs-xs); color: var(--muted); }
+.cal-connect .btn { flex: none; margin: 0; text-decoration: none; }
+.cal-quiet { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; z-index: 2; }
+.cal-quiet-card { pointer-events: auto; max-width: 360px; padding: 18px 22px; border-radius: var(--r-panel); background: var(--raised); box-shadow: var(--shadow); text-align: center; }
+.cal-quiet-title { margin: 0 0 4px; font-weight: 500; }
+.cal-quiet-card .hint { margin: 0 0 12px; }
+.cal-quiet-card .btn { margin: 0 auto; }
 .cal-hint { margin: -10px 2px 0; font-size: var(--fs-xs); }
-.cal-connect { margin: 0; font-size: var(--fs-xs); }
 .cal-empty { margin: 0; }
 .cal-done-toggle { align-self: flex-start; font-size: var(--fs-xs); }
 .cal-side.peek { gap: 12px; padding: 10px 18px 24px; background: var(--raised); }

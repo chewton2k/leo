@@ -3067,7 +3067,8 @@ test.describe('recording', () => {
     await page.goto('/#/record');
     await expect(page.locator('.rec-kinds .choice-title')).toHaveText(['Microphone', 'Screen', 'Call']);
     await expect(page.locator('.rec-kinds .choice-pick', { hasText: 'Screen' })).toContainText('Records what this computer plays');
-    await expect(page.locator('.rec-kinds .choice-diagram > svg')).toHaveCount(3);
+    await expect(page.locator('.rec-kinds .choice-icon > svg')).toHaveCount(3);
+    await expect(page.locator('#rec-kind-line')).toHaveText('A lecture, meeting or your voice');
     await expect(page.locator('.rec-start .rec-tip'), 'the tip sits with Start').toBeVisible();
     await expect(page.locator('.rec-head .rec-chips #rec-dir ~ .select-menu-button'), 'the folder uses the shared select menu inside its chip').toBeVisible();
     await page.locator('.rec-kinds .choice-pick', { hasText: 'Call' }).click();
@@ -3076,22 +3077,22 @@ test.describe('recording', () => {
     expect(seen.started.source).toBe('nativecall');
   });
 
-  test('Label speakers is chosen per recording, remembered, shown for calls and sent with Start once its model is ready', async ({ page }) => {
+  test('a call labels speakers on its own, microphone and screen never do, and Start sends it once the model is ready', async ({ page }) => {
     const seen = stubRecorder(page, { noteId: 'x', local: false });
     let model = { id: 'diar', size: 139310336, bytes: 0, verified: false, progress: null };
     await page.route('**/api/speech', (route) => route.fulfill({ json: { models: [], speakers: model } }));
     await page.goto('/#/record');
-    const toggle = page.locator('#rec-speakers');
-    await expect(toggle, 'off by default, so lectures stay as they are').not.toBeChecked();
-    await toggle.check();
+    await expect(page.locator('#rec-speakers'), 'no switch: leo decides from the source').toHaveCount(0);
+    await expect(page.locator('#rec-speakers-model'), 'a microphone recording never asks for the speaker model').toHaveCount(0);
+    await page.locator('.rec-kinds .choice-pick', { hasText: 'Call' }).click();
     await expect(page.locator('#rec-speakers-model')).toContainText('133 MB');
     await expect(page.locator('#rec-speakers-get')).toBeVisible();
+    await page.locator('.rec-kinds .choice-pick', { hasText: 'Screen' }).click();
+    await expect(page.locator('#rec-speakers-model')).toHaveCount(0);
     model = { ...model, bytes: model.size, verified: true };
     await page.reload();
-    await expect(page.locator('#rec-speakers'), 'the choice is remembered').toBeChecked();
-    await expect(page.locator('#rec-speakers-model')).toHaveCount(0);
     await page.locator('.rec-kinds .choice-pick', { hasText: 'Call' }).click();
-    await expect(page.locator('#rec-speakers-box'), 'calls tell the other voices apart').toBeVisible();
+    await expect(page.locator('#rec-speakers-model')).toHaveCount(0);
     await page.locator('[data-action="rec-start"]').click();
     await expect(page.locator('[data-action="rec-stop"]')).toBeVisible();
     expect(seen.started.profile.speakers).toBe(true);
@@ -3130,7 +3131,7 @@ test.describe('recording', () => {
     await page.route('**/api/record', (route) => route.fulfill({ json: { available: true, local: false, job: null, pending: [] } }));
     await page.route('**/api/calendar', (route) => route.fulfill({ json: { connected: false, calendars: [], events: [] } }));
     await page.goto('/#/record');
-    await expect(page.locator('.rec-idle a[href="#/settings/calendar"]')).toHaveText('Connect a calendar');
+    await expect(page.locator('.rec-idle .rec-check.optional a[href="#/settings/calendar"]')).toHaveText('Connect');
     await expect(page.locator('#rec-event')).toHaveCount(0);
     await page.unroute('**/api/calendar');
     await page.route('**/api/calendar', (route) => route.fulfill({ status: 500, json: { error: 'The calendars could not be read.' } }));
