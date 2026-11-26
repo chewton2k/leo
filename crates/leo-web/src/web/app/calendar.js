@@ -1037,6 +1037,7 @@ closeOnOutsidePress('#cal-side, .cal-item, .cal-tray-row', () => {
 function calOpenPeek(kind, id, on = null) {
   const side = $('#cal-side');
   if (!side) return;
+  panelStay(side);
   const fresh = !side.classList.contains('peek');
   cal.peek = { kind, id, on };
   side.classList.add('peek');
@@ -1051,8 +1052,11 @@ function calClosePeek() {
   const flush = cal.peek.flush;
   cal.peek = null;
   if (flush) flush();
-  $('#cal-side')?.classList.remove('peek');
-  drawCalendar();
+  panelLeave($('#cal-side'), () => {
+    if (cal.peek) return;
+    $('#cal-side')?.classList.remove('peek');
+    drawCalendar();
+  });
 }
 
 function calPeekRefresh(id) {

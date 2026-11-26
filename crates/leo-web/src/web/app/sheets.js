@@ -282,6 +282,12 @@ function quickLook(row) {
   return { icon: ICON.plus, said: quickSaid('Start a note called', row.title) };
 }
 
+function quickRow(row, i, head) {
+  const look = quickLook(row);
+  const on = i === quick.at;
+  return `${head ? `<div class="quick-due-head" role="presentation">${head}</div>` : ''}<button type="button" class="quick-row${on ? ' on' : ''}" id="quick-row-${i}" role="option" aria-selected="${on}" data-action="quick-run" data-at="${i}" tabindex="-1"><span class="quick-icon">${look.icon}</span><span class="quick-label${look.said ? ' quick-said' : ''}">${look.said || esc(look.label)}</span>${look.hint ? `<span class="quick-hint">${esc(look.hint)}</span>` : ''}${look.keys ? `<kbd>${esc(look.keys)}</kbd>` : on ? '<kbd>↵</kbd>' : ''}</button>`;
+}
+
 function drawQuick() {
   const box = inQuick('#quick-results');
   if (!box) return;
@@ -308,12 +314,7 @@ function drawQuick() {
   const keys = quick.rows.map((row) => JSON.stringify(row));
   flipList(box, '.quick-row', (el) => (quick.keys || [])[Number(el.dataset.at)], () => {
     quick.keys = keys;
-    box.innerHTML = quick.rows.map((row, i) => {
-      const look = quickLook(row);
-      const on = i === quick.at;
-      const head = headed && (i === 0 || doing(row) !== doing(quick.rows[i - 1])) ? `<div class="quick-due-head" role="presentation">${doing(row) ? 'Do' : 'Notes'}</div>` : '';
-      return `${head}<button type="button" class="quick-row${on ? ' on' : ''}" id="quick-row-${i}" role="option" aria-selected="${on}" data-action="quick-run" data-at="${i}" tabindex="-1"><span class="quick-icon">${look.icon}</span><span class="quick-label${look.said ? ' quick-said' : ''}">${look.said || esc(look.label)}</span>${look.hint ? `<span class="quick-hint">${esc(look.hint)}</span>` : ''}${on ? '<kbd>↵</kbd>' : ''}</button>`;
-    }).join('');
+    box.innerHTML = quick.rows.map((row, i) => quickRow(row, i, headed && (i === 0 || doing(row) !== doing(quick.rows[i - 1])) ? (doing(row) ? 'Do' : 'Notes') : '')).join('');
   }, { ms: QUICK_FLIP_MS });
   inQuick('#quick-input')?.setAttribute('aria-activedescendant', `quick-row-${quick.at}`);
 }
@@ -357,12 +358,7 @@ function drawQuickStart(box) {
   if (picked >= 0) quick.at = picked;
   quick.at = Math.min(quick.at, quick.rows.length - 1);
   quick.keys = quick.rows.map((row) => JSON.stringify(row));
-  box.innerHTML = quick.rows.map((row, i) => {
-    const look = quickLook(row);
-    const on = i === quick.at;
-    const head = i === 0 || row.group !== quick.rows[i - 1].group ? `<div class="quick-due-head" role="presentation">${row.group}</div>` : '';
-    return `${head}<button type="button" class="quick-row${on ? ' on' : ''}" id="quick-row-${i}" role="option" aria-selected="${on}" data-action="quick-run" data-at="${i}" tabindex="-1"><span class="quick-icon">${look.icon}</span><span class="quick-label">${esc(look.label)}</span>${look.hint ? `<span class="quick-hint">${esc(look.hint)}</span>` : ''}${look.keys ? `<kbd>${esc(look.keys)}</kbd>` : on ? '<kbd>↵</kbd>' : ''}</button>`;
-  }).join('') + quickDueHtml();
+  box.innerHTML = quick.rows.map((row, i) => quickRow(row, i, i === 0 || row.group !== quick.rows[i - 1].group ? row.group : '')).join('') + quickDueHtml();
   inQuick('#quick-input')?.setAttribute('aria-activedescendant', `quick-row-${quick.at}`);
 }
 

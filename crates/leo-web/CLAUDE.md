@@ -454,7 +454,9 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   (2026-11-21, the user's call); the page reserves bottom room for it (`--dock-room`,
   set by `fitTasksWindow` from the dock's height, read by `body.on-note main`). A live
   recording off the Record page is the first row of that panel (`pill()` in
-  recording.js fires `leo-recording`; there is no floating pill). The
+  recording.js fires `leo-recording`), and the recorder bar floats at the bottom of every other
+  page (`floatBar`: `#rec-float`, the Record page's bar with its wave, Pause and Stop; its time
+  opens the recording; 2026-11-25, the owner's call). The
   top bar shows no breadcrumbs on any page (`.crumbs` is kept invisible as the bar's
   spacer). On note pages at 1000 px and up the bar takes no room (2026-11-16): it is a
   zero-height sticky overlay holding only Felix's button, at the same spot as on every other
@@ -1132,15 +1134,14 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   and the newest transcript (`liveAsk`, at most `MOST_ASK` 8,000 characters, the tail,
   since the server's `clip` keeps a passage's head). Each opens Felix's chat through
   `attachSelection({note: '', title: 'Live recording', text})` and `askNew` (`deps.chat`).
-- Label speakers (2026-11-16, the user's call: per recording, for meetings,
-  not lectures): a switch under the note fields, off by default, remembered as
-  `leo-label-speakers`, shown for Call too (2026-11-22, the owner's call: a call
-  splits only its Others track); it sends `profile.speakers`. With the speaker model missing it
-  offers Download through `/api/speech` (`speakers` in the view, polled while
-  downloading, redrawn only when it changes, focus kept); Start sends it only
-  while the model is ready or downloading. The switch is `settingsSwitch()`,
-  and the choice is kept in memory when storage is blocked. Settings → Speech
-  models lists the speaker model under Downloaded with Delete.
+- Speaker labels (2026-11-25, the owner's call: "we decide for the user"): no switch. Call
+  labels speakers (`speakersOn()` is the picked `rec-kind` being `call`; a call splits only its
+  Others track), Microphone and Screen never do; it sends `profile.speakers`. With the speaker
+  model missing, choosing Call shows one line with Download through `/api/speech` (`speakers` in
+  the view, polled while downloading, redrawn only when it changes); Start sends it only while the
+  model is ready or downloading. Settings → Speech models lists the speaker model under
+  Downloaded with Delete. A live call colours each speaker by first appearance (`s.toneOrder`,
+  the saved transcript's `toneOf` order), You in ink.
 - A note's transcript and original files open in the note's place (2026-11-22, the owner's
   call; the side pane is gone): `openAside` (sources.js) sets `.note-layout.aside-open`, which hides
   `#doc`, the margin, outline, related and `#note-facts` and shows `#note-aside` with its own facts
@@ -1252,7 +1253,8 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
 - Note tasks: checkboxes under Action items (or To do, Next steps, Deadlines) plus
   promoted ones (`note_tasks`, located by text and neighbours, never the wrong
   box). A date change is written into the checkbox (409 with a preview when the
-  old date is gone); checkbox descriptions never rewrite note content.
+  old date is gone; leo's own trailing " — due <date>" phrase is always found and dates the task, even
+  beside a date without a year, and a run of them collapses into one: `tasks::own_due_tail`, 2026-11-25); checkbox descriptions never rewrite note content.
 - Repeating: `repeat` weekdays 0 (Mon)…6, `done_on` holds every day ticked, never
   overdue. `moved` maps an occurrence's original date to `{date, time, end}`
   (every move kept, absent when empty so old files are unchanged); `on` stays the
@@ -1593,3 +1595,19 @@ keys and downloaded runtimes stay untouched.
 The note API preserves the preexisting version hash for ordinary notes after removing the unused tags field.
 
 Config and data file paths use the same `leo_core::paths::own` names as uninstall.
+- Round 2 redesign (2026-11-25, the owner's approvals): home's Today rows add today's timed
+  events with a Record link (`homeEvents`, `#/record?event=<id>&kind=microphone|call`, call when
+  the place or description holds a link; ended and all-day events are left out) and Recently
+  written previews are plain text (`md.plain`). Quick Leo opens, before any typing, on the three
+  notes edited last, then New note, Start recording, New task and Ask Felix (`quickStart`), then
+  Due today. Note headings fold (`doc.js` `applyFolds`: a `.fold-btn` inside the heading, the
+  heading's `data-fold-said` drawn by `::after` so no text node reaches the caret or margin
+  maths; folds per note in `leo-folds`, at most 40 notes; the note file never changes; a line
+  being edited inside a fold unfolds it, and folding closes an open line first); margin notes
+  inside a fold are hidden with it and counted on the heading (`doc.foldedHeading`,
+  `doc.foldNotes`, from `marginDraw`). A note made from a recording ends with Felix's three
+  follow-ups (`.note-follow`, `NOTE_FOLLOW_ASKS`, each `chat.askNew`). The Calendar shows "Nothing
+  this week/day" with New task when no visible day holds anything (`calQuiet`), tray tasks read at
+  normal weight with the note they came from (`.cal-from`), and Google Calendar is a row with
+  Connect. The calendar peek and the card panel slide in (`panelArrive`) and out
+  (`panelLeave`, a `ghostOf` copy), none under `stillMotion()`.

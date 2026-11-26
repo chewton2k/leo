@@ -8,12 +8,15 @@ const ed = require('../src/web/editing.js');
 const doc = fs.readFileSync(path.resolve(__dirname, '../src/web/doc.js'), 'utf8');
 const between = (from, to) => doc.slice(doc.indexOf(from), doc.indexOf(to));
 
+const blockQueries = { count: 0 };
 function element() {
   const classes = new Set();
+  const heading = { dataset: {}, prepend() {} };
   return {
     dataset: {}, style: {}, className: '', isConnected: false, parentNode: null,
-    classList: { contains: (name) => classes.has(name), add: (name) => classes.add(name), remove: (name) => classes.delete(name), toggle: () => {} },
-    set innerHTML(value) {}, replaceWith() {}, remove() {},
+    classList: { contains: (name) => classes.has(name), add: (...names) => names.forEach((name) => classes.add(name)), remove: (...names) => names.forEach((name) => classes.delete(name)), toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) },
+    set innerHTML(value) {}, replaceWith() {}, remove() {}, setAttribute() {},
+    querySelector(selector) { blockQueries.count++; return selector.startsWith('h1') ? heading : null; },
   };
 }
 
@@ -22,6 +25,7 @@ function drawn(count) {
   const container = {
     children: [],
     classList: { toggle() {} },
+    addEventListener() {},
     insertBefore(el, before) {
       el.parentNode = container;
       el.isConnected = true;
@@ -34,17 +38,22 @@ function drawn(count) {
     },
     querySelectorAll() { counts.queryAll++; return container.children.filter((el) => !el.dataset.tail); },
   };
-  const body = `${between('function listStarts(', 'function renderBlock(')}\nconst renderBlock = () => '';\n${between('function draw()', 'let outlineTimer')}\nreturn draw;`;
+  const body = `${between('function listStarts(', 'function renderBlock(')}\nconst renderBlock = () => '';\n${between('function draw()', 'let outlineTimer')}\n${between('const FOLDS_KEPT', '    draw();\n\n    function insert(')}\nreturn draw;`;
   const lines = Array.from({ length: count }, (_, i) => `## Heading ${i + 1}`);
-  const draw = new Function('ed', 'lines', 'container', 'document', 'outlineScroll', 'let blocks = []; let rendered = [];\n' + body)(ed, lines, container, { createElement: element }, () => {});
+  const draw = new Function('ed', 'lines', 'container', 'document', 'outlineScroll', 'foldKey', 'let blocks = []; let rendered = [];\n' + body)(ed, lines, container, { createElement: element }, () => {}, '');
   draw();
-  return { counts, container };
+  const first = blockQueries.count;
+  draw();
+  return { counts, container, first, again: blockQueries.count - first };
 }
 
 for (const count of [3000, 30000]) {
   test(`drawing ${count} blocks looks the note up a constant number of times`, () => {
-    const { counts, container } = drawn(count);
+    blockQueries.count = 0;
+    const { counts, container, first, again } = drawn(count);
     assert.equal(container.children.length, count + 1);
+    assert.ok(first <= count * 2, `the first draw decorates each heading once (${first} lookups)`);
+    assert.equal(again, 0, 'a draw that changes nothing looks inside no block for folding');
     assert.ok(counts.query <= 4, `container.querySelector ran ${counts.query} times`);
     assert.ok(counts.queryAll <= 2, `container.querySelectorAll ran ${counts.queryAll} times`);
   });

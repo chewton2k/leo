@@ -300,12 +300,19 @@ test('earlier points go before the shown ones, once', () => {
   assert.deepEqual(L.earlierFirst([], shown), shown);
 });
 
-test('a live recording off the Record page is announced for the activity panel, and not on it', () => {
+test('a live recording off the Record page is announced for the activity panel and floats its recorder bar, and not on it', () => {
   const heard = [];
-  const from = recordingSource.indexOf('    function pill(');
+  const bars = [];
+  const from = recordingSource.indexOf('    function floatBar(');
+  const node = () => {
+    const el = { dataset: {}, innerHTML: '', classList: { on: new Set(), toggle(name, on) { if (on) this.on.add(name); else this.on.delete(name); } }, parts: {}, remove() { bars.splice(bars.indexOf(el), 1); } };
+    el.querySelector = (at) => (el.parts[at] ||= { textContent: '' });
+    return el;
+  };
+  const document = { getElementById: (id) => bars.find((b) => b.id === id) || null, createElement: node, body: { appendChild: (el) => bars.push(el) } };
   const pill = (s) => require('node:vm').runInNewContext(`(function(){${recordingSource.slice(from, recordingSource.indexOf('    async function refresh(', from))} return pill;})()`, {
-    s, live: (view) => ['starting', 'recording', 'paused'].includes(view.state), clock: L.clock,
-    root: { CustomEvent: class { constructor(name, init) { this.name = name; this.detail = init.detail; } }, dispatchEvent: (event) => heard.push(event) },
+    s, live: (view) => ['starting', 'recording', 'paused'].includes(view.state), clock: L.clock, paintWaveNow() {}, recBar: (v, lead) => `${lead}<pause title="${v.state === 'paused' ? 'Resume' : 'Pause'}">`,
+    root: { document, CustomEvent: class { constructor(name, init) { this.name = name; this.detail = init.detail; } }, dispatchEvent: (event) => heard.push(event) },
   });
   const page = { view: null, container: null };
   const announce = (view, container) => {
@@ -313,12 +320,21 @@ test('a live recording off the Record page is announced for the activity panel, 
     pill(page)();
   };
   announce(null, null);
+  assert.equal(bars.length, 0);
   announce({ state: 'recording', secs: 75 }, null);
+  assert.equal(bars.length, 1, 'off the Record page the recorder bar floats');
+  assert.equal(bars[0].parts['#rec-time'].textContent, '1:15');
+  assert.match(bars[0].innerHTML, /rec-float-open.*title="Pause"/, 'the shared recorder bar, led by a button back to the recording');
   announce({ state: 'recording', secs: 75 }, null);
   announce({ state: 'paused', secs: 3605 }, { isConnected: false });
+  assert.equal(bars.length, 1, 'one bar, updated in place');
+  assert.match(bars[0].innerHTML, /title="Resume"/);
+  assert.ok(bars[0].classList.on.has('paused'));
   announce({ state: 'recording', secs: 5 }, { isConnected: true });
+  assert.equal(bars.length, 0, 'the Record page has its own bar');
   announce({ state: 'recording', secs: 6 }, { isConnected: true });
   announce({ state: 'done', secs: 5 }, null);
+  assert.equal(bars.length, 0, 'a finished recording leaves no bar');
   announce(null, null);
   assert.deepEqual(JSON.parse(JSON.stringify(heard.map((event) => [event.name, event.detail]))), [
     ['leo-recording', { paused: false, label: 'Recording · 1:15' }],

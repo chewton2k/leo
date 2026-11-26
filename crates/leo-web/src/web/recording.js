@@ -547,6 +547,11 @@
     const PAUSE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/></svg>';
     const RESUME_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l12 7-12 7z" fill="currentColor"/></svg>';
 
+    function recBar(v, lead) {
+      const word = v.state === 'paused' ? 'Resume' : 'Pause';
+      return `<div class="rec-bar" role="group" aria-label="Recorder">${lead}<span class="rec-wave-box"><canvas class="rec-wave" id="rec-wave" aria-hidden="true"></canvas></span><button type="button" class="rec-pause" id="rec-pause" data-keep data-action="rec-pause" aria-label="${word}" title="${word}">${v.state === 'paused' ? RESUME_ICON : PAUSE_ICON}<span class="said">${word}</span></button><button type="button" class="rec-stop" id="rec-stop" data-keep data-action="rec-stop"><span class="rec-square"></span>Stop and save</button></div>`;
+    }
+
     function liveTab(tab, text, panel, on, extra = '') {
       return `<button type="button" role="tab" class="kanban-tab${on === tab ? ' on' : ''}" id="rec-tab-${tab}" data-rec-tab="${tab}" aria-controls="${panel}" aria-selected="${on === tab}" tabindex="${on === tab ? 0 : -1}">${text}${extra}</button>`;
     }
@@ -564,7 +569,7 @@
       const event = s.liveEvent && s.liveEvent.id === v.id ? s.liveEvent.event : null;
       const chips = [event ? chip(icons.calendar, whenOf(event)) : '', chip(icons.folder, v.directory || 'Top level'), chip(kind === 'Screen' ? icons.screen : icons.mic, kind)].join('');
       const denied = micDenied(v.source);
-      const bar = writing ? '' : `<div class="rec-bar" role="group" aria-label="Recorder"><span class="rec-dot"></span><span class="said" id="rec-word">${esc(stateWord(v))}</span><span class="rec-time" id="rec-time">${clock(v.secs)}</span><span class="rec-wave-box"><canvas class="rec-wave" id="rec-wave" aria-hidden="true"></canvas></span><button type="button" class="rec-pause" id="rec-pause" data-keep data-action="rec-pause" aria-label="${paused ? 'Resume' : 'Pause'}" title="${paused ? 'Resume' : 'Pause'}">${paused ? RESUME_ICON : PAUSE_ICON}<span class="said">${paused ? 'Resume' : 'Pause'}</span></button><button type="button" class="rec-stop" id="rec-stop" data-keep data-action="rec-stop"><span class="rec-square"></span>Stop and save</button></div>`;
+      const bar = writing ? '' : recBar(v, `<span class="rec-dot"></span><span class="said" id="rec-word">${esc(stateWord(v))}</span><span class="rec-time" id="rec-time">${clock(v.secs)}</span>`);
       const hear = writing ? '' : `<p class="rec-hear" id="rec-hear" role="status">${esc(hearingWords(hearing(s.wave, WAVE_STEP_MS), v.source, paused, denied))}</p>${denied ? `<button class="btn plain sm" data-action="app-command" data-app-action="microphone">${(desktopNow()?.platform === 'windows' ? 'Open Settings' : 'Open System Settings')}</button>` : ''}`;
       const wanted = s.wantsDraft !== null ? s.wantsDraft : v.wants || '';
       const count = v.points_total ?? listed.length;
@@ -1006,8 +1011,30 @@
     }
 
 
+    function floatBar(show) {
+      let el = root.document.getElementById('rec-float');
+      if (!show) {
+        if (el) el.remove();
+        return;
+      }
+      if (!el) {
+        el = root.document.createElement('div');
+        el.id = 'rec-float';
+        el.className = 'rec-bar-dock rec-float';
+        root.document.body.appendChild(el);
+      }
+      if (el.dataset.state !== s.view.state) {
+        el.dataset.state = s.view.state;
+        el.innerHTML = recBar(s.view, '<button type="button" class="rec-float-open" data-action="record" title="Open the recording"><span class="rec-dot"></span><span class="rec-time" id="rec-time"></span></button>');
+      }
+      el.classList.toggle('paused', s.view.state === 'paused');
+      el.querySelector('#rec-time').textContent = clock(s.view.secs);
+      if (!s.raf) paintWaveNow();
+    }
+
     function pill() {
       const show = s.view && live(s.view) && !(s.container && s.container.isConnected);
+      floatBar(show);
       const paused = show && s.view.state === 'paused';
       const label = show ? `${paused ? 'Paused' : 'Recording'} · ${clock(s.view.secs)}` : '';
       if (label === (s.pilled || '')) return;

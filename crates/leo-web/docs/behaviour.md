@@ -1313,13 +1313,16 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
   The idle page (2026-11-22, the owner's call) starts with the title, like a note's
   ("Untitled recording", `#rec-title`), then the calendar event (when a calendar is connected)
   and the folder as chips that open the shared select menu (`#rec-event`, `#rec-dir`), then
-  Microphone, Screen and Call as one row of `.choice-pick` cards with a track diagram each
-  (one waveform, or two for Call) over the same `rec-kind` radios, What do you want
-  (`#rec-wants`), Label speakers (not for Call), the calendar hint as one linked line, the red
-  Start with the "keeps recording if you close the window" tip, and Felix's before-start
-  questions under it.
+  Microphone, Screen and Call as one full-width switch of three equal parts whose highlight
+  slides (`.rec-kinds`, the `choiceCards` ring, an icon each) over the same `rec-kind` radios with
+  the picked source's one line under it (`#rec-kind-line`), What do you want (`#rec-wants`), then
+  either one ready line with the pencil tick ("Ready · the speech model and writing AI are set
+  up", `.rec-ready`) or the gaps as rows with their own fix (`.rec-checks`: Speech model, Writing
+  AI, and Calendar as an optional row), the red Start (text only, no icon) with the "keeps
+  recording if you close the window" tip, and Felix's before-start questions under it
+  (2026-11-25, the owner's round 2 approval).
 
-- Record warns before Start (`/api/record` `checks` from `Housekeeper::checks`: `speech`, `writing`, `headset`, each cheap, never opening the microphone): quiet `.set-note` lines with links above Start, which stays enabled; the headset line shows only for Call. A denied microphone (`desktopApp.permissions`, passed to recording.js as `deps.desktop`) says so under the live title with Open System Settings; Call fills an empty "What do you want" with `MEETING_WANTS`.
+- Record warns before Start (`/api/record` `checks` from `Housekeeper::checks`: `speech`, `writing`, `headset`, each cheap, never opening the microphone): the `.rec-checks` rows above Start, which stays enabled; the headset line shows only for Call. A denied microphone (`desktopApp.permissions`, passed to recording.js as `deps.desktop`) says so under the live title with Open System Settings; Call fills an empty "What do you want" with `MEETING_WANTS`.
 
 - Live transcript (2026-11-21, the user's call): every second only the new words are
   added to the Transcript tab; the words already shown stay put, so a selection and the
@@ -1334,8 +1337,9 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
 
 - Live page (2026-11-22, the owner's call): the recording looks like the note it becomes.
   The header holds the title, chips for the event time, folder and kind, the hearing line
-  and, on the right, one recorder bar (pulsing red dot, clock, a small wave, Pause, red Stop
-  and save). Under it, tabs Your notes (with its count, open first) · Transcript · What you
+  and one recorder bar (pulsing red dot, clock, a small wave, Pause, red Stop and save) fixed at
+  the bottom of the window; off the Record page the same bar floats on every page (`#rec-float`).
+  Felix's column also takes your own question (`data-rec-ask-form`), sent like his three. Under it, tabs Your notes (with its count, open first) · Transcript · What you
   want; the open tab survives each poll and keyboard focus stays on it (arrow keys, Home and
   End move between tabs). Felix's three questions sit in a narrow column beside the tabs
   (a recording area of 820 px or more), under them when narrower. After Stop the page stays:

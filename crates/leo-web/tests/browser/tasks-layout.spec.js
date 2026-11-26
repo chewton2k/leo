@@ -27,6 +27,8 @@ test('task completion shows its check before hiding and survives refresh, Undo a
     class Locked extends Error {}
     const calLocale = () => 'en-US';
     const toneOfTask = () => '--accent';
+    const toneOfEvent = () => '--accent';
+    const md = { plain: (text) => text };
     const drawCalendar = () => {};
     const loadSchedule = () => {};
     const calFind = id => cal.data.tasks.find(task => task.id === id);
@@ -168,6 +170,8 @@ test('home opens on the date and one plain sentence, keeps today\'s done rows an
     class Locked extends Error {}
     const calLocale = () => 'en-US';
     const toneOfTask = () => '--accent';
+    const toneOfEvent = () => '--accent';
+    const md = { plain: (text) => text };
     const drawCalendar = () => {};
     const loadSchedule = () => {};
     const calFind = id => cal.data.tasks.find(task => task.id === id);
@@ -289,6 +293,8 @@ test('home shows the week as a ribbon, the last three notes written and today\'s
     class Locked extends Error {}
     const calLocale = () => 'en-US';
     const toneOfTask = () => '--accent';
+    const toneOfEvent = () => '--accent';
+    const md = { plain: (text) => text };
     const drawCalendar = () => {};
     const loadSchedule = () => {};
     const calFind = id => cal.data.tasks.find(task => task.id === id);
