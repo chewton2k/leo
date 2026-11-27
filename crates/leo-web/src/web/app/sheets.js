@@ -535,6 +535,7 @@ async function trashFolder(from) {
     go('#/', { replace: true });
   }
   if (side.target === from || side.target?.startsWith(`${from}/`)) side.target = parentOf(from);
+  if (side.root === from || side.root.startsWith(`${from}/`)) sideFocus('');
   loadSideFolders();
   refocusExplorer({ kind: 'folder', dir: parentOf(from) });
   toast(`Moved “${folderLabel(from)}” to the trash`, { action: 'Undo', run: () => undoTrashMove(done, from) });

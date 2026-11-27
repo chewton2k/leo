@@ -552,6 +552,10 @@ test('a focused folder renamed in leo stays focused, and trashing it clears focu
   await expect(folderRow(page, `${again}/Child`)).toBeVisible();
   await page.locator('.toast', { hasText: again }).getByRole('button', { name: 'Undo' }).click();
   await expect(leave(page)).toContainText(dir);
+  await leave(page).focus();
+  await page.keyboard.press('Shift+F10');
+  await expect(page.getByRole('menuitem', { name: 'Rename', exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
   await page.reload();
   await expect(folderRow(page, child)).toBeVisible();
   const response = await page.request.post('/api/trash/move', { data: { notes: [], dirs: [dir] } });
@@ -559,5 +563,10 @@ test('a focused folder renamed in leo stays focused, and trashing it clears focu
   await page.goto('/#/calendar');
   await expect(leave(page)).toHaveCount(0);
   await expect(page.locator('.toast')).toContainText('focused folder');
+  await expect(folderRow(page, other)).toBeVisible();
+  await options(page, folderRow(page, other), FOCUS);
+  await options(page, leave(page), 'Move to trash');
+  await expect(leave(page), 'trashing the focused folder from its bar shows all notes').toHaveCount(0);
+  await page.locator('.toast', { hasText: 'to the trash' }).getByRole('button', { name: 'Undo' }).click();
   await expect(folderRow(page, other)).toBeVisible();
 });
