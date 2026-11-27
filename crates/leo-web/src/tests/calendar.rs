@@ -58,6 +58,32 @@ fn a_pasted_calendar_link_shows_upcoming_events_and_is_never_sent_back() {
     )));
     assert_eq!(off["offer"], false);
     assert_eq!(off["calendars"][0]["name"], "Classes");
+    assert_eq!(
+        (page["lead"].as_u64(), page["tasks_remind"].as_bool()),
+        (Some(2), Some(true))
+    );
+    let changed = json_of(run(crate::calendar::change(
+        State(state.clone()),
+        Json(
+            serde_json::from_value(serde_json::json!({"lead": 10, "tasks_remind": false})).unwrap(),
+        ),
+    )));
+    assert_eq!(
+        (
+            changed["offer"].as_bool(),
+            changed["lead"].as_u64(),
+            changed["tasks_remind"].as_bool()
+        ),
+        (Some(false), Some(10), Some(false))
+    );
+    assert_eq!(
+        run(crate::calendar::change(
+            State(state.clone()),
+            Json(serde_json::from_value(serde_json::json!({"lead": 7})).unwrap()),
+        ))
+        .status(),
+        StatusCode::BAD_REQUEST
+    );
 
     fake.pages.lock().unwrap().clear();
     let refreshed = json_of(run(crate::calendar::refresh_now(State(state.clone()))));
@@ -69,6 +95,15 @@ fn a_pasted_calendar_link_shows_upcoming_events_and_is_never_sent_back() {
     let id = page["calendars"][0]["id"].as_str().unwrap().to_string();
     let gone = json_of(run(crate::calendar::remove(State(state.clone()), Path(id))));
     assert_eq!(gone["connected"], false);
+    assert_eq!(
+        (
+            gone["offer"].as_bool(),
+            gone["lead"].as_u64(),
+            gone["tasks_remind"].as_bool()
+        ),
+        (Some(false), Some(10), Some(false)),
+        "removing a calendar keeps the reminder choices"
+    );
     assert!(fake.secrets.lock().unwrap().is_empty());
 }
 

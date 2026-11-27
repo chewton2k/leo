@@ -326,7 +326,7 @@ fn when(params: &str, value: &str) -> Option<When> {
     Some(When::At(local_to_utc(t, zone)?, zone))
 }
 
-fn local_to_utc(t: NaiveDateTime, zone: Option<chrono_tz::Tz>) -> Option<DateTime<Utc>> {
+pub(crate) fn local_to_utc(t: NaiveDateTime, zone: Option<chrono_tz::Tz>) -> Option<DateTime<Utc>> {
     let pick = |r: LocalResult<DateTime<Utc>>| match r {
         LocalResult::Single(x) | LocalResult::Ambiguous(x, _) => Some(x),
         LocalResult::None => None,

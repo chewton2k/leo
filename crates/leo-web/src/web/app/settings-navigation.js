@@ -55,6 +55,8 @@ const SETTINGS_INDEX = [
   { section: 'felix', id: 'felix-gap', label: 'Time between reads', keywords: 'felix margin often seconds minutes 3 min wait cooldown' },
   { section: 'felix', id: 'felix-cap', label: 'Reads a day', keywords: 'felix margin often daily limit cap budget' },
   { section: 'calendar', id: 'calendar-connect', label: 'Connect a calendar', keywords: 'google ical ics outlook apple link secret address meetings classes' },
+  { section: 'calendar', id: 'calendar-remind', label: 'Remind me', keywords: 'calendar reminder lead time minutes before notification event start' },
+  { section: 'calendar', id: 'calendar-task-remind', label: 'Remind me about tasks with a time', keywords: 'calendar tasks reminder due notification' },
   { section: 'keeping', id: 'keeping-trash', label: 'Keep the trash', keywords: 'deleted notes days retention delete' },
   { section: 'keeping', id: 'keeping-chat', label: 'Keep chats with Felix', keywords: 'conversations days retention delete' },
   { section: 'keeping', id: 'keeping-upload', label: 'Keep uploaded files', keywords: 'originals documents pdf days retention delete' },

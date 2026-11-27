@@ -102,7 +102,7 @@ test('the calendar card guides each provider and checks the address before savin
   const listeners = {};
   const nodes = {};
   const field = (extra = {}) => ({ value: '', attrs: {}, setAttribute(k, v) { this.attrs[k] = v; }, ...extra });
-  const context = { app: { addEventListener() {} }, document: { addEventListener: (type, fn) => (listeners[type] = [...(listeners[type] || []), fn]) }, window: {}, ICON: new Proxy({}, { get: () => '' }), esc: text => String(text), $: sel => nodes[sel] || null, segmented: ({ current, choices, field: f }) => `<seg ${f} ${current}>${choices.map(c => c[1]).join('|')}</seg>`, state: {} };
+  const context = { app: { addEventListener() {} }, document: { addEventListener: (type, fn) => (listeners[type] = [...(listeners[type] || []), fn]) }, window: {}, ICON: new Proxy({}, { get: () => '' }), esc: text => String(text), $: sel => nodes[sel] || null, segmented: ({ current, choices, field: f }) => `<seg ${f} ${current}>${choices.map(c => c[1]).join('|')}</seg>`, settingsSwitch: () => '', state: {} };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/settings.js'), 'utf8'), context);
   const firstLink = { google: 'https://calendar.google.com/calendar/r/settings', outlook: 'https://outlook.live.com/calendar/0/options/calendar/SharedCalendars', apple: 'https://www.icloud.com/calendar' };
@@ -177,6 +177,12 @@ test('the calendar card offers to record when an event starts, on by default onc
   await Promise.all(listeners.change.map((fn) => fn({ target: box })));
   assert.deepEqual(JSON.parse(JSON.stringify(sent)), [['/api/calendar', { method: 'PATCH', body: { offer: false } }]]);
   assert.equal(context.state.calendar.offer, false);
+  assert.match(context.calendarCard({ calendars: [] }), /data-cal-tasks checked/);
+  assert.match(context.calendarCard({ calendars: [] }), /Remind me/);
+  sent.length = 0;
+  await Promise.all(listeners.change.map((fn) => fn({ target: { checked: false, matches: (at) => at === '[data-cal-tasks]' } })));
+  await Promise.all(listeners.change.map((fn) => fn({ target: { value: '10', matches: (at) => at === '[data-cal-lead]' } })));
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [['/api/calendar', { method: 'PATCH', body: { tasks_remind: false } }], ['/api/calendar', { method: 'PATCH', body: { lead: 10 } }]]);
 });
 
 test('a missing coding app names the desktop app it comes with, on a Mac only', () => {

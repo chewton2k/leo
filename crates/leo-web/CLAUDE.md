@@ -1268,9 +1268,17 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   drawn muted and get no Record button; free ones get a dashed edge.
 - Offer to record: `calendar::offer_to_record`, a 60 s task (only with
   `Powers.app_settings`) over cached expansions after `catch_up` (same `Busy`
-  guard): a timed event once when start−2 min ≤ now < start+10 min and nothing
+  guard): a timed event once when start−lead ≤ now < start+10 min and nothing
   is recording (`record::live`); it never presses Start. leo.db `calendar_prompted(uid, start)` dedupes
-  (pruned after 2 days); `offer` in calendars.json (absent = on).
+  (pruned after 2 days); `offer` in calendars.json (absent = on). Reminders
+  (2026-11-27): `lead` (0, 2, 5, 10, 15 minutes; absent = 2) and `tasks_remind`
+  (absent = on) sit beside `offer` in calendars.json, are returned and PATCHed with it
+  (`lead` validated), and every `Linking` writer carries all three (`keep_settings`).
+  `calendar::due_tasks` runs from the same 60 s tick over `listed_index`: a not-done timed
+  task occurrence (repeats, moved and `done_on` through `tasks::occurs_on`) is announced once
+  (uid `task:<id>`, start = its instant) through `AppApi::notify(Reminder {title, body, route})`
+  with route `#/calendar?day=<day>`; it needs no linked calendar, ignores `offer` and fires
+  while recording.
 - Standalone tasks: `<notes>/.leo/tasks/<id>.json` (`tasks::tasks_dir`), one
   JSON line per save through `jsonline.rs` (one generic reader/writer for any
   `Line`: `DIR`, `id`, `stamp`; shared with boards and cards), written atomically; the newest `updated_at`

@@ -309,6 +309,9 @@ impl leo_web::app_settings::AppApi for AppSettings {
     fn event_starting(&self, event: leo_web::app_settings::EventStarting) {
         crate::notify::starting(&self.app, event);
     }
+    fn notify(&self, reminder: leo_web::app_settings::Reminder) {
+        crate::notify::remind(&self.app, reminder);
+    }
     fn health(&self, notes: &Path, facts: leo_core::store::Facts, fresh: bool) -> Result<Value> {
         let mut view = leo_host::health::scan(notes, facts, fresh)?;
         let permissions = self.permission_view(true);

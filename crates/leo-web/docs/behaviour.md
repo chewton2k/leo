@@ -1454,10 +1454,10 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
 - Offer to record (2026-11-09, item L1): `calendar::offer_to_record`, a 60 s
   background task (stops with the engine; only when `Powers.app_settings` is
   set) over the cached expansions, never fetching. A timed event is offered once
-  when start−2 min ≤ now < start+10 min (UTC instants) and no recording is live
+  when start−lead ≤ now < start+10 min (UTC instants; lead is 2 min unless Settings → Calendar's "Remind me" says 0, 5, 10 or 15) and no recording is live
   (`record::live`); leo.db `calendar_prompted(uid, start)` dedupes (rows older
   than 2 days pruned) and `AppApi::event_starting(EventStarting {uid, title,
-  start, online})` (default no-op) tells the app. Settings → Calendar's switch "Offer to
+  start, online, lead})` (default no-op) tells the app. Settings → Calendar's switch "Offer to
   record when an event starts" is `offer` in calendars.json (absent = on; PATCH
   `/api/calendar {offer}`). `#/record?event=<uid>&kind=call|microphone` preselects that kind and
   event (`preselect` in recording.js; the meeting wording is filled only for
@@ -1465,6 +1465,12 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
   location or description. The 60 s tick first refreshes a stale cached feed
   (`catch_up`, under the same `Busy` guard as the routes), so a leo left
   running offers current meetings.
+- Task reminders (2026-11-27): "Remind me about tasks with a time" (`tasks_remind` in
+  calendars.json, absent = on; PATCH `/api/calendar {tasks_remind}`, with `lead`) makes the
+  same tick call `AppApi::notify(Reminder {title, body, route})` once per not-done timed task
+  occurrence from start−lead to start+10 min ("Due at 3:00 PM", route
+  `#/calendar?day=<day>`, which selects that day). It works with no calendar linked and with
+  the offer off, and is not held while recording.
 
 - Standalone tasks are files: `<notes>/.leo/tasks/<id>.json`
   (`tasks::tasks_dir`), one JSON line each, written atomically. The reader

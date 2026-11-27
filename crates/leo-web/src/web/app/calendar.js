@@ -53,11 +53,13 @@ function calWindow() {
   return { days, from: S.fromKey(days[0]).toISOString(), to: S.addDays(S.fromKey(days[days.length - 1]), 1).toISOString() };
 }
 
-async function showCalendar() {
+async function showCalendar(arg = '') {
   const mine = ++seq;
   state = { view: 'calendar', dir: '' };
   chrome();
   document.title = 'Calendar · leo';
+  const asked = /^\?day=(\d{4}-\d{2}-\d{2})$/.exec(arg)?.[1];
+  if (asked) cal.selected = asked;
   if (!cal.selected) cal.selected = S.dayKey(new Date());
   calDragEnd();
   if (!cal.compose?.failed) cal.compose = null;

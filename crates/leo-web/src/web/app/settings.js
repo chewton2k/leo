@@ -86,11 +86,15 @@ document.addEventListener('input', (e) => {
 });
 document.addEventListener('change', async (e) => {
   const field = e.target;
-  if (!field.matches?.('[data-cal-offer]')) return;
+  const key = field.matches?.('[data-cal-offer]') ? 'offer' : field.matches?.('[data-cal-tasks]') ? 'tasks_remind' : field.matches?.('[data-cal-lead]') ? 'lead' : '';
+  if (!key) return;
   try {
-    state.calendar = await api('/api/calendar', { method: 'PATCH', body: { offer: field.checked } });
+    state.calendar = await api('/api/calendar', { method: 'PATCH', body: { [key]: key === 'lead' ? Number(field.value) : field.checked } });
   } catch (error) {
-    field.checked = !field.checked;
+    if (key === 'lead') {
+      field.value = String(state.calendar?.lead ?? 2);
+      syncSegmented(field.closest('.segmented'));
+    } else field.checked = !field.checked;
     fail(error);
   }
 });
@@ -121,6 +125,8 @@ function calendarCard(cal) {
     <p class="hint">Recordings are named after the class or meeting you are in, and the AI gets its description and who was invited. leo only reads your calendar.</p>
     ${rows}
     ${count ? `<label class="set-row" data-find="calendar-offer"><span class="grow">Offer to record when an event starts<span class="set-desc">Ask whether to record when a connected calendar event begins.</span></span>${settingsSwitch('data-cal-offer', cal.offer !== false)}</label>` : ''}
+    <div class="set-row" data-find="calendar-remind"><span class="grow">Remind me<span class="set-desc">How long before an event or a task with a time.</span></span>${segmented({ label: 'Remind me', field: 'data-cal-lead', current: cal.lead ?? 2, choices: [[0, 'At start'], [2, '2 min'], [5, '5 min'], [10, '10 min'], [15, '15 min']] })}</div>
+    <label class="set-row" data-find="calendar-task-remind"><span class="grow">Remind me about tasks with a time<span class="set-desc">A notification when a task with a time is due, even with no calendar connected.</span></span>${settingsSwitch('data-cal-tasks', cal.tasks_remind !== false)}</label>
     ${adder}
   </section>`;
 }
