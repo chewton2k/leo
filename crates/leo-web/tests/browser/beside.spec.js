@@ -344,11 +344,18 @@ test('select all and typing stay in the pane that was clicked', async ({ page })
 test('quitting settles the typing in both panes', async ({ page }) => {
   const [a, b] = await notes(page, 'Left.', 'Right.');
   await split(page, a, b);
+  const sent = [];
+  page.on('request', (request) => { if (request.method() === 'PATCH' && /\/api\/notes\/[^/]+$/.test(new URL(request.url()).pathname)) sent.push([new URL(request.url()).pathname.split('/').pop(), request.postDataJSON().body]); });
   await typeIn(page, '#app', ' left before quit');
   await typeIn(page, '#beside', ' right before quit');
   await page.evaluate(() => window.leoFromApp('quit', 'now'));
-  expect((await (await page.request.get(`/api/notes/${a.id}`)).json()).body).toContain('left before quit');
-  expect((await (await page.request.get(`/api/notes/${b.id}`)).json()).body).toContain('right before quit');
+  const left = (await (await page.request.get(`/api/notes/${a.id}`)).json()).body;
+  const right = (await (await page.request.get(`/api/notes/${b.id}`)).json()).body;
+  expect(left).toBe('Left. left before quit');
+  expect(right).toBe('Right. right before quit');
+  expect(sent.filter(([id]) => id === a.id).every(([, body]) => !body.includes('right before quit'))).toBe(true);
+  expect(sent.filter(([id]) => id === b.id).every(([, body]) => !body.includes('left before quit'))).toBe(true);
+  expect(sent.some(([id]) => id === a.id) && sent.some(([id]) => id === b.id)).toBe(true);
 });
 
 test('a wide window with a 1000px left pane and margin on the right shows cards on the left and marks on the right', async ({ page }) => {
@@ -588,6 +595,17 @@ test('closing the right pane right after scrolling keeps its saved reading place
   expect(anchor.line).toBeGreaterThan(0);
   await besideMenu(page, b);
   await expect.poll(() => page.locator('#beside').evaluate((el) => el.scrollTop)).toBeGreaterThan(800);
+});
+
+test('a note opened into the right pane starts at the top, not at the last note\'s scroll', async ({ page }) => {
+  const [a, b, c] = await notes(page, 'Left.', longBody('b'), longBody('c'));
+  await split(page, a, b);
+  await page.locator('#beside').hover();
+  await page.mouse.wheel(0, 1500);
+  await expect.poll(() => page.locator('#beside').evaluate((el) => el.scrollTop)).toBeGreaterThan(1000);
+  await page.locator(`#side .side-note[data-id="${c.id}"]`).click();
+  await expect(page.locator('#beside #title')).toHaveText(c.title);
+  expect(await page.locator('#beside').evaluate((el) => el.scrollTop)).toBe(0);
 });
 
 test('leaving for another page while the right note is still loading never draws it', async ({ page }) => {
