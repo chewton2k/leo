@@ -625,6 +625,33 @@ async function pinCard(el) {
   }
 }
 
+function overText(e) {
+  const at = document.caretPositionFromPoint?.(e.clientX, e.clientY) || document.caretRangeFromPoint?.(e.clientX, e.clientY);
+  const node = at?.offsetNode || at?.startContainer;
+  if (node?.nodeType !== 3) return false;
+  const range = document.createRange();
+  range.selectNodeContents(node);
+  return [...range.getClientRects()].some((box) => e.clientX >= box.left && e.clientX <= box.right && e.clientY >= box.top && e.clientY <= box.bottom);
+}
+document.addEventListener('contextmenu', (e) => {
+  const blank = e.target.matches('#app, #beside, .note-layout, .note-columns, article.note, .note-head, .note-meta, #doc, .doc-tail') || e.target.closest('#doc .blk') && !e.target.closest('a, img, input, button, textarea, pre, table, .math, .note-fig') && !overText(e);
+  const p = state.view === 'note' && blank && panes.find((q) => q.s && q.el.contains(e.target));
+  if (!p || !getSelection().isCollapsed) return;
+  e.preventDefault();
+  if (split()) usePane(p);
+  popupMenu(e.target, {
+    label: 'This note',
+    point: { x: e.clientX, y: e.clientY },
+    rows: [
+      { text: 'Close note', icon: ICON.close, run: () => (split() ? paneClose(p) : goBack('#/')) },
+      { text: 'New note', icon: ICON.filePlus, run: () => actions.new({ dataset: { dir: p.s.note.directory } }) },
+      { line: true },
+      { text: 'Move to folder', icon: ICON.move, run: () => moveSheet(inPane('#note-more', p)) },
+      { text: 'Share', icon: ICON.share, next: shareRows() },
+    ],
+  });
+});
+
 async function noteMarkdown() {
   const s = await ready();
   if (!s) {

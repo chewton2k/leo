@@ -91,7 +91,7 @@ function noteZone(e) {
   if (!p) return null;
   const left = app.getBoundingClientRect().left;
   const right = (split() ? besidePane.el : app).getBoundingClientRect().right;
-  return { p, zone: e.clientX > right - (right - left) / 3 ? 'beside' : 'here' };
+  return { p, zone: e.clientX > (left + right) / 2 ? 'beside' : 'here' };
 }
 
 function noteOver(zone) {

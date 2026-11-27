@@ -45,7 +45,7 @@ async function typeIn(page, pane, text) {
   await page.keyboard.type(text);
 }
 
-test('a note dropped on the right third opens beside with its own width marks and margin, and on the left it opens here', async ({ page }) => {
+test('a note dropped on the right half opens beside with its own width marks and margin, and on the left it opens here', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   const [a, b, c] = await notes(page, 'Alpha text.', 'Beta text.', 'Gamma text.');
   await open(page, a);
@@ -658,4 +658,67 @@ test('a failed reload of the right pane after a Felix change closes only that pa
   await expect(page.locator('#beside')).toBeHidden();
   await expect(page.locator('#app #title')).toHaveText(a.title);
   expect(new URL(page.url()).hash).toBe(`#/n/${a.id}`);
+});
+
+test('each pane’s × stays at its top right while the pane scrolls and shows while the pointer is over that pane', async ({ page }) => {
+  const long = Array.from({ length: 150 }, (_, i) => `Paragraph ${i + 1}.`).join('\n\n');
+  const [a, b] = await notes(page, long, long);
+  await split(page, a, b);
+  const opacity = (pane) => page.locator(`${pane} .pane-close`).evaluate((el) => getComputedStyle(el).opacity);
+  for (const pane of ['#beside', '#app']) {
+    const close = page.locator(`${pane} .pane-close`);
+    const before = await close.boundingBox();
+    const meta = await page.locator(`${pane} .note-meta`).boundingBox();
+    expect(Math.abs(before.y + before.height / 2 - (meta.y + meta.height / 2)), 'the × sits on the chip row').toBeLessThanOrEqual(1);
+    expect(await page.locator(`${pane} #margin-status`).evaluate((el) => el.getBoundingClientRect().right), 'the chips leave room for the ×').toBeLessThanOrEqual(before.x);
+    await page.evaluate((sel) => (sel === '#app' ? window : document.querySelector(sel)).scrollTo(0, 1500), pane);
+    await expect.poll(() => page.evaluate((sel) => (sel === '#app' ? scrollY : document.querySelector(sel).scrollTop), pane)).toBeGreaterThan(1000);
+    await expect.poll(async () => Math.abs((await close.boundingBox()).y - before.y), 'the × stays put').toBeLessThanOrEqual(1);
+    expect(Math.abs((await close.boundingBox()).x - before.x)).toBeLessThanOrEqual(1);
+  }
+  if (await page.evaluate(() => matchMedia('(hover: hover)').matches)) {
+    await page.locator('#side').hover({ position: { x: 10, y: 300 } });
+    await expect.poll(() => opacity('#app')).toBe('0');
+    await expect.poll(() => opacity('#beside')).toBe('0');
+    await page.locator('#beside .note-meta').hover();
+    await expect.poll(() => opacity('#beside')).toBe('1');
+    expect(await opacity('#app')).toBe('0');
+    await page.locator('#app .note-meta').hover();
+    await expect.poll(() => opacity('#app')).toBe('1');
+  }
+  await page.evaluate(() => document.querySelector('#beside').scrollTo(0, 1500));
+  await page.locator('#beside .pane-close').click();
+  await expect(page.locator('#beside')).toBeHidden();
+  await expect(page.locator('body')).not.toHaveClass(/\bsplit\b/);
+  await expect(page.locator('#app #title')).toHaveText(a.title);
+});
+
+test('a right-click on blank note space opens leo’s note menu, and text keeps the native one', async ({ page }) => {
+  const [a, b] = await notes(page, 'Left words.', 'Right words.');
+  await open(page, a);
+  const fire = (selector) => page.locator(selector).first().evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    return el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left + 4, clientY: box.top + 4 }));
+  });
+  expect(await fire('#app #doc .blk'), 'note text keeps the native menu').toBe(true);
+  expect(await fire('#app #title'), 'the title keeps the native menu').toBe(true);
+  expect(await fire('#app .doc-tail'), 'blank space under the text opens leo’s menu').toBe(false);
+  for (const name of ['Close note', 'New note', 'Move to folder', 'Share']) await expect(page.getByRole('menuitem', { name, exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.popup-menu')).toHaveCount(0);
+
+  await besideMenu(page, b);
+  await expect(page.locator('#beside #title')).toHaveText(b.title);
+  await typeIn(page, '#beside', ' typed before closing');
+  expect(await fire('#beside article.note')).toBe(false);
+  await page.getByRole('menuitem', { name: 'Close note', exact: true }).click();
+  await expect(page.locator('#beside')).toBeHidden();
+  await expect(page.locator('body')).not.toHaveClass(/\bsplit\b/);
+  await expect(page.locator('#app #title')).toHaveText(a.title);
+  await expect.poll(async () => (await (await page.request.get(`/api/notes/${b.id}`)).json()).body).toContain('typed before closing');
+
+  expect(await fire('#app #doc')).toBe(false);
+  await page.getByRole('menuitem', { name: 'Close note', exact: true }).click();
+  await expect(page.locator('#app #title')).toHaveCount(0);
+  expect(new URL(page.url()).hash).not.toBe(`#/n/${a.id}`);
 });

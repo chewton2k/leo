@@ -1,6 +1,6 @@
 .note-layout { contain: inline-size layout style; --side: initial; --right: initial; --mid: initial; --explorer-w: initial; --chat-w: initial; --dock-room: initial; }
-.note-columns { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 48px auto; }
-.note-columns > .note { position: relative; grid-area: 2 / 1; min-width: 0; width: 100%; max-width: var(--note-width); margin-inline: auto; }
+.note-columns { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.note-columns > .note { position: relative; grid-area: 1 / 1; min-width: 0; width: 100%; max-width: var(--note-width); margin-inline: auto; }
 .page-marks { position: absolute; left: 0; right: 0; top: 0; height: 0; z-index: 3; }
 .page-mark { position: absolute; top: 2px; width: 24px; height: 28px; display: grid; place-items: center; cursor: col-resize; border-radius: var(--r-xs); touch-action: none; }
 .page-mark[data-edge="left"] { left: -28px; }
@@ -33,13 +33,17 @@
 .note-outline .outline-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
 .note-outline .outline-spacer { flex: none; width: 24px; }
 .note-outline .outline-ticks, .note-outline .outline-preview, .note-outline .outline-page { display: none; }
-:where(.note-layout:not([data-wide])) .note-outline { background: var(--page); }
-:where(.note-layout[data-wide]) .note-columns { grid-template-rows: auto; padding-inline: 48px; min-height: calc(100dvh - var(--bar-height) - 16px); }
-:where(.note-layout[data-wide]) .note-columns > .note { grid-area: 1 / 1; }
+:where(.note-layout:not([data-wide])) .note-outline { position: relative; top: 0; height: 0; width: 100%; max-width: var(--note-width); justify-self: center; }
+:where(.note-layout:not([data-wide])) .note-outline .source-more { position: relative; width: 32px; margin-top: 8px; }
+:where(.note-layout:not([data-wide])) .note-outline .source-more > summary { width: 32px; height: 32px; padding: 0; justify-content: center; align-items: center; border-radius: 50%; }
+:where(.note-layout:not([data-wide])) .note-outline .source-more > summary:hover { background: var(--tint); }
+:where(.note-layout:not([data-wide])) .note-outline nav { position: absolute; top: 100%; left: 0; width: min(280px, calc(100vw - 32px)); padding: 6px; border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow); }
+:where(.note-layout:not([data-wide]) .note-columns:has(> .note-outline:not([hidden]))) .note-meta { min-height: 32px; padding-left: 44px; }
+:where(.note-layout[data-wide]) .note-columns { padding-inline: 48px; min-height: calc(100dvh - var(--bar-height) - 16px); }
 :where(.note-layout[data-wide]) .note-outline { top: var(--outline-center, 50dvh); justify-self: start; width: 48px; margin-left: -48px; display: flex; flex-direction: column; }
 :where(.note-layout[data-wide]) .note-outline .source-more { order: 1; }
 :where(.note-layout[data-wide]) .note-outline .source-more > summary { width: 36px; justify-content: flex-start; padding: 8px 0 8px 8px; }
-:where(.note-layout[data-wide]) .note-outline .source-more > summary > svg { display: none; }
+.note-outline .source-more > summary > svg { display: none; }
 :where(.note-layout[data-wide]) .note-outline .outline-ticks { display: flex; flex-direction: column; width: 100%; height: min(calc(var(--outline-count) * 12px), calc(100dvh - var(--outline-top, 76px) - 160px)); min-height: 12px; padding: 0 0 0 8px; border: 0; background: transparent; cursor: pointer; }
 :where(.note-layout[data-wide]) .note-outline .outline-page { display: grid; place-items: center; width: 36px; height: 24px; padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--muted); }
 :where(.note-layout[data-wide]) .note-outline .outline-page:disabled { visibility: hidden; }
@@ -234,7 +238,8 @@ textarea.set-input:focus { outline: 2px solid var(--focus); outline-offset: 1px;
 .blk.margin-room { margin-bottom: var(--margin-room, 0px); }
 .note-meta .margin-mode { font-size: var(--fs-sm); }
 #margin-status { margin-left: auto; }
-.margin-mode-wrap { position: relative; flex: none; }
+.margin-mode-wrap { position: relative; flex: none; display: flex; align-items: center; }
+.note-meta > * { min-height: inherit; }
 .margin-instructions { margin: 0 0 16px; }
 .writeup-pending { margin: 0 0 16px; }
 .writeup-pending .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
@@ -302,13 +307,19 @@ body.split #beside { position: fixed; top: 0; bottom: 0; right: var(--right); wi
 .beside-resize { position: fixed; z-index: 36; top: 0; bottom: 0; right: calc(var(--right) + var(--beside-w) - 4px); width: 8px; }
 .beside-resize::before { content: ''; position: absolute; top: 0; bottom: 0; left: 4px; width: 11px; pointer-events: none; background: linear-gradient(to right, var(--line) 1px, var(--split-shade) 1px, transparent); }
 body:not(.beside-on) .beside-resize::before { left: auto; right: 3px; background: linear-gradient(to left, var(--line) 1px, var(--split-shade) 1px, transparent); }
-.pane-close { display: none; width: 32px; height: 32px; color: var(--muted); }
+.pane-close-row { display: none; position: sticky; top: calc(var(--bar-height) + 8px); z-index: 3; height: 0; justify-content: flex-end; align-items: flex-start; }
+body.split .pane-close-row { display: flex; }
+body.split .note-meta { min-height: 32px; padding-right: 40px; }
+.pane-close { width: 32px; height: 32px; margin-top: 8px; border-radius: 50%; background: var(--page); color: var(--muted); opacity: 0; transition: opacity var(--t-fade) ease-out; }
 .pane-close svg { width: 16px; height: 16px; }
-body.split .pane-close { display: grid; }
+:is(main, #beside):hover .pane-close, .pane-close:focus-visible { opacity: 1; }
+@media (hover: none) { .pane-close { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .pane-close { transition: none; } }
+@media (min-width: 1000px) { body.on-note :where(.note-layout:not([data-wide])) .note-outline .source-more, body.on-note .pane-close { margin-top: 4px; } }
 body.split .page-bar { margin-right: 4px; }
 body.split :is(main, #beside):not(.pane-on) :is(.note-meta, .note-meta .margin-mode) { color: var(--faint); }
 @media print {
-  body.beside-on main, body.split:not(.beside-on) #beside { display: none !important; }
+  body.beside-on main, body.split:not(.beside-on) #beside, .pane-close-row { display: none !important; }
   body.split main { margin-right: 0; }
   body.beside-on #beside { position: static; width: auto; overflow: visible; padding: 0; }
 }
