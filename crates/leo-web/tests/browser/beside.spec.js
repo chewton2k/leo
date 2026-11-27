@@ -509,3 +509,31 @@ test('the right pane saves its reading place, so closing and reopening it beside
   await expect.poll(() => page.locator('#beside').evaluate((el) => el.scrollTop)).toBeGreaterThan(800);
 });
 
+test('unfolding the explorer while two notes need the room opens it as a drawer over the page', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const [a, b, c] = await notes(page, 'Left.', 'Right.', 'Third.');
+  await split(page, a, b);
+  await page.locator('#chat-toggle').click();
+  await expect(page.locator('body')).toHaveClass(/\bside-mini\b/);
+  const widths = () => page.evaluate(() => ['#app', '#beside'].map((p) => Math.round(document.querySelector(p).getBoundingClientRect().width)));
+  const before = await widths();
+  const fold = page.locator('#side .side-fold');
+  await fold.click();
+  await expect(page.locator('body')).toHaveClass(/\bside-drawer\b/);
+  await expect(page.locator(`#side .side-note[data-id="${c.id}"]`)).toBeVisible();
+  await expect(page.locator('#side-filter')).toBeFocused();
+  expect(await widths()).toEqual(before);
+  await expect(page.locator('body')).toHaveClass(/\bsplit\b/);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('body')).not.toHaveClass(/\bside-drawer\b/);
+  await expect(page.locator('body')).toHaveClass(/\bside-mini\b/);
+  await fold.click();
+  await page.locator('#app #note-facts').click();
+  await expect(page.locator('body')).not.toHaveClass(/\bside-drawer\b/);
+  await fold.click();
+  await page.locator(`#side .side-note[data-id="${c.id}"]`).click();
+  await expect(page.locator('#app #title')).toHaveText(c.title);
+  await expect(page.locator('body')).not.toHaveClass(/\bside-drawer\b/);
+  await expect(page.locator('#beside #title')).toHaveText(b.title);
+  expect(await widths()).toEqual(before);
+});

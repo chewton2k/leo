@@ -64,12 +64,7 @@ const sideResize = window.leoPaneResize.create({
   handle: sideGrip,
   key: 'leo-side-width',
   measure: () => $('#side').getBoundingClientRect().width,
-  limits: () => {
-    const body = document.body;
-    const chat = body.classList.contains('chat-open') && document.querySelector('.chat:not([hidden])');
-    const right = Math.max(parseFloat(getComputedStyle(body).paddingRight) || 0, chat ? window.innerWidth - chat.getBoundingClientRect().left : 0);
-    return [SIDE_LEAST_WIDTH, Math.max(SIDE_LEAST_WIDTH, Math.min(SIDE_MOST_WIDTH, window.innerWidth - right - (body.classList.contains('split') ? SPLIT_ROOM : SIDE_PAGE_ROOM)))];
-  },
+  limits: () => [SIDE_LEAST_WIDTH, Math.max(SIDE_LEAST_WIDTH, Math.min(SIDE_MOST_WIDTH, sideRoom()))],
   apply: (width) => {
     if (width === null) document.body.style.removeProperty('--explorer-w');
     else document.body.style.setProperty('--explorer-w', `${width}px`);
@@ -77,6 +72,13 @@ const sideResize = window.leoPaneResize.create({
   enabled: () => sideWide() && !side.mini && !document.body.classList.contains('side-folding') && state.view !== 'locked',
   onChange: () => window.dispatchEvent(new Event('resize')),
 });
+
+function sideRoom() {
+  const body = document.body;
+  const chat = body.classList.contains('chat-open') && document.querySelector('.chat:not([hidden])');
+  const right = Math.max(parseFloat(getComputedStyle(body).paddingRight) || 0, chat ? window.innerWidth - chat.getBoundingClientRect().left : 0);
+  return window.innerWidth - right - (body.classList.contains('split') ? SPLIT_ROOM : SIDE_PAGE_ROOM);
+}
 
 function sideRow(action, icon, label, { on = false, attrs = '', count = '', hint = label, aria = label } = {}) {
   const tail = count === '' ? '' : `<span class="side-count side-label">${esc(String(count))}</span>`;
@@ -391,7 +393,7 @@ document.addEventListener('pointerdown', (e) => {
 window.addEventListener('hashchange', () => sideDrawer(false));
 
 function foldSide() {
-  if (sideNarrow()) return sideDrawer(!sideDrawerOpen());
+  if (sideNarrow() || (side.mini && split() && sideRoom() < SIDE_LEAST_WIDTH)) return sideDrawer(!sideDrawerOpen());
   side.mini = !side.mini;
   const generation = side.folding = (side.folding || 0) + 1;
   const body = document.body;
@@ -634,7 +636,10 @@ let explorerOpenSeq = 0;
 async function openExplorerNote(el) {
   const request = ++explorerOpenSeq;
   if (state.session?.note.id === el.dataset.id && side.target) { side.target = null; drawSide(); }
-  if (split() && !el.closest('#folders-sheet')) return besideOpen(el.dataset.id, here());
+  if (split() && !el.closest('#folders-sheet')) {
+    sideDrawer(false);
+    return besideOpen(el.dataset.id, here());
+  }
   if (!el.closest('#folders-sheet') || state.session?.note.id === el.dataset.id) return go(noteHash(el.dataset.id));
   const box = el.closest('.scrim');
   const mine = seq;
