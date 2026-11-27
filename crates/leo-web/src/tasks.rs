@@ -201,7 +201,7 @@ pub fn move_occurrence(task: &mut Task, on: NaiveDate, slot: Slot) {
 const WEEKDAYS: [&str; 7] = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
 
 pub fn rrule_of(rule: &Repeat, timed: bool) -> Option<String> {
-    use chrono::{Datelike, TimeZone};
+    use chrono::Datelike;
     let every = if rule.every > 1 {
         format!(";INTERVAL={}", rule.every)
     } else {
@@ -222,12 +222,7 @@ pub fn rrule_of(rule: &Repeat, timed: bool) -> Option<String> {
     };
     if let Some(until) = rule.until {
         if timed {
-            let end = until.and_hms_opt(23, 59, 59)?;
-            let utc = chrono::Local
-                .from_local_datetime(&end)
-                .latest()
-                .map_or(end, |at| at.naive_utc());
-            text.push_str(&format!(";UNTIL={}Z", utc.format("%Y%m%dT%H%M%S")));
+            text.push_str(&format!(";UNTIL={}T235959", until.format("%Y%m%d")));
         } else {
             text.push_str(&format!(";UNTIL={}", until.format("%Y%m%d")));
         }
@@ -1211,16 +1206,8 @@ mod tests {
             "{ics}"
         );
         task.time = NaiveTime::from_hms_opt(9, 0, 0);
-        let end = day(2026, 12, 19).and_hms_opt(23, 59, 59).unwrap();
-        let utc = chrono::TimeZone::from_local_datetime(&chrono::Local, &end)
-            .latest()
-            .unwrap()
-            .naive_utc();
         let ics = ics_of(&standalone(&task, None), Utc::now());
-        assert!(
-            ics.contains(&format!("UNTIL={}Z\r\n", utc.format("%Y%m%dT%H%M%S"))),
-            "{ics}"
-        );
+        assert!(ics.contains("UNTIL=20261219T235959\r\n"), "{ics}");
         task.repeat.clear();
         (task.monthly, task.every, task.date) = (true, 1, Some(day(2026, 11, 15)));
         let ics = ics_of(&standalone(&task, None), Utc::now());
