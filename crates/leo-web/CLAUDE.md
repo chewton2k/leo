@@ -630,6 +630,27 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   ≤24 lines / 800 UTF-16 units, escaped, always beside the rail; preview updates
   never redraw the editor.
 
+- Split view (2026-11-26, the user's call: "literally just a note opened on the side"): a second
+  full note pane, `#beside` (`app/beside.js`, `panes[1]`), with its own margin (`marginFresh`),
+  width bars (only from 900 px of pane, `data-wide`), outline and scroll (`leoDoc.mount`'s
+  `scroller`); `active` keeps body-focused keys, Select all and pastes in the focused pane. The pane
+  clicked or focused last (`usePane`, capture `pointerdown`/`focusin`) is `state.session`,
+  `marginPage`, Felix's note and the window title; an open chat keeps its messages. The divider is
+  `leoPaneResize` (`leo-beside-width`, 380 px each side, double-click halves, arrows) and the width
+  control while split; `SPLIT_ROOM` (760) applies only while split: opening folds the explorer to
+  its rail, and a window with less room closes beside ("Not enough room for two notes"). Open beside
+  is in the explorer note menu (with Close split view while split) and a right-third drop zone
+  ("Open here" / "Open beside", the files overlay's style, never for files, Felix first); exit by the
+  `.pane-close` × on each pane, the ⋯ menu's Close this pane or any page that is not a note (beside is
+  saved first; a failed save keeps it with Close anyway when the draft is kept). Closing the left
+  pane promotes the right with its unsaved typing (`besideTake`, `replaceState`, the same session, so
+  no conflict copy), as does opening `#/n/<right id>`. The hash names the left pane; Back and
+  Forward change only it; a note open in one pane is refused in the other; beside is not restored
+  after a restart. Trash closes a pane without a save (`paneGone`); Felix's reloads check unsaved
+  typing per pane (`saving.get(key)`). Look (Style D2): one background, a 1 px `--line` hairline in
+  the 8 px handle, a 10 px 6% shade on the active pane, the other pane's chips in `--faint`; print
+  shows only the focused pane.
+
 Decided: Obsidian-style live preview, nothing jumps when a line opens
 (2026-11-02); `/` quick menu writes plain Markdown (2026-11-09); tags are not
 read (root CLAUDE.md, 2026-11-17).

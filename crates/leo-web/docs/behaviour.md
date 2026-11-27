@@ -661,6 +661,21 @@ outside clicks dismiss the heading list without swallowing the destination click
 The heading disclosure opens on mouse hover without taking focus, stays open across its summary and menu, and closes on leaving both. Click, keyboard and touch disclosure and outside dismissal remain available. Felix draws only when the user asks to see, draw or visualize something (2026-11-14, the user's call, replacing the 2026-11-09 complexity threshold): one ```svg (320 wide, theme colour tokens): one picture, split into 2 to 5 `data-step` groups only when it unfolds in order (a process, derivation or cycle; 2026-11-15, the user's call), never Mermaid and never text characters. Margin reads never draw; margin replies and asks draw on request (Visualize). The after-reply drawing pass (`drawing::drawn`) runs only when the user's message asks for a drawing (`drawing::asks_to_see`) and keeps only one clean ```svg block (`drawing::picked`); a root without `fill` defaults to `var(--text)`, so unpainted text and shapes follow the theme. User-written ```mermaid in notes and old replies still renders strictly, and SVG stays an inert image. `BASE` stays under 4,500 bytes.
 
 
+- Split view (2026-11-26, the user's call): drag a note from the explorer onto the right third of
+  the note ("Open beside") or choose Open beside in its menu, and it opens as a second full note on
+  the right, with its own margin notes, outline, width bars (in a pane 900 px or wider) and scroll.
+  Dragging onto the left or centre ("Open here") replaces the note under the pointer. The bar between
+  the notes drags to resize them (remembered; double-click for half and half; arrow keys when
+  focused). Clicking or typing in a note makes it the active one: Felix talks about it, the window
+  title names it, a soft shade falls on it from the divider and the other note's header row goes
+  faint. A click in the explorer replaces the active note. Leave with the × at the end of either
+  note's header row, Close this pane in the ⋯ menu, Close split view in the explorer menu, or by
+  opening any page that is not a note (the right note is saved first). Closing the left note moves the
+  right one to the left with whatever you typed. Back and Forward move the left note only. A note
+  already open is not opened twice: leo says so and switches to it. A window too narrow for two notes
+  (under 760 px beside the explorer's rail) closes the right note with a toast. Printing prints the
+  active note. The second note is not reopened after a restart.
+
 ## Felix
 
 - Felix's chat list: the × turns into Delete on the first press; pressing
