@@ -362,7 +362,7 @@ test('undo and redo after bursts of typing, pastes and rewrites give back the re
 
 const marginNotes = read('app/margin-notes.js');
 const typingOf = new Function('lines', 'editing', 'container', 'onChange', 'outlineLater', 'Date', 'stop', 'draw', 'selectSpan', 'editSpan', 'told', 'tell', 'look', 'fit', 'slashSeen', 'editLine', 'ed',
-  `${doc.slice(doc.indexOf('const MOST_UNDO'), doc.indexOf('function historyKey('))}\n${lookups}\n${doc.slice(doc.indexOf('function onInput(e) {'), doc.indexOf('function singleRow('))}\nreturn { onInput, source: joinedText };`);
+  `${doc.slice(doc.indexOf('const MOST_UNDO'), doc.indexOf('function historyKey('))}\n${lookups}\n${doc.match(/const lineValue = .*;/)[0]}\n${doc.slice(doc.indexOf('function onInput(e) {'), doc.indexOf('function singleRow('))}\nreturn { onInput, source: joinedText };`);
 
 function notePage(body) {
   const timers = [];
@@ -379,7 +379,7 @@ function notePage(body) {
   s.title = { textContent: 'Note' };
   page.state.main = page.state.session = s;
   const area = { value: '', selectionStart: 0, selectionEnd: 0, closest: () => ({ style: {} }) };
-  const editing = { area, start: 2, end: 3, prefix: '', kind: 'line' };
+  const editing = { area, start: 2, end: 3, prefix: '', suffix: '', kind: 'line' };
   const lines = body.split('\n');
   const noop = () => {};
   const d = typingOf(lines, editing, { classList: { toggle: noop } }, (text) => { page.changed(s, text); page.readSoon(s, text); }, noop, Date, noop, noop, noop, noop, false, noop, noop, noop, noop, noop, ed);
