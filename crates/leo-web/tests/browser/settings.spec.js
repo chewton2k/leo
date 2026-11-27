@@ -257,7 +257,7 @@ test('Settings sections keep drafts and selections across redraws in both themes
   const server=http.createServer((req,res)=>{
     if(req.url==='/fixture.js') {res.setHeader('Content-Type','text/javascript; charset=utf-8');return res.end(fixture);}
     if(req.url==='/style.css') {res.setHeader('Content-Type','text/css; charset=utf-8');return res.end(css);}
-    res.setHeader('Content-Type','text/html; charset=utf-8');res.end('<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/style.css"></head><body class="on-settings"><header class="bar"><div class="bar-row"><nav class="crumbs" id="crumbs"></nav></div></header><div id="app-update-banner" hidden></div><main id="app"></main><script src="/fixture.js"></script></body></html>');
+    res.setHeader('Content-Type','text/html; charset=utf-8');res.end('<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/style.css"></head><body class="on-settings"><header class="bar"><div class="bar-row"><nav class="crumbs" id="crumbs"></nav></div></header><main id="app"></main><script src="/fixture.js"></script></body></html>');
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   try {

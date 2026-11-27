@@ -88,6 +88,9 @@ body.chat-open .quick-perch { display: none; }
   border: 0; border-radius: var(--r-md); background: none; color: var(--muted); font-size: var(--fs-base); text-align: left;
 }
 .side-row svg { width: 20px; height: 20px; flex: none; }
+.side-row[hidden] { display: none; }
+.side-row[data-action="update-offer"] { position: relative; color: var(--text); }
+.side-row[data-action="update-offer"]::after { content: ""; position: absolute; top: 7px; left: 28px; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .side-row .side-label { min-width: 0; }
 .side-row:hover { background: var(--wash); color: var(--text); }
 .side-row.on { background: var(--accent-soft); color: var(--text); }

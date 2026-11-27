@@ -275,3 +275,37 @@ test('Check again asks for a fresh Health check; other reloads do not', async ()
   await value.loadHealth({ dataset: {} });
   assert.deepEqual(paths, ['/api/health?fresh=true', '/api/health', '/api/health']);
 });
+test('the update offer shows only for available, downloading and ready updates, and escapes the version', () => {
+  const { value } = context();
+  const set = (updates) => vm.runInContext(`desktopApp = ${JSON.stringify({ updates })}`, value);
+  const sheets = [];
+  value.confirmSheet = (options) => sheets.push(options);
+  value.go = (hash) => sheets.push(hash);
+  for (const state of ['idle', 'checking', 'current', 'installing', 'error']) { set({ state, version: '1.2.3' }); assert.equal(value.updateOffer(), null); }
+  const button = { hidden: true, title: '', dataset: {}, attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } };
+  value.$ = () => button;
+  set({ state: 'available', version: '<b>1' });
+  value.updateOfferButton();
+  assert.equal(button.hidden, false);
+  assert.equal(button.dataset.state, 'available');
+  assert.equal(button.attrs['aria-label'], 'Update to leo <b>1');
+  value.offerUpdate();
+  assert.equal(sheets[0].title, 'Update to leo &lt;b&gt;1?');
+  assert.match(sheets[0].data, /download_update/);
+  set({ state: 'downloading', version: '1.2.3' });
+  value.offerUpdate();
+  assert.equal(sheets[1], '#/settings/updates');
+  set({ state: 'ready', version: '1.2.3', busy: true });
+  value.updateOfferButton();
+  assert.equal(button.attrs['aria-label'], 'Restart to update to leo 1.2.3');
+  value.toast = (message) => sheets.push(message);
+  value.offerUpdate();
+  assert.match(sheets[2], /Finish recording or dictation first/);
+  set({ state: 'ready', version: '1.2.3', busy: false });
+  value.offerUpdate();
+  assert.match(sheets[3].data, /restart_update/);
+  set({ state: 'current' });
+  value.updateOfferButton();
+  assert.equal(button.hidden, true);
+  assert.equal(button.dataset.state, undefined);
+});

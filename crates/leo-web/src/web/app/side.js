@@ -136,6 +136,7 @@ function drawSide() {
   side.lastSig = sig;
   const pillBefore = box.querySelector('.side-tree .side-pill');
   const pillFrom = pillBefore ? pillBefore.getBoundingClientRect() : null;
+  const offer = updateOffer();
   const paint = () => refreshPanel(box, `
     <div class="side-head" data-tauri-drag-region="deep">
       <button class="icon-btn side-fold" data-action="side-fold" aria-label="${sideShown() ? 'Hide folders' : 'Show folders'}" title="${sideShown() ? 'Hide folders' : 'Show folders'}" aria-expanded="${sideShown()}" aria-controls="side-explorer">${ICON.sidebar}</button>
@@ -150,6 +151,7 @@ function drawSide() {
         ${sideRow('upload', ICON.upload, 'Note from a file', { attrs: ` data-dir="${esc(actionDir)}"` })}
       </nav>
       <nav class="side-foot" aria-label="This app">
+        ${sideRow('update-offer', ICON.download, 'Update', { attrs: offer ? ` data-state="${offer.state}"` : ' hidden', hint: updateOfferLabel(offer), aria: updateOfferLabel(offer) })}
         ${sideRow('settings', ICON.gear, 'Settings', { on: here === 'settings' })}
       </nav>
     </div>
