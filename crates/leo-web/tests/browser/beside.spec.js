@@ -537,3 +537,35 @@ test('unfolding the explorer while two notes need the room opens it as a drawer 
   await expect(page.locator('#beside #title')).toHaveText(b.title);
   expect(await widths()).toEqual(before);
 });
+
+test('an answer to a margin question asked in the left pane lands in the left margin after the right pane is clicked', async ({ page }) => {
+  const [a, b] = await notes(page, 'Intro line\n\nA binary heap keeps the minimum at the root.\n\nLast line', 'Right words.');
+  await split(page, a, b);
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const at = '2026-11-26T10:00:00Z';
+  await page.route(`**/api/notes/${a.id}/margin/threads`, async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    await held;
+    await route.fulfill({ json: { id: 'asked-left', note: a.id, quote: 'keeps the minimum', prefix: 'A binary heap ', suffix: ' at the root.', status: 'open', source: 'ask', messages: [{ from: 'you', text: 'Why?', at }, { from: 'felix', text: 'Because the heap property holds.', at }], created_at: at, updated_at: at } });
+  });
+  await page.locator('#app #doc .blk', { hasText: 'keeps the minimum' }).click();
+  const area = page.locator('#app #doc textarea.line-edit');
+  await expect(area).toHaveCount(1);
+  await area.evaluate((el) => {
+    const from = el.value.indexOf('keeps the minimum');
+    el.focus();
+    el.setSelectionRange(from, from + 'keeps the minimum'.length);
+    el.dispatchEvent(new Event('select'));
+  });
+  await page.locator('.ask-float').getByRole('button', { name: 'Ask Felix' }).click();
+  const question = page.locator('#app .margin-note[data-id="draft"]').getByRole('textbox', { name: 'Ask Felix about this passage' });
+  await question.fill('Why?');
+  await question.press('Enter');
+  await page.locator('#beside #note-facts').click();
+  await expect(page.locator('#beside')).toHaveClass(/\bpane-on\b/);
+  release();
+  await expect(page.locator('#app .margin-note[data-id="asked-left"]')).toHaveCount(1);
+  await expect(page.locator('#app .margin-note[data-id="draft"]')).toHaveCount(0);
+  await expect(page.locator('#beside .margin-note[data-id="asked-left"]')).toHaveCount(0);
+});

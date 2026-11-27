@@ -1076,17 +1076,21 @@ function marginRevisits(source, origin, open, edit) {
 
 async function marginReopen(id) {
   const s = marginPage.s;
-  if (marginPage.reopening.has(id)) return;
-  marginPage.reopening.add(id);
+  const page = marginPage;
+  const back = marginLater((fn) => fn());
+  if (page.reopening.has(id)) return;
+  page.reopening.add(id);
   try {
-    const done = await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(id)}`, { method: 'POST', body: { status: 'open', gone: marginPage.gone } });
-    if (marginPage.s !== s) return;
-    marginPage.resolved = marginPage.resolved.filter((r) => r.id !== id);
-    marginPage.faded.delete(id);
-    if (!marginPage.threads.some((t) => t.id === done.id)) marginPage.threads.push(done);
-    marginOpen(done.id, true);
+    const done = await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(id)}`, { method: 'POST', body: { status: 'open', gone: page.gone } });
+    back(() => {
+      if (marginPage.s !== s) return;
+      marginPage.resolved = marginPage.resolved.filter((r) => r.id !== id);
+      marginPage.faded.delete(id);
+      if (!marginPage.threads.some((t) => t.id === done.id)) marginPage.threads.push(done);
+      marginOpen(done.id, true);
+    });
   } finally {
-    marginPage.reopening.delete(id);
+    page.reopening.delete(id);
   }
 }
 
@@ -1519,32 +1523,37 @@ async function marginSubmit(e) {
 }
 
 async function marginReply(s, el, t, text, area = null) {
+  const back = marginLater((fn) => fn());
   marginSaying(el, '');
   marginPage.thinking.set(t.id, { text });
   marginDraw();
   if (t.reply?.text !== text) t.reply = { text, request: requestId() };
   try {
     const done = await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(t.id)}/reply`, { method: 'POST', body: { text, request: t.reply.request } });
-    if (marginPage.s !== s) return;
-    marginPage.thinking.delete(t.id);
-    marginPage.threads = marginPage.threads.map((old) => (old.id === done.id ? done : old));
-    marginDraw();
-    const fresh = marginPage.els.get(done.id);
-    const replies = fresh && [...fresh.querySelectorAll('.margin-felix')];
-    if (replies?.length && marginIsOpen(done)) marginAnswer(replies[replies.length - 1], marginNow(done), true);
-    if (marginPage.open === done.id) $('textarea', fresh)?.focus();
+    back(() => {
+      if (marginPage.s !== s) return;
+      marginPage.thinking.delete(t.id);
+      marginPage.threads = marginPage.threads.map((old) => (old.id === done.id ? done : old));
+      marginDraw();
+      const fresh = marginPage.els.get(done.id);
+      const replies = fresh && [...fresh.querySelectorAll('.margin-felix')];
+      if (replies?.length && marginIsOpen(done)) marginAnswer(replies[replies.length - 1], marginNow(done), true);
+      if (marginPage.open === done.id) $('textarea', fresh)?.focus();
+    });
   } catch (error) {
-    if (marginPage.s !== s) return;
-    marginPage.thinking.delete(t.id);
-    marginDraw();
-    if (error instanceof Locked) throw error;
-    if (el.isConnected) {
-      if (area) {
-        area.value = text;
-        marginSized(area);
+    back(() => {
+      if (marginPage.s !== s) return;
+      marginPage.thinking.delete(t.id);
+      marginDraw();
+      if (error instanceof Locked) throw error;
+      if (el.isConnected) {
+        if (area) {
+          area.value = text;
+          marginSized(area);
+        }
+        marginSaying(el, error.status === 409 && error.data?.why === 'busy' ? 'Felix is still answering this.' : error.message);
       }
-      marginSaying(el, error.status === 409 && error.data?.why === 'busy' ? 'Felix is still answering this.' : error.message);
-    }
+    });
   }
 }
 
@@ -1583,6 +1592,7 @@ function marginRekey(from, to) {
 }
 
 async function marginAskOn(s, t, question) {
+  const back = marginLater((fn) => fn());
   marginPage.drafted.delete(marginDraftKey(t));
   marginSaying(marginPage.els.get('draft'), '');
   marginPage.thinking.set('draft', { text: question });
@@ -1593,58 +1603,63 @@ async function marginAskOn(s, t, question) {
     await flush(s);
     done = await api(`/api/notes/${enc(s.note.id)}/margin/threads`, { method: 'POST', body: { version: s.note.version, quote: t.quote, prefix: t.prefix, suffix: t.suffix, question, gone: marginPage.gone, request: t.ask.request } });
   } catch (error) {
-    if (marginPage.s !== s) return;
-    marginPage.thinking.delete('draft');
-    if (error instanceof Locked) throw error;
-    const el = marginPage.els.get('draft');
-    if (marginPage.draft === t && marginPage.open === 'draft' && el) {
-      const area = $('textarea', el);
-      area.value = question;
-      marginSized(area);
-      marginSaying(el, error.message);
-      marginDraw();
-      area.focus({ preventScroll: true });
-    } else {
-      if (marginPage.draft === t) {
-        marginDropThread('draft');
-        marginPage.draft = null;
+    back(() => {
+      if (marginPage.s !== s) return;
+      marginPage.thinking.delete('draft');
+      if (error instanceof Locked) throw error;
+      const el = marginPage.els.get('draft');
+      if (marginPage.draft === t && marginPage.open === 'draft' && el) {
+        const area = $('textarea', el);
+        area.value = question;
+        marginSized(area);
+        marginSaying(el, error.message);
+        marginDraw();
+        area.focus({ preventScroll: true });
+      } else {
+        if (marginPage.draft === t) {
+          marginDropThread('draft');
+          marginPage.draft = null;
+        }
+        toast(error.message, { bad: true });
+        marginDraw();
       }
-      toast(error.message, { bad: true });
-      marginDraw();
-    }
+    });
     return;
   }
-  if (marginPage.s !== s) return;
-  marginPage.thinking.delete('draft');
-  const open = marginPage.draft === t && marginPage.open === 'draft';
-  if (marginPage.draft === t) {
-    marginRekey('draft', done.id);
-    marginPage.draft = null;
-  }
-  if (open) marginPage.open = done.id;
-  else marginPage.arriving.add(done.id);
-  marginPage.threads.push(done);
-  marginDraw();
-  if (!open) return;
-  const fresh = marginPage.els.get(done.id);
-  const replies = fresh && [...fresh.querySelectorAll('.margin-felix')];
-  if (replies?.length) marginAnswer(replies[replies.length - 1], marginNow(done), true);
-  $('textarea', fresh)?.focus();
+  back(() => {
+    if (marginPage.s !== s) return;
+    marginPage.thinking.delete('draft');
+    const open = marginPage.draft === t && marginPage.open === 'draft';
+    if (marginPage.draft === t) {
+      marginRekey('draft', done.id);
+      marginPage.draft = null;
+    }
+    if (open) marginPage.open = done.id;
+    else marginPage.arriving.add(done.id);
+    marginPage.threads.push(done);
+    marginDraw();
+    if (!open) return;
+    const fresh = marginPage.els.get(done.id);
+    const replies = fresh && [...fresh.querySelectorAll('.margin-felix')];
+    if (replies?.length) marginAnswer(replies[replies.length - 1], marginNow(done), true);
+    $('textarea', fresh)?.focus();
+  });
 }
 
 const marginPins = new Map();
 
 async function marginPin(t) {
   const s = marginPage.s;
+  const back = marginLater((fn) => fn());
   const pin = marginPins.get(t.id) || { latest: 0, saved: t.pinned };
   marginPins.set(t.id, pin);
   const mine = ++pin.latest;
-  const show = (pinned) => {
+  const show = (pinned) => back(() => {
     const live = marginThread(t.id);
     if (mine !== pin.latest || marginPage.s !== s || !live || live.pinned === pinned) return;
     live.pinned = pinned;
     marginDraw();
-  };
+  });
   const pinned = !t.pinned;
   t.pinned = pinned;
   if (pinned || marginPage.open === t.id) marginDraw();
@@ -1671,6 +1686,7 @@ const marginLight = ({ id, quote, prefix, suffix }) => ({ id, quote, prefix, suf
 
 async function marginStatus(t, status) {
   const s = marginPage.s;
+  const back = marginLater((fn) => fn());
   const at = marginPage.threads.indexOf(t);
   const wasOpen = marginPage.open === t.id;
   const box = marginPage.els.get(t.id);
@@ -1685,7 +1701,8 @@ async function marginStatus(t, status) {
   try {
     await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(t.id)}`, { method: 'POST', body: { status } });
   } catch (e) {
-    if (marginPage.s === s && !marginThread(t.id)) {
+    back(() => {
+      if (marginPage.s !== s || marginThread(t.id)) return;
       marginPage.resolved = marginPage.resolved.filter((old) => old.id !== t.id);
       marginPage.faded.delete(t.id);
       marginPage.threads.splice(Math.max(at, 0), 0, t);
@@ -1696,27 +1713,28 @@ async function marginStatus(t, status) {
         area.value = typed;
         marginSized(area);
       }
-    }
+    });
     throw e;
   }
-  if (marginPage.s !== s) return;
-  if (marginThread(t.id)) {
+  if (back(() => marginPage.s !== s)) return;
+  back(() => {
+    if (!marginThread(t.id)) return;
     marginPage.threads = marginPage.threads.filter((old) => old.id !== t.id);
     marginDropThread(t.id);
     if (status === 'resolved' && !marginPage.resolved.some((old) => old.id === t.id)) marginPage.resolved.unshift(marginLight(t));
     marginDraw();
-  }
+  });
   if (status === 'dismissed') {
     toast('Dismissed Felix’s note', {
       action: 'Undo',
       run: async () => {
         try {
-          await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(t.id)}`, { method: 'POST', body: { status: 'open', gone: marginPage.gone } });
+          await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(t.id)}`, { method: 'POST', body: { status: 'open', gone: back(() => marginPage.gone) } });
         } catch (e) {
           if (e instanceof Locked) throw e;
           return toast(e.message, { bad: true });
         }
-        if (marginPage.s === s) await marginLoad(s);
+        if (back(() => marginPage.s === s)) await back(() => marginLoad(s));
       },
     });
   }
@@ -2119,50 +2137,61 @@ async function marginRead(s) {
   const reading = {};
   marginPage.reading = reading;
   queueMicrotask(sideRedrawSoon);
+  const back = (fn) => withPane(p, fn);
   try {
     await flush(s);
-    if (s !== marginPage.s || marginPage.mode !== 'along' || saving.get(s.key)) return;
-    const source = s.doc.source();
-    const blocks = marginKit.changedBlocks(marginPage.baseline, source);
-    if (!blocks.length) return;
-    marginPage.nextRead = Date.now() + (marginPrefs?.gap ?? READ_GAP_SECONDS) * 1000;
-    marginPage.newest = null;
-    for (const path of marginPage.svg?.querySelectorAll('path.pencil.leaving') || []) path.remove();
-    marginShowReading(s, source, blocks);
-    const got = await api(`/api/notes/${enc(s.note.id)}/margin/read`, { method: 'POST', body: { version: s.note.version, blocks, keep: [...new Set([marginPage.open, ...marginPage.els.keys()])].filter((id) => id && marginTyped(id)), changed: marginChanged(s) } });
-    if (s !== marginPage.s) return;
-    const along = marginPage.mode === 'along';
-    if (!got?.failed) marginPage.baseline = marginKit.blocksOf(source);
-    if (!along) marginSetStatus('');
-    else if (got?.failed) marginSetStatus(got.error || READ_FAILED);
-    else marginSetStatus(got?.note ? '' : 'Felix read it; nothing to add.', true);
-    if (!got?.failed && !got?.note) marginQuiet(marginPage.readingSpan);
-    if (!got?.failed) marginReadingDone(!got?.note);
-    if (got?.note || got?.resolved?.length) {
-      const held = [];
-      for (const id of got.resolved || []) {
-        if (!marginTyped(id)) continue;
-        const back = await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(id)}`, { method: 'POST', body: { status: 'open', gone: marginPage.gone } }).catch((e) => {
-          if (e instanceof Locked) throw e;
-          return null;
-        });
-        if (marginPage.s !== s) return;
-        if (back) held.push(id);
-      }
+    const asked = back(() => {
+      if (s !== marginPage.s || marginPage.mode !== 'along' || saving.get(s.key)) return null;
+      const source = s.doc.source();
+      const blocks = marginKit.changedBlocks(marginPage.baseline, source);
+      if (!blocks.length) return null;
+      marginPage.nextRead = Date.now() + (marginPrefs?.gap ?? READ_GAP_SECONDS) * 1000;
+      marginPage.newest = null;
+      for (const path of marginPage.svg?.querySelectorAll('path.pencil.leaving') || []) path.remove();
+      marginShowReading(s, source, blocks);
+      return { source, body: { version: s.note.version, blocks, keep: [...new Set([marginPage.open, ...marginPage.els.keys()])].filter((id) => id && marginTyped(id)), changed: marginChanged(s) } };
+    });
+    if (!asked) return;
+    const got = await api(`/api/notes/${enc(s.note.id)}/margin/read`, { method: 'POST', body: asked.body });
+    const more = back(() => {
+      if (s !== marginPage.s) return false;
+      const along = marginPage.mode === 'along';
+      if (!got?.failed) marginPage.baseline = marginKit.blocksOf(asked.source);
+      if (!along) marginSetStatus('');
+      else if (got?.failed) marginSetStatus(got.error || READ_FAILED);
+      else marginSetStatus(got?.note ? '' : 'Felix read it; nothing to add.', true);
+      if (!got?.failed && !got?.note) marginQuiet(marginPage.readingSpan);
+      if (!got?.failed) marginReadingDone(!got?.note);
+      return Boolean(got?.note || got?.resolved?.length);
+    });
+    if (!more) return;
+    const held = [];
+    for (const id of got.resolved || []) {
+      if (!back(() => marginTyped(id))) continue;
+      const reopened = await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(id)}`, { method: 'POST', body: { status: 'open', gone: back(() => marginPage.gone) } }).catch((e) => {
+        if (e instanceof Locked) throw e;
+        return null;
+      });
+      if (back(() => marginPage.s !== s)) return;
+      if (reopened) held.push(id);
+    }
+    const crowded = back(() => {
       const now = s.doc.source();
       const fresh = got.note && marginKit.find(now, got.note);
-      const crowded = fresh && marginPage.threads.some((t) => {
+      return fresh && marginPage.threads.some((t) => {
         const at = held.includes(t.id) && marginKit.find(now, t);
         return at && at.from < fresh.to && fresh.from < at.to;
       });
-      if (crowded) {
-        const kept = await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(got.note.id)}`, { method: 'DELETE' }).then(() => false, (e) => {
-          if (e instanceof Locked) throw e;
-          return true;
-        });
-        if (marginPage.s !== s) return;
-        if (!kept) got.note = null;
-      }
+    });
+    if (crowded) {
+      const kept = await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(got.note.id)}`, { method: 'DELETE' }).then(() => false, (e) => {
+        if (e instanceof Locked) throw e;
+        return true;
+      });
+      if (back(() => marginPage.s !== s)) return;
+      if (!kept) got.note = null;
+    }
+    back(() => {
       const freed = marginPage.threads.filter((t) => got.resolved?.includes(t.id) && !held.includes(t.id));
       for (const t of freed) marginDropThread(t.id);
       marginPage.threads = marginPage.threads.filter((t) => !freed.includes(t));
@@ -2175,18 +2204,19 @@ async function marginRead(s) {
         if (voice) voice.textContent = `Felix: ${marginNow(got.note)}`;
       }
       marginRedraw();
-    }
+    });
   } catch (e) {
     if (e instanceof Locked) throw e;
-    if (marginPage.s === s) {
+    back(() => {
+      if (marginPage.s !== s) return;
       const paused = { daily: 'Paused for today: daily limit reached', soon: 'Felix reads again in a moment', busy: 'Already reading', felix: 'Paused while Felix answers', unedited: 'Reads changes after you edit', mode: '' };
       const stale = e.status === 409 && !e.data?.why;
       if (stale) marginPage.nextRead = 0;
       if (marginPage.mode !== 'along') marginSetStatus('');
       else marginSetStatus(paused[e.data?.why] || (stale ? 'This note changed while Felix was reading. He will try again after your next edit.' : noAi(e.message) ? e.message : READ_FAILED));
-    }
+    });
   } finally {
-    withPane(p, () => {
+    back(() => {
       if (s !== marginPage.s || marginPage.reading !== reading) return;
       marginPage.reading = false;
       clearTimeout(marginPage.faceTimer);
