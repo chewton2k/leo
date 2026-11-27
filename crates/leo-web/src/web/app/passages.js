@@ -19,7 +19,7 @@ function hideAskFloat() {
 }
 
 function placeFloat(el, point) {
-  const doc = $('#doc');
+  const doc = inPane('#doc');
   if (!point || !doc) return false;
   el.hidden = false;
   const width = el.offsetWidth;
@@ -38,7 +38,7 @@ function placeAskFloat(has) {
   const long = Boolean(box && marginPage.layer && !chat.isOpen()) && Array.from(s.doc.selection()?.text || '').length > MARGIN_PASSAGE_READS;
   askFloat.toggleAttribute('data-long', long);
   if (long) askFloat.querySelector('.ask-long').textContent = `Felix reads the first ${MARGIN_PASSAGE_READS.toLocaleString('en')} characters of the selected passage.`;
-  const columns = $('.note-columns');
+  const columns = inPane('.note-columns');
   const beside = Boolean(box && columns && ['right', 'both'].includes(columns.dataset.margin) && !marginTaken(s, s.doc.selection()));
   askFloat.classList.toggle('beside', beside);
   if (!beside) {
@@ -47,7 +47,7 @@ function placeAskFloat(has) {
   }
   askFloat.hidden = false;
   const gap = parseFloat(getComputedStyle(columns).getPropertyValue('--margin-gap')) || 24;
-  const left = $('#doc').getBoundingClientRect().right + gap;
+  const left = inPane('#doc').getBoundingClientRect().right + gap;
   askFloat.style.left = `${Math.min(left, window.innerWidth - askFloat.offsetWidth - 8)}px`;
   askFloat.style.top = `${Math.max(8, Math.min(box.top - 4, window.innerHeight - askFloat.offsetHeight - 12))}px`;
 }
@@ -190,22 +190,22 @@ function addSheet({ text }) {
     const target = pick.target;
     try {
       let base = null;
-      const isOpen = state.view === 'note' && state.session && state.session.note.id === target.id;
+      const isOpen = paneWith(target.id);
       if (isOpen) {
-        const s = await ready();
+        const s = await ready(isOpen.s);
         base = s ? s.note.version : null;
       }
       if (!base) base = (await api(`/api/notes/${enc(target.id)}`)).version;
       const line = pick.where === 'cursor' && caret !== null ? caret + 1 : null;
       const done = await api(`/api/notes/${enc(target.id)}/insert`, { method: 'POST', body: { text, line, base, request } });
       closeSheet();
-      if (state.view === 'note' && state.session && state.session.note.id === target.id) await showNote(target.id);
+      if (paneWith(target.id)) await showNote(target.id, { pane: paneWith(target.id) });
       toast(`Added to “${target.title}”`, {
         action: 'Undo',
         run: async () => {
           try {
             await api(`/api/notes/${enc(target.id)}`, { method: 'PATCH', body: { body: done.before, base: done.version } });
-            if (state.view === 'note' && state.session && state.session.note.id === target.id) await showNote(target.id);
+            if (paneWith(target.id)) await showNote(target.id, { pane: paneWith(target.id) });
             toast(`Took it out of “${target.title}”`);
           } catch (e) {
             toast(e.status === 409 ? 'That note has changed since, so leo left it as it is.' : e.message, { bad: true });
@@ -260,7 +260,7 @@ function blockText(block) {
 
 function readingAnchor() {
   const top = readingTop();
-  const first = [...document.querySelectorAll('#doc .blk')].find((b) => blockText(b) && b.getBoundingClientRect().bottom > top);
+  const first = [...panes[0].el.querySelectorAll('#doc .blk')].find((b) => blockText(b) && b.getBoundingClientRect().bottom > top);
   if (!first) return null;
   return { line: Number(first.dataset.start) || 0, text: blockText(first), dy: Math.round(top - first.getBoundingClientRect().top) };
 }
@@ -295,8 +295,8 @@ async function restoreReading(id, mine) {
   }
   const anchor = got && got.anchor;
   if (mine !== seq || reading.id !== id || reading.user || !anchor || (!anchor.line && !anchor.text)) return;
-  if (window.scrollY > 4 || (state.session && state.session.doc && state.session.doc.isEditing())) return;
-  const blocks = [...document.querySelectorAll('#doc .blk')];
+  if (window.scrollY > 4 || panes[0].s?.doc?.isEditing()) return;
+  const blocks = [...panes[0].el.querySelectorAll('#doc .blk')];
   const block = (anchor.text && blocks.find((b) => blockText(b) === anchor.text)) || blocks.find((b) => Number(b.dataset.start) >= Number(anchor.line));
   if (!block) return;
   reading.quietUntil = Date.now() + 1500;

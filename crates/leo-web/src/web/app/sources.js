@@ -13,20 +13,20 @@ async function fetchSources(note, query, source, cursor) {
 }
 
 function asideOpen() {
-  return Boolean($('.note-layout.aside-open'));
+  return Boolean(inPane('.note-layout.aside-open'));
 }
 
 let asideReturn = null;
 
 function openAside(kind, facts, body) {
-  const layout = $('.note-layout');
-  const box = $('#note-aside');
+  const layout = inPane('.note-layout');
+  const box = inPane('#note-aside');
   if (!layout || !box) return null;
   const arriving = !layout.classList.contains('aside-open');
   if (arriving) asideReturn = { focus: document.activeElement, top: window.scrollY };
   layout.classList.add('aside-open');
   layout.dataset.aside = kind;
-  $('#note-aside-facts').innerHTML = facts;
+  inPane('#note-aside-facts').innerHTML = facts;
   box.innerHTML = body;
   if (arriving) {
     window.scrollTo(0, 0);
@@ -36,12 +36,12 @@ function openAside(kind, facts, body) {
 }
 
 function closeAside() {
-  const layout = $('.note-layout');
+  const layout = inPane('.note-layout');
   if (!layout || !layout.classList.contains('aside-open')) return;
   layout.classList.remove('aside-open');
   delete layout.dataset.aside;
-  $('#note-aside').innerHTML = '';
-  $('#note-aside-facts').innerHTML = '';
+  inPane('#note-aside').innerHTML = '';
+  inPane('#note-aside-facts').innerHTML = '';
   sourcePage = null;
   fileAside = null;
   if (typeof marginDraw === 'function') marginDraw();
@@ -63,13 +63,13 @@ function focusAgain(focus) {
 const backLink = '<button type="button" class="facts-link" data-action="note-back">Back to note</button>';
 
 function transcriptOpen() {
-  const layout = $('.note-layout');
+  const layout = inPane('.note-layout');
   return Boolean(layout && layout.dataset.aside === 'transcript' && sourcePage);
 }
 
 function holdAside(id) {
   if (!asideOpen()) return null;
-  const kind = $('.note-layout').dataset.aside;
+  const kind = inPane('.note-layout').dataset.aside;
   if (kind === 'file' && fileAside) return { kind, file: fileAside, back: asideReturn };
   if (kind === 'transcript' && sourcePage && sourcePage.note === id) return { kind, back: asideReturn };
   return null;

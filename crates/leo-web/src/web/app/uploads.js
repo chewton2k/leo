@@ -51,7 +51,7 @@ async function addPictures(s, files) {
     try {
       const ready = await pictureFor(file);
       const saved = await putBody(`/api/pictures/${enc(pastedName(ready, i))}`, ready.blob);
-      if (state.session !== s || !s.doc) return;
+      if (!paneOf(s) || !s.doc) return;
       s.doc.insert(`![${altFor(file.name)}](${saved.path})`);
       added += 1;
     } catch (e) {
@@ -329,13 +329,13 @@ function watchUpload(id, dir, into = null) {
 // saving its draft, so typing during the upload never makes a conflict copy.
 async function addSection(into, job) {
   if (!job) return;
-  const isHere = () => state.view === 'note' && state.session && state.session.note && state.session.note.id === into.id;
+  const isHere = () => paneWith(into.id);
   let done = null;
   try {
     for (let attempt = 0; attempt < 2 && !done; attempt++) {
       let base = null;
       if (isHere()) {
-        const s = await ready();
+        const s = await ready(isHere().s);
         base = s ? s.note.version : null;
       }
       try {
@@ -347,14 +347,14 @@ async function addSection(into, job) {
     }
   } finally {
     // ready() paused the editor; drawing the note again restarts it either way.
-    if (isHere()) await showNote(into.id);
+    if (isHere()) await showNote(into.id, { pane: isHere() });
   }
   toast(`Added to “${into.title}”`, {
     action: 'Undo',
     run: async () => {
       try {
         await api(`/api/notes/${enc(into.id)}`, { method: 'PATCH', body: { body: done.before, base: done.version } });
-        if (isHere()) await showNote(into.id);
+        if (isHere()) await showNote(into.id, { pane: isHere() });
         toast(`Took it out of “${into.title}”`);
       } catch (e) {
         toast(e.status === 409 ? 'That note has changed since, so leo left it as it is.' : e.message, { bad: true });
@@ -368,7 +368,7 @@ async function showLatest() {
   else await loadSideFolders();
 }
 
-async function drawOriginals(note) {
+async function drawOriginals(note, pane) {
   if (!note.id) return;
   let files = [];
   try {
@@ -376,8 +376,8 @@ async function drawOriginals(note) {
   } catch (e) {
     return;
   }
-  const row = $('.note-originals');
-  if (!files.length || !row || state.view !== 'note' || state.session.note.id !== note.id) return;
+  const row = inPane('.note-originals', pane);
+  if (!files.length || !row || pane.s?.note.id !== note.id) return;
   const all = files.length > 1 ? `<a class="chip original all" href="/api/notes/${enc(note.id)}/originals.zip" download>${ICON.paperclip}Download all ${files.length}</a>` : '';
   row.insertAdjacentHTML('beforeend', files.map((f) => {
     const look = viewKind(f.name) ? ` data-action="view-original" data-id="${esc(note.id)}" data-name="${esc(f.name)}" title="Open ${esc(f.name)}"` : '';
@@ -396,7 +396,7 @@ async function viewOriginal(id, name, page = null) {
   const kind = viewKind(name);
   if (!kind) return;
   const url = `/api/notes/${enc(id)}/originals/${enc(name)}`;
-  if (state.view === 'note' && state.session && state.session.note.id === id) {
+  if (paneWith(id)) {
     sourcePage = null;
     return openFileAside(url, kind, name, page);
   }
