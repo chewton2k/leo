@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { pageHtml } = require('./page-source');
+const { pageHtml, paneHelpers } = require('./page-source');
 const kit = require('../src/web/margin.js');
 require('../src/web/chat.js');
 const docContext = { document: { addEventListener() {} }, leoMarkdown: {}, leoEditing: {} };
@@ -36,10 +36,12 @@ function harness() {
     clearTimeout: (id) => timers.delete(id), cancelAnimationFrame() {}, drawSide() {}, sideRedrawSoon() {}, queueMicrotask,
     $: () => null, svg: (paths) => paths, ICON: { book: '' }, stillMotion: () => false, fail: (e) => { throw e; }, ON_MAC: true, MOTION_MS: 180, POP_FROM: .95,
     noAi: globalThis.leoChat.noAi, esc: (text) => String(text), choiceCards: (options) => JSON.stringify(options), segmented: () => '', settingsSwitch: () => '',
+    state: { view: 'note' }, app: {},
   };
   vm.createContext(context);
   const core = fs.readFileSync(path.join(__dirname, '../src/web/app/core.js'), 'utf8');
   vm.runInContext(core.slice(core.indexOf('const SHORTCUT_KEYS'), core.indexOf('async function dictateHint')), context);
+  vm.runInContext(paneHelpers(), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/margin-notes.js'), 'utf8'), context);
   const state = vm.runInContext('marginPage', context);
   const session = () => ({ note: { id: 'a', version: 'abc' }, doc: { source: () => 'A changed paragraph long enough to read.' } });

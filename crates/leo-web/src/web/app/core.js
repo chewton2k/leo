@@ -529,6 +529,36 @@ function skeleton(n, surface = 'page') {
 let state = { view: null };
 let seq = 0;
 
+const panes = [{ el: app, get s() { return state.main; } }];
+const paneOf = (s) => (s ? panes.find((p) => p.s === s) : undefined);
+const here = () => paneOf(state.session) || panes[0];
+const paneWith = (id) => panes.find((p) => p.s && p.s.note.id === id);
+const inPane = (selector, p = here()) => $(selector, p.el);
+function withPane(p, fn) {
+  const at = state;
+  const session = at.session;
+  const margin = marginPage;
+  if (session === p.s && margin === p.margin) return fn();
+  at.session = p.s;
+  marginPage = p.margin;
+  try {
+    return fn();
+  } finally {
+    at.session = session;
+    marginPage = margin;
+  }
+}
+function marginLater(fn) {
+  const p = here();
+  return (...args) => withPane(p, () => fn(...args));
+}
+function leaveMain() {
+  const s = state.main;
+  s.doc.destroy();
+  if (state.session === s) state.session = null;
+  state.main = null;
+}
+
 const SEARCH_HIGHLIGHT_MS = 5000;
 const SEARCH_HIGHLIGHT_MOST = 300;
 const SEARCH_HIGHLIGHT_NODES = 20000;

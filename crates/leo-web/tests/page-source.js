@@ -19,8 +19,13 @@ function pageCss() {
     .join('');
 }
 
+function paneHelpers() {
+  const core = read('app/core.js');
+  return core.slice(core.indexOf('const panes ='), core.indexOf('const SEARCH_HIGHLIGHT_MS'));
+}
+
 function pageHtml() {
   return read('page-head.html') + pageCss() + read('page-tail.html');
 }
 
-module.exports = { pageCss, pageHtml };
+module.exports = { pageCss, pageHtml, paneHelpers };
