@@ -44,6 +44,8 @@ for (const p of panes) for (const type of ['pointerdown', 'focusin']) p.el.addEv
 function besideClose() {
   const s = besidePane.s;
   besidePane.seq++;
+  clearTimeout(besidePane.reading.timer);
+  besidePane.reading.id = null;
   if (s) {
     withPane(besidePane, marginLeave);
     s.doc.destroy();

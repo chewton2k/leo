@@ -569,3 +569,23 @@ test('an answer to a margin question asked in the left pane lands in the left ma
   await expect(page.locator('#app .margin-note[data-id="draft"]')).toHaveCount(0);
   await expect(page.locator('#beside .margin-note[data-id="asked-left"]')).toHaveCount(0);
 });
+
+const longBody = (tag) => Array.from({ length: 80 }, (_, i) => `Paragraph ${tag} ${i} keeps the note long enough to scroll.`).join('\n\n');
+
+test('closing the right pane right after scrolling keeps its saved reading place', async ({ page }) => {
+  const [a, b] = await notes(page, 'Left.', longBody('b'));
+  await page.request.put(`/api/notes/${b.id}/reading`, { data: { anchor: { line: 100, text: 'Paragraph b 50 keeps the note long enough', dy: 0 } } });
+  await split(page, a, b);
+  await expect.poll(() => page.locator('#beside').evaluate((el) => el.scrollTop)).toBeGreaterThan(800);
+  await page.waitForTimeout(1700);
+  await page.locator('#beside').hover();
+  await page.mouse.wheel(0, 200);
+  await page.waitForTimeout(200);
+  await page.locator('#beside .pane-close').click();
+  await expect(page.locator('#beside')).toBeHidden();
+  await page.waitForTimeout(2600);
+  const anchor = (await (await page.request.get(`/api/notes/${b.id}/reading`)).json()).anchor;
+  expect(anchor.line).toBeGreaterThan(0);
+  await besideMenu(page, b);
+  await expect.poll(() => page.locator('#beside').evaluate((el) => el.scrollTop)).toBeGreaterThan(800);
+});
