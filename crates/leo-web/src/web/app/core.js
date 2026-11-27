@@ -533,6 +533,8 @@ const paneOf = (s) => (s ? panes.find((p) => p.s === s) : undefined);
 const here = () => paneOf(state.session) || panes[0];
 const paneWith = (id) => panes.find((p) => p.s && p.s.note.id === id);
 const split = () => panes.some((p) => p !== panes[0] && p.s);
+const inFolder = (dir, folder) => dir === folder || dir.startsWith(`${folder}/`);
+const panesIn = (folder) => (state.view === 'note' ? panes.filter((p) => p.s && inFolder(p === panes[0] ? state.dir || '' : p.s.note.directory || '', folder)) : []);
 function reloadOpen(id) {
   const open = paneWith(id);
   return open && !saving.get(open.s.key) ? showNote(id, { pane: open }) : null;

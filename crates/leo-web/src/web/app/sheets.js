@@ -506,7 +506,7 @@ function renameFolder(from) {
     save: async (name) => {
       if (!validFolderName(name)) return false;
       try {
-        if (state.view === 'note' && (state.dir === from || state.dir.startsWith(`${from}/`))) await ready();
+        for (const p of panesIn(from)) await ready(p.s);
         const moved = await api('/api/dirs/rename', { method: 'POST', body: { from, name } });
         await afterMove(from, moved.path);
         toast(`Renamed folder to “${name}”`, {
@@ -526,13 +526,11 @@ function renameFolder(from) {
 async function trashFolder(from) {
   if (!from) return;
   const mine = seq;
-  const within = (dir) => dir === from || dir.startsWith(`${from}/`);
-  const inside = () => (state.view === 'note' ? panes.filter((p) => p.s && within(p === panes[0] ? state.dir : p.s.note.directory || '')) : []);
-  for (const p of inside()) await ready(p.s);
+  for (const p of panesIn(from)) await ready(p.s);
   const done = await api('/api/trash/move', { method: 'POST', body: { notes: [], dirs: [from] } });
-  if (mine === seq) for (const p of inside().reverse()) paneGone(p);
-  if (side.target === from || side.target?.startsWith(`${from}/`)) side.target = parentOf(from);
-  if (side.root === from || side.root.startsWith(`${from}/`)) sideFocus('');
+  if (mine === seq) for (const p of panesIn(from).reverse()) paneGone(p);
+  if (inFolder(side.target || '', from)) side.target = parentOf(from);
+  if (inFolder(side.root, from)) sideFocus('');
   loadSideFolders();
   refocusExplorer({ kind: 'folder', dir: parentOf(from) });
   toast(`Moved “${folderLabel(from)}” to the trash`, { action: 'Undo', run: () => undoTrashMove(done, from) });

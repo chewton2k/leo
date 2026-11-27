@@ -24,7 +24,7 @@ function accepts(e, target) {
   if (carries(e, NOTE_DRAG)) return !dragging.note || dragging.note.dir !== into;
   if (carries(e, FOLDER_DRAG)) {
     const from = dragging.folder;
-    return from !== null && into !== from && !into.startsWith(`${from}/`) && parentOf(from) !== into;
+    return from !== null && !inFolder(into, from) && parentOf(from) !== into;
   }
   return carries(e, 'Files');
 }
@@ -74,7 +74,7 @@ function springFolder(e) {
   }
   const dir = key;
   const from = dragging.folder;
-  if (dir === null || folderShown(dir) || (from !== null && (dir === from || dir.startsWith(`${from}/`)))) return;
+  if (dir === null || folderShown(dir) || (from !== null && inFolder(dir, from))) return;
   dragging.spring = { key, kind, timer: setTimeout(() => { if (!folderShown(dir)) twistFolder(dir, null, false); }, SPRING_MS) };
 }
 
@@ -377,7 +377,7 @@ async function dropNote(note, into) {
 }
 
 async function dropFolder(from, into) {
-  if (state.view === 'note' && (state.dir === from || state.dir.startsWith(`${from}/`))) await ready();
+  for (const p of panesIn(from)) await ready(p.s);
   let moved;
   try {
     moved = await api('/api/dirs/move', { method: 'POST', body: { from, into } });
@@ -396,18 +396,22 @@ async function dropFolder(from, into) {
 }
 
 async function afterMove(from, to, noteId = null) {
-  const dir = state.dir || '';
+  const moved = from ? panesIn(from) : [];
   if (from) {
     moveOpenFolders(from, to);
-    if (side.target === from || side.target?.startsWith(`${from}/`)) side.target = to + side.target.slice(from.length);
+    if (inFolder(side.target || '', from)) side.target = to + side.target.slice(from.length);
   }
-  const within = (at) => from && (at === from || at.startsWith(`${from}/`));
-  if (state.view === 'note' && within(dir)) state.dir = to + dir.slice(from.length);
-  const open = panes.filter((p) => p.s?.note.id && !saving.get(p.s.key) && (noteId === p.s.note.id || within(p === panes[0] ? dir : p.s.note.directory || '')));
-  if (open.length) {
-    for (const p of open) await showNote(p.s.note.id, { pane: p });
-    await loadSideFolders();
-  } else await showLatest();
+  if (moved.includes(panes[0])) state.dir = to + (state.dir || '').slice(from.length);
+  let reloaded = false;
+  for (const p of panes) {
+    const reload = p.s?.note.id && (noteId === p.s.note.id || moved.includes(p)) ? reloadOpen(p.s.note.id) : null;
+    if (reload) {
+      reloaded = true;
+      await reload;
+    }
+  }
+  if (reloaded) await loadSideFolders();
+  else await showLatest();
 }
 
 const PAGE_STEP = 20;

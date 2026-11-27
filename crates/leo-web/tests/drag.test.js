@@ -78,6 +78,22 @@ test('moving a folder reloads the pane whose own note was inside it, and leaves 
   assert.deepEqual(shown, ['latest']);
 });
 
+test('dropping a folder saves the pane whose note is inside it, judged by that pane, before moving it', async () => {
+  const readied = [];
+  const main = {note:{id:'main', directory:'Other'}, key:'m'};
+  const side = {el:{}, s:{note:{id:'side', directory:'Course/Week'}, key:'s'}};
+  const context = {side:{root:'', target:null}, state:{view:'note', dir:'Other', main, session:main}, app:{}, marginPage:null, felix:{NOTE_DRAG:'application/x-leo-note'}, clearTimeout(){},
+    document:{addEventListener(){}, querySelectorAll:() => [], body:{dataset:{}, classList:{remove(){},add(){},toggle(){}}}},
+    saving:{get:() => undefined}, moveOpenFolders(){}, showNote:async () => {}, loadSideFolders:async () => {}, showLatest:async () => {}, folderLabel:(dir) => dir, toast(){},
+    ready:async (s = context.state.session) => { readied.push(s.note.id); return s; }, api:async () => ({path:'Archive/Course'})};
+  vm.createContext(context);
+  vm.runInContext(require('./page-source').paneHelpers(), context);
+  vm.runInContext('panes', context).push(side);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/drag.js'), 'utf8'), context);
+  await context.dropFolder('Course', 'Archive');
+  assert.deepEqual(readied, ['side']);
+});
+
 function clock() {
   const list = [];
   return {

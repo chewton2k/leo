@@ -5,7 +5,7 @@ const sideDrawerOpen = () => document.body.classList.contains('side-drawer');
 const sideActive = () => sideWide() && !side.mini || sideDrawerOpen() || Boolean(document.querySelector('#folders-sheet'));
 const creationDir = (explicit) => {
   const dir = explicit ?? side.target ?? (state.view === 'note' ? state.dir || '' : '');
-  return !side.root || dir === side.root || dir.startsWith(`${side.root}/`) ? dir : side.root;
+  return !side.root || inFolder(dir, side.root) ? dir : side.root;
 };
 const side = { root: '', sort: 'title', flip: false, tasks: false, filter: '', focusKey: '', folders: [], loaded: false, mini: false, open: new Set(), revealed: new Set(), shut: new Set(), here: null, target: null, twisted: null, notes: new Map(), pending: [], reading: 0, visible: [], automatic: new Set(), generation: 0, sig: [], lastSig: '', pill: '', closing: new Set(), growing: null, freshUntil: Infinity, freshTimer: 0, quietTimer: 0, making: null, frame: 0, rev: null, revAt: 0, unopened: new Map() };
 // Folders the user opened with their own hands, kept across restarts. Folders
@@ -416,7 +416,7 @@ function foldSide() {
 }
 
 function moveOpenFolders(from, to) {
-  const moved = (path) => (path === from || path.startsWith(`${from}/`) ? to + path.slice(from.length) : path);
+  const moved = (path) => (inFolder(path, from) ? to + path.slice(from.length) : path);
   for (const set of [side.open, side.revealed, side.shut]) {
     const paths = [...set];
     set.clear();
@@ -832,7 +832,7 @@ async function explorerMoveMenu(target, note, owner) {
   const folders = await api('/api/folders');
   if (mine !== seq) return;
   const from = target.kind === 'note' ? note.directory : parentOf(target.dir);
-  const choices = ['', ...folders.map((f) => f.name)].filter((dir) => dir !== from && (target.kind === 'note' || dir !== target.dir && !dir.startsWith(`${target.dir}/`)));
+  const choices = ['', ...folders.map((f) => f.name)].filter((dir) => dir !== from && (target.kind === 'note' || !inFolder(dir, target.dir)));
   popupMenu(owner, {
     label: `Move “${note?.title || folderLabel(target.dir)}”`,
     find: 'Find a folder',

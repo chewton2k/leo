@@ -68,6 +68,7 @@ test('move choices leave out where the note or folder already is', () => {
     seq: 1,
     api: async () => ['A', 'A/B', 'A/B/C', 'D'].map((name) => ({ name })),
     parentOf: (path) => path.split('/').slice(0, -1).join('/'),
+    inFolder: (dir, folder) => dir === folder || dir.startsWith(`${folder}/`),
     esc: (text) => text,
     folderLabel: (dir) => dir.split('/').pop() || 'Top level',
     ICON: { folder: '' },
