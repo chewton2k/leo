@@ -130,7 +130,7 @@ function marginLeave() {
 
 async function marginMount(s, current) {
   marginLeave();
-  const columns = $('.note-columns');
+  const columns = $('.note-columns', marginPage.root);
   if (!columns) return;
   const layer = document.createElement('div');
   layer.className = 'margin-layer';
@@ -146,25 +146,29 @@ async function marginMount(s, current) {
   layer.addEventListener('submit', (e) => marginSubmit(e).catch(fail));
   layer.addEventListener('input', (e) => e.target.matches('.margin-reply textarea') && marginSized(e.target));
   if (window.ResizeObserver) {
-    marginPage.observer = new ResizeObserver(() => marginPage.folds.size || marginPage.unfolds.size || marginRedraw());
+    marginPage.observer = new ResizeObserver(marginLater(() => marginPage.folds.size || marginPage.unfolds.size || marginRedraw()));
     marginPage.observer.observe(columns);
-    marginPage.observer.observe($('#doc'));
+    marginPage.observer.observe($('#doc', marginPage.root));
   }
   if (window.MutationObserver) {
     marginPage.watch = new MutationObserver(() => marginRedraw());
-    marginPage.watch.observe($('#doc'), { childList: true });
+    marginPage.watch.observe($('#doc', marginPage.root), { childList: true });
   }
-  $('#doc').addEventListener('focusin', marginRedraw);
+  $('#doc', marginPage.root).addEventListener('focusin', marginRedraw);
   if (s.note.id) return marginLoad(s, current);
+  const p = here();
   const prefs = await marginLoadPrefs();
-  if (!current() || marginPage.s !== s) return;
-  marginPage.mode = prefs.default_mode || 'ask';
-  marginPage.persona = prefs.default_persona || 'reader';
-  marginControl();
-  marginRedraw();
+  withPane(p, () => {
+    if (!current() || marginPage.s !== s) return;
+    marginPage.mode = prefs.default_mode || 'ask';
+    marginPage.persona = prefs.default_persona || 'reader';
+    marginControl();
+    marginRedraw();
+  });
 }
 
 async function marginLoad(s, current = () => true, id = s.note.id) {
+  const p = here();
   let view = null;
   try {
     [, view] = await Promise.all([marginLoadPrefs(), api(`/api/notes/${enc(id)}/margin`)]);
@@ -172,23 +176,25 @@ async function marginLoad(s, current = () => true, id = s.note.id) {
     if (e instanceof Locked) throw e;
     return;
   }
-  if (!current() || marginPage.s !== s || !view) return;
-  const was = marginPage.loaded;
-  const shown = (m) => JSON.stringify([m.mode, m.persona || 'reader', m.instructions || '', m.threads || [], m.resolved || []]);
-  if (was && shown(view) === shown(marginPage)) return;
-  marginPage.mode = view.mode;
-  marginPage.persona = view.persona || 'reader';
-  marginPage.saved = marginPage.persona;
-  marginPage.instructions = view.instructions || '';
-  marginPage.threads = view.threads || [];
-  marginPage.resolved = view.resolved || [];
-  const first = !marginPage.loaded;
-  marginPage.loaded = true;
-  cancelAnimationFrame(marginPage.frame);
-  marginDraw();
-  marginControl();
-  marginInstructions();
-  if (first) marginReanchor(s).catch(() => {});
+  withPane(p, () => {
+    if (!current() || marginPage.s !== s || !view) return;
+    const was = marginPage.loaded;
+    const shown = (m) => JSON.stringify([m.mode, m.persona || 'reader', m.instructions || '', m.threads || [], m.resolved || []]);
+    if (was && shown(view) === shown(marginPage)) return;
+    marginPage.mode = view.mode;
+    marginPage.persona = view.persona || 'reader';
+    marginPage.saved = marginPage.persona;
+    marginPage.instructions = view.instructions || '';
+    marginPage.threads = view.threads || [];
+    marginPage.resolved = view.resolved || [];
+    const first = !marginPage.loaded;
+    marginPage.loaded = true;
+    cancelAnimationFrame(marginPage.frame);
+    marginDraw();
+    marginControl();
+    marginInstructions();
+    if (first) marginReanchor(s).catch(() => {});
+  });
 }
 
 function marginKept(t) {
@@ -197,6 +203,7 @@ function marginKept(t) {
 
 async function marginReanchor(s) {
   if (s !== marginPage.s || !s.note.id) return;
+  const p = here();
   await flush(s);
   if (s !== marginPage.s || saving.unsaved()) return;
   const source = s.doc.source();
@@ -212,7 +219,7 @@ async function marginReanchor(s) {
     } catch (e) {
       if (e instanceof Locked) throw e;
     } finally {
-      marginPage.anchoring.delete(t.id);
+      withPane(p, () => marginPage.anchoring.delete(t.id));
     }
   }
 }
@@ -244,15 +251,15 @@ function marginSetStatus(text, brief = false) {
   marginPage.status = text;
   marginPage.statusToken = token;
   marginPage.brief = Boolean(brief && text);
-  const status = $('#margin-status');
+  const status = $('#margin-status', marginPage.root);
   if (status) {
     status.textContent = text;
     if (noAi(text)) status.insertAdjacentHTML('beforeend', ' <a href="#/settings/writing">Set up writing AI</a>');
   }
   if (!marginPage.brief) return;
-  marginPage.statusTimer = setTimeout(() => {
+  marginPage.statusTimer = setTimeout(marginLater(() => {
     if (marginPage.s === s && marginPage.statusToken === token && marginPage.status === text) marginSetStatus('');
-  }, NO_COMMENT_MS);
+  }), NO_COMMENT_MS);
 }
 
 function marginAskKeys() {
@@ -276,13 +283,13 @@ function marginMenuSlide(menu, open, button, key) {
     run.pause();
     run.currentTime = open ? 0 : MENU_MS;
     marginPage[key] = run;
-    run.onfinish = () => {
+    run.onfinish = marginLater(() => {
       const shown = run.playbackRate > 0;
       run.onfinish = null;
       run.cancel();
       if (marginPage[key] === run) marginPage[key] = null;
       menu.hidden = !shown;
-    };
+    });
   }
   menu.hidden = false;
   run.playbackRate = open ? 1 : -1 / EXIT_SHARE;
@@ -290,8 +297,8 @@ function marginMenuSlide(menu, open, button, key) {
 }
 
 function marginMenu(which, open, focus = false) {
-  const menu = $(`#margin-${which}-menu`);
-  const button = $(`#margin-${which}`);
+  const menu = $(`#margin-${which}-menu`, marginPage.root);
+  const button = $(`#margin-${which}`, marginPage.root);
   if (!menu || !button) return;
   button.setAttribute('aria-expanded', String(open));
   marginMenuSlide(menu, open, button, which === 'mode' ? 'slide' : 'personaSlide');
@@ -343,8 +350,8 @@ function marginWireMenu(button, menu, item, toggle) {
 
 function marginControl() {
   const s = marginPage.s;
-  const button = $('#margin-mode');
-  const menu = $('#margin-mode-menu');
+  const button = $('#margin-mode', marginPage.root);
+  const menu = $('#margin-mode-menu', marginPage.root);
   if (!s || !button || !menu) return;
   if (!button.dataset.ready) {
     button.dataset.ready = '1';
@@ -357,13 +364,13 @@ function marginControl() {
   const along = marginPage.mode === 'along';
   button.disabled = marginPage.changing;
   button.dataset.mode = marginPage.mode;
-  const icon = $('#margin-mode-icon');
+  const icon = $('#margin-mode-icon', marginPage.root);
   if (icon && icon.dataset.along !== String(along)) {
     const paint = () => { icon.innerHTML = along ? '<svg><use href="#leo-mark"/></svg>' : ICON.chat; icon.dataset.along = String(along); };
     if (icon.dataset.along) iconSwap(icon, paint);
     else paint();
   }
-  $('#margin-mode-label').textContent = along ? 'Reads along' : 'When you ask';
+  $('#margin-mode-label', marginPage.root).textContent = along ? 'Reads along' : 'When you ask';
   button.title = along ? 'Felix reads changes after a pause. The text goes to your writing AI.' : `Select a passage, then choose Ask Felix or press ${marginAskKeys()}.`;
   for (const option of menu.querySelectorAll('[data-margin-mode]')) {
     option.setAttribute('aria-checked', String(option.dataset.marginMode === marginPage.mode));
@@ -373,8 +380,8 @@ function marginControl() {
 }
 
 function marginPersonaControl() {
-  const button = $('#margin-persona');
-  const menu = $('#margin-persona-menu');
+  const button = $('#margin-persona', marginPage.root);
+  const menu = $('#margin-persona-menu', marginPage.root);
   if (!marginPage.s || !button || !menu) return;
   if (!button.dataset.ready) {
     button.dataset.ready = '1';
@@ -397,8 +404,8 @@ function marginPersonaControl() {
   const now = list.find((p) => p.id === marginPage.persona) || list[0];
   button.disabled = !now;
   if (!now) return;
-  $('#margin-persona-icon').innerHTML = PERSONA_ICON[now.icon] || PERSONA_ICON.book;
-  $('#margin-persona-label').textContent = `Felix as ${now.name}`;
+  $('#margin-persona-icon', marginPage.root).innerHTML = PERSONA_ICON[now.icon] || PERSONA_ICON.book;
+  $('#margin-persona-label', marginPage.root).textContent = `Felix as ${now.name}`;
   button.title = `${now.name} reads this note. Shapes margin notes and replies.`;
   button.setAttribute('aria-label', `Who reads this note: ${now.name}`);
   const key = JSON.stringify([list, now.id]);
@@ -416,7 +423,7 @@ function updateReadHint(area) {
 }
 
 function marginInstructions(open = false) {
-  const box = $('#margin-instructions');
+  const box = $('#margin-instructions', marginPage.root);
   const s = marginPage.s;
   if (!box || !s) return;
   const input = $('input', box);
@@ -520,15 +527,19 @@ async function marginChangeMode(mode) {
     if (marginPage.s === s) {
       marginPage.changing = false;
       marginControl();
-      if (document.activeElement === document.body) $('#margin-mode')?.focus({ preventScroll: true });
+      if (document.activeElement === document.body) $('#margin-mode', marginPage.root)?.focus({ preventScroll: true });
     }
   }
 }
 
 function marginRedraw() {
-  if (!marginPage.layer) return;
-  cancelAnimationFrame(marginPage.frame);
-  marginPage.frame = requestAnimationFrame(marginDraw);
+  for (const p of panes) {
+    withPane(p, () => {
+      if (!marginPage.layer) return;
+      cancelAnimationFrame(marginPage.frame);
+      marginPage.frame = requestAnimationFrame(marginLater(marginDraw));
+    });
+  }
 }
 
 let marginFonts = 0;
@@ -950,13 +961,13 @@ function marginDraw() {
   inkSettle((id) => marginPage.els.get(id)?.querySelectorAll('.margin-felix') || []);
   if (marginPage.arriving.size && !stillMotion()) {
     const done = [...marginPage.arriving];
-    setTimeout(() => {
+    setTimeout(marginLater(() => {
       for (const id of done) {
         marginPage.arriving.delete(id);
         for (const [, path] of marginThreadPaths(id)) path.classList.remove('arriving');
         marginPage.els.get(id)?.classList.remove('arriving');
       }
-    }, MARGIN_SETTLE_MS);
+    }), MARGIN_SETTLE_MS);
   } else marginPage.arriving.clear();
 }
 
@@ -991,9 +1002,9 @@ function marginSettle(s) {
       marginPage.finds.delete(t.id);
       marginFind(source, t, null);
     } while (deadline.timeRemaining() > 0);
-    marginIdle(step);
+    marginIdle(marginLater(step));
   };
-  marginIdle(step);
+  marginIdle(marginLater(step));
 }
 
 function marginPlaced(source, threads) {
@@ -1241,10 +1252,10 @@ function marginPlaceAsMarks(boxes, page, origin, slots) {
     el.animate([{ clipPath: 'inset(0 0 100% 0)', opacity: .4 }, { clipPath: 'inset(0 0 0 0)', opacity: 1 }], { duration: OPEN_MS, easing: EASE_OUT });
     const grow = block.animate([{ marginBottom: `${above - CARD_TOP}px` }, { marginBottom: `${room}px` }], { duration: OPEN_MS, easing: EASE_OUT });
     marginPage.unfolds.add(t.id);
-    grow.onfinish = grow.oncancel = () => {
+    grow.onfinish = grow.oncancel = marginLater(() => {
       marginPage.unfolds.delete(t.id);
       marginRedraw();
-    };
+    });
   }
   for (const { t, rects } of boxes) {
     const mark = marginMark(t);
@@ -1307,17 +1318,17 @@ function marginFoldAway(id, then) {
     for (const run of runs) run.cancel();
   };
   marginPage.folds.set(id, stop);
-  runs[0].finished.then(() => {
+  runs[0].finished.then(marginLater(() => {
     end();
     if (marginPage.s === s) then();
     stop();
-  }, end);
+  }), marginLater(end));
 }
 
 function marginHover(e) {
   if (!marginPage.layer || e.pointerType === 'touch' || marginPage.pointer) return;
   const { clientX, clientY, target } = e;
-  marginPage.pointer = requestAnimationFrame(() => {
+  marginPage.pointer = requestAnimationFrame(marginLater(() => {
     marginPage.pointer = 0;
     if (!marginPage.layer) return;
     const origin = marginPage.layer.parentElement.getBoundingClientRect();
@@ -1336,7 +1347,7 @@ function marginHover(e) {
       marginPage.hover = id;
       marginPaint();
     }
-  });
+  }));
 }
 
 function marginFocus(e) {
@@ -1778,14 +1789,14 @@ async function marginAdd(t) {
   }
   const id = s.note.id;
   const threadPath = `/api/notes/${enc(id)}/margin/threads/${enc(t.id)}`;
-  const open = () => state.view === 'note' && state.session && state.session.note.id === id;
+  const open = () => paneWith(id);
   toast(woven ? 'Worked into the note' : from === null ? 'Its passage has moved, so this went at the end of the note' : 'Added to note', {
     action: 'Undo',
     run: async () => {
       try {
         await api(`/api/notes/${enc(id)}`, { method: 'PATCH', body: { body: done.before, base: done.version } });
         await api(threadPath, { method: 'POST', body: { status: 'open', gone: marginPage.gone } }).catch(() => {});
-        if (open()) await showNote(id);
+        if (open()) await showNote(id, { pane: open() });
         toast('Took it out of the note');
       } catch (e) {
         toast(e.status === 409 ? 'That note has changed since, so leo left it as it is.' : e.message, { bad: true });
@@ -1795,10 +1806,10 @@ async function marginAdd(t) {
   await api(threadPath, { method: 'POST', body: { status: 'resolved' } }).catch((e) => {
     if (e instanceof Locked) throw e;
   });
-  if (open()) await showNote(id);
+  if (open()) await showNote(id, { pane: open() });
   if (open() && from !== null) {
-    state.session.doc.glow(from, to);
-    setTimeout(() => { if (open()) state.session.doc.glow(); }, GLOW_MS);
+    open().s.doc.glow(from, to);
+    setTimeout(() => open()?.s.doc.glow(), GLOW_MS);
   }
 }
 
@@ -1900,13 +1911,13 @@ function marginPlain() {
 function marginDue(s, again) {
   const last = marginKit.changedBlocks(marginPage.baseline, s.doc.source()).pop();
   const more = marginKit.pauseFor(last, marginPrefs?.pace) - marginPlain();
-  if (again && more > 0) marginPage.timer = setTimeout(() => marginDue(s, false), more);
+  if (again && more > 0) marginPage.timer = setTimeout(marginLater(() => marginDue(s, false)), more);
   else marginRead(s).catch(fail);
 }
 
 function marginArm(s) {
   clearTimeout(marginPage.timer);
-  marginPage.timer = setTimeout(() => marginDue(s, true), Math.max(marginPlain(), marginPage.nextRead - Date.now()));
+  marginPage.timer = setTimeout(marginLater(() => marginDue(s, true)), Math.max(marginPlain(), marginPage.nextRead - Date.now()));
 }
 
 function marginEdited(s) {
@@ -1917,9 +1928,9 @@ function marginEdited(s) {
   if (marginPage.brief) marginSetStatus('');
   if (s.note.id && !marginPage.loaded) marginLoad(s).catch(() => {});
   clearTimeout(marginPage.anchorTimer);
-  marginPage.anchorTimer = setTimeout(() => marginReanchor(s).catch(() => {}), REANCHOR_MS);
+  marginPage.anchorTimer = setTimeout(marginLater(() => marginReanchor(s).catch(() => {})), REANCHOR_MS);
   clearTimeout(marginPage.settle);
-  marginPage.settle = setTimeout(() => marginSettle(s), FIND_SETTLE_MS);
+  marginPage.settle = setTimeout(marginLater(() => marginSettle(s)), FIND_SETTLE_MS);
   clearTimeout(marginPage.timer);
   if (marginPage.mode !== 'along') return;
   marginArm(s);
@@ -1928,14 +1939,14 @@ function marginEdited(s) {
 function marginShowReading(s, source, blocks) {
   const at = source.lastIndexOf(blocks[blocks.length - 1]);
   if (at < 0) return;
-  marginPage.faceTimer = setTimeout(() => {
+  marginPage.faceTimer = setTimeout(marginLater(() => {
     if (!marginPage.reading || marginPage.s !== s) return;
     marginPage.readingAt = at;
     marginPage.readingSpan = { from: at, to: at + blocks[blocks.length - 1].length };
     const voice = $('.margin-said-aloud', marginPage.layer);
     if (voice) voice.textContent = 'Felix is reading.';
     marginRedraw();
-  }, READ_FACE_AFTER_MS);
+  }), READ_FACE_AFTER_MS);
 }
 
 function marginQuiet(span) {
@@ -2081,6 +2092,7 @@ function marginTyped(id) {
 }
 
 async function marginRead(s) {
+  const p = here();
   if (marginPage.reading || marginPage.through) {
     marginPage.again = true;
     return;
@@ -2157,7 +2169,8 @@ async function marginRead(s) {
       else marginSetStatus(paused[e.data?.why] || (stale ? 'This note changed while Felix was reading. He will try again after your next edit.' : noAi(e.message) ? e.message : READ_FAILED));
     }
   } finally {
-    if (s === marginPage.s && marginPage.reading === reading) {
+    withPane(p, () => {
+      if (s !== marginPage.s || marginPage.reading !== reading) return;
       marginPage.reading = false;
       clearTimeout(marginPage.faceTimer);
       if (marginPage.readingAt !== null || marginPage.readingEl) marginReadingDone();
@@ -2165,7 +2178,7 @@ async function marginRead(s) {
       marginPage.again = false;
       if (again && marginPage.mode === 'along') marginArm(s);
       queueMicrotask(sideRedrawSoon);
-    }
+    });
   }
 }
 
@@ -2255,7 +2268,7 @@ function marginReveal(s, found) {
       marginPage.threads.push(t);
       marginRedraw();
     };
-    if (i) setTimeout(show, i * step);
+    if (i) setTimeout(marginLater(show), i * step);
     else show();
   });
 }
