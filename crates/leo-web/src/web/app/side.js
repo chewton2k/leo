@@ -634,6 +634,7 @@ let explorerOpenSeq = 0;
 async function openExplorerNote(el) {
   const request = ++explorerOpenSeq;
   if (state.session?.note.id === el.dataset.id && side.target) { side.target = null; drawSide(); }
+  if (split() && !el.closest('#folders-sheet')) return besideOpen(el.dataset.id, here());
   if (!el.closest('#folders-sheet') || state.session?.note.id === el.dataset.id) return go(noteHash(el.dataset.id));
   const box = el.closest('.scrim');
   const mine = seq;
@@ -660,7 +661,7 @@ function explorerMenu(el, event = null) {
   const owner = el.closest('button') || el.closest('.side-tree, .side-group');
   if (!owner) return;
   const rows = target.kind === 'note'
-    ? [['open', 'Open', ICON.note], ['rename', 'Rename', ICON.pen], ['move', 'Move to…', ICON.move], ['combine', 'Combine into…', ICON.note], null, ['trash', 'Move to trash', ICON.trash, true]]
+    ? [['open', 'Open', ICON.note], ['beside', 'Open beside', ICON.sidebar], ...(split() ? [['unsplit', 'Close split view', ICON.close]] : []), ['rename', 'Rename', ICON.pen], ['move', 'Move to…', ICON.move], ['combine', 'Combine into…', ICON.note], null, ['trash', 'Move to trash', ICON.trash, true]]
     : [['new', target.dir ? 'New note here' : 'New note', ICON.filePlus, false, target.dir === creationDir() && !$('.scrim') ? `<kbd aria-hidden="true">${esc(shortcutText(shortcutKeys('new')))}</kbd>` : ''], ['folder', target.dir ? 'New folder here' : 'New folder', ICON.folderPlus], ...(target.kind === 'folder' && target.dir ? [...(target.dir === side.root ? [] : [['focus', 'Focus on this folder', ICON.search]]), null, ['rename', 'Rename', ICON.pen], ['move', 'Move to…', ICON.move], null, ['trash', 'Move to trash', ICON.trash, true]] : [])];
   popupMenu(owner, {
     label: target.kind === 'note' ? 'Note options' : 'Folder options',
@@ -706,6 +707,8 @@ async function explorerAction(action, target) {
   const el = { dataset: { dir: target.dir, parent: target.dir } };
   if (action === 'new') return actions.new(el);
   if (action === 'folder') return newFolder(el);
+  if (action === 'beside') return besideOpen(target.id);
+  if (action === 'unsplit') return besideShut();
   if (action === 'open') {
     const row = [...document.querySelectorAll('#folders-sheet .side-note, #side .side-note')].find((row) => row.dataset.id === target.id);
     return row ? openExplorerNote(row) : go(noteHash(target.id));

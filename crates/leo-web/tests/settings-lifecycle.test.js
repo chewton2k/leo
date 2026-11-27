@@ -56,7 +56,7 @@ test('the note menu keeps every note tool, with Read through and Share as second
   const script = sheets.slice(sheets.indexOf('function shareRows('), sheets.indexOf('async function share('));
   const shown = [];
   const marginPage = { through: null, changing: false, persona: 'reader', s: { note: { id: 'note-id' } } };
-  const context = { marginPage, marginPrefs: { personas: [{ id: 'reader', name: 'Reader', icon: 'book' }, { id: 'critic', name: 'Critic', icon: 'target' }] }, PERSONA_ICON: { book: '<svg></svg>', target: '<svg></svg>' }, ICON: new Proxy({}, { get: () => '<svg></svg>' }), state: { view: 'note', session: { note: { id: 'note-id', recorded: true } } }, popupMenu: (owner, { rows }) => shown.push(rows), marginPrintable: () => [], copyMarkdown() {}, saveMarkdown() {}, share() {} };
+  const context = { marginPage, marginPrefs: { personas: [{ id: 'reader', name: 'Reader', icon: 'book' }, { id: 'critic', name: 'Critic', icon: 'target' }] }, PERSONA_ICON: { book: '<svg></svg>', target: '<svg></svg>' }, ICON: new Proxy({}, { get: () => '<svg></svg>' }), state: { view: 'note', session: { note: { id: 'note-id', recorded: true } } }, popupMenu: (owner, { rows }) => shown.push(rows), marginPrintable: () => [], copyMarkdown() {}, saveMarkdown() {}, share() {}, split: () => false, closed: [], here: () => 'focused', paneClose: (p) => context.closed.push(p) };
   vm.createContext(context);
   vm.runInContext(script, context);
   context.noteMenu({});
@@ -80,6 +80,13 @@ test('the note menu keeps every note tool, with Read through and Share as second
   assert.equal(shown[3][idle].off, true);
   assert.match(shown[3][idle + 1].note, /did not load/);
   assert.equal(loads, 1);
+  assert.equal(shown[0].some((row) => row.text === 'Close this pane'), false);
+  context.split = () => true;
+  context.noteMenu({});
+  const texts = shown[4].filter((row) => row.text).map((row) => row.text);
+  assert.equal(JSON.stringify(texts.slice(-2)), JSON.stringify(['Close this pane', 'Move to trash']));
+  shown[4].find((row) => row.text === 'Close this pane').run();
+  assert.deepEqual([...context.closed], ['focused']);
 });
 
 test('Codex and Claude Code models list newest release first, then by power', () => {

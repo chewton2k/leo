@@ -244,6 +244,7 @@ const actions = {
   move: (el) => moveSheet(el),
   share: (el) => shareMenu(el),
   'note-menu': (el) => noteMenu(el),
+  'pane-close': (el) => paneClose(panes.find((p) => p.el.contains(el))),
   delete: () => trashNote(),
   restore: (el) => restore(el.dataset.id, false),
   'trash-select': () => {

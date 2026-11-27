@@ -6,6 +6,8 @@ const vm = require('node:vm');
 const { paneHelpers } = require('./page-source');
 const core = fs.readFileSync(path.resolve(__dirname, '../src/web/app/core.js'), 'utf8');
 const sheets = fs.readFileSync(path.resolve(__dirname, '../src/web/app/sheets.js'), 'utf8');
+const beside = fs.readFileSync(path.resolve(__dirname, '../src/web/app/beside.js'), 'utf8');
+const paneGone = beside.slice(beside.indexOf('function paneGone('), beside.indexOf('function paneClose('));
 
 test('note deletion preserves failures and never redirects another open note', async () => {
   for (const mode of ['success', 'error', 'navigate']) {
@@ -18,7 +20,7 @@ test('note deletion preserves failures and never redirects another open note', a
     };
     vm.createContext(context);
     vm.runInContext(paneHelpers(), context);
-    vm.runInContext(sheets.slice(sheets.indexOf('let trashing = null;'), sheets.indexOf('async function restore(')), context);
+    vm.runInContext(sheets.slice(sheets.indexOf('let trashing = null;'), sheets.indexOf('async function restore(')) + paneGone, context);
     await context.trashNote({ id: 'note' }).catch(context.fail);
     assert.equal(went, mode === 'success' ? 1 : 0);
     assert.equal(destroyed, mode === 'success' ? 1 : 0);
@@ -26,6 +28,51 @@ test('note deletion preserves failures and never redirects another open note', a
     if (mode === 'error') assert.equal(context.state.session, session);
     if (mode === 'navigate') assert.equal(context.state.session.note.id, 'other');
   }
+});
+
+function twoPanes(extra = {}) {
+  const log = { went: [], closed: 0, destroyed: 0, ready: [] };
+  const main = { note: { id: 'main', directory: 'Other' }, doc: { destroy() { log.destroyed++; } } };
+  const side = { el: {}, s: { note: { id: 'side', directory: 'Course/Week' }, doc: {} }, margin: {} };
+  const context = { state: { view: 'note', dir: 'Other', session: side.s, main }, app: {}, marginPage: null, seq: 1, enc: encodeURIComponent, noteHash: (id) => `#/n/${id}`, loadSideFolders() {}, toast() {}, restore() {}, refocusExplorer() {}, sideFocus() {}, undoTrashMove() {}, folderLabel: (dir) => dir, parentOf: (dir) => dir.split('/').slice(0, -1).join('/'), side: { target: null, root: '' }, api: async () => ({}), ready: async (s) => { log.ready.push(s.note.id); }, go: (hash) => log.went.push(hash), besideClose: () => { log.closed++; side.s = null; }, fail: (e) => { throw e; }, ...extra };
+  vm.createContext(context);
+  vm.runInContext(paneHelpers(), context);
+  vm.runInContext('panes', context).push(side);
+  context.besidePane = side;
+  vm.runInContext(sheets.slice(sheets.indexOf('async function trashFolder('), sheets.indexOf('async function saveFolder(')) + sheets.slice(sheets.indexOf('let trashing = null;'), sheets.indexOf('async function restore(')) + paneGone, context);
+  return { context, log, main, side };
+}
+
+test('trashing the second pane note closes only that pane, without a flush or a page change', async () => {
+  const { context, log, main } = twoPanes();
+  await context.trashNote({ id: 'side' });
+  assert.equal(log.closed, 1);
+  assert.deepEqual(log.went, []);
+  assert.equal(log.destroyed, 0);
+  assert.equal(context.state.main, main);
+});
+
+test('trashing the first pane note while split brings the second note into the first pane', async () => {
+  const { context, log } = twoPanes();
+  await context.trashNote({ id: 'main' });
+  assert.equal(log.closed, 0);
+  assert.equal(log.destroyed, 1);
+  assert.deepEqual(log.went, ['#/n/side']);
+});
+
+test('trashing a folder closes the pane whose note is inside it, judged by that note and not the first pane', async () => {
+  const { context, log, main } = twoPanes();
+  await context.trashFolder('Course');
+  assert.deepEqual(log.ready, ['side']);
+  assert.equal(log.closed, 1);
+  assert.deepEqual(log.went, []);
+  assert.equal(context.state.main, main);
+  const both = twoPanes();
+  both.context.state.dir = 'Course';
+  await both.context.trashFolder('Course');
+  assert.deepEqual(both.log.ready, ['main', 'side']);
+  assert.equal(both.log.closed, 1);
+  assert.deepEqual(both.log.went, ['#/']);
 });
 
 const motionSource = fs.readFileSync(path.resolve(__dirname, '../src/web/app/motion.js'), 'utf8');

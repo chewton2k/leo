@@ -526,13 +526,11 @@ function renameFolder(from) {
 async function trashFolder(from) {
   if (!from) return;
   const mine = seq;
-  const inside = () => state.view === 'note' && (state.dir === from || state.dir.startsWith(`${from}/`));
-  if (inside()) await ready(panes[0].s);
+  const within = (dir) => dir === from || dir.startsWith(`${from}/`);
+  const inside = () => (state.view === 'note' ? panes.filter((p) => p.s && within(p === panes[0] ? state.dir : p.s.note.directory || '')) : []);
+  for (const p of inside()) await ready(p.s);
   const done = await api('/api/trash/move', { method: 'POST', body: { notes: [], dirs: [from] } });
-  if (mine === seq && inside()) {
-    leaveMain();
-    go('#/', { replace: true });
-  }
+  if (mine === seq) for (const p of inside().reverse()) paneGone(p);
   if (side.target === from || side.target?.startsWith(`${from}/`)) side.target = parentOf(from);
   if (side.root === from || side.root.startsWith(`${from}/`)) sideFocus('');
   loadSideFolders();
@@ -595,10 +593,7 @@ async function trashNote(note = null, at = null) {
   try {
     await api(`/api/notes/${enc(note.id)}`, { method: 'DELETE' });
   } finally { trashing = null; }
-  if (paneWith(note.id) === panes[0]) {
-    leaveMain();
-    go('#/', { replace: true });
-  }
+  if (paneWith(note.id)) paneGone(paneWith(note.id));
   loadSideFolders();
   if (at) refocusExplorer({ kind: 'folder', dir: at.dir });
   toast(`Moved “${note.title || 'Untitled'}” to the trash`, { action: 'Undo', run: () => restore(note.id, false) });
@@ -697,6 +692,7 @@ function noteMenu(owner) {
       { text: 'Move to folder', icon: ICON.move, run: () => moveSheet(owner) },
       ...throughRow(),
       { text: 'Share', icon: ICON.share, next: shareRows() },
+      ...(split() ? [{ text: 'Close this pane', icon: ICON.close, run: () => paneClose(here()) }] : []),
       { line: true },
       { text: 'Move to trash', icon: ICON.trash, danger: true, run: () => trashNote() },
       ...(words ? [{ line: true }, { note: `${words.toLocaleString()} ${words === 1 ? 'word' : 'words'}` }] : []),
