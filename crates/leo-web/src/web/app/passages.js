@@ -249,7 +249,6 @@ async function drawRelated(id, current, p = here(), limit = 4) {
 const readingFresh = () => ({ id: null, timer: 0, user: false, quietUntil: 0 });
 const reading = readingFresh();
 panes[0].reading = reading;
-const paneScroll = (p) => (p === panes[0] ? { box: window, top: window.scrollY } : { box: p.el, top: p.el.scrollTop });
 const READ_SAVE_MS = 2000;
 
 function readingTop() {

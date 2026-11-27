@@ -23,13 +23,13 @@ function openAside(kind, facts, body) {
   const box = inPane('#note-aside');
   if (!layout || !box) return null;
   const arriving = !layout.classList.contains('aside-open');
-  if (arriving) asideReturn = { focus: document.activeElement, top: window.scrollY };
+  if (arriving) asideReturn = { focus: document.activeElement, top: paneScroll(here()).top };
   layout.classList.add('aside-open');
   layout.dataset.aside = kind;
   inPane('#note-aside-facts').innerHTML = facts;
   box.innerHTML = body;
   if (arriving) {
-    window.scrollTo(0, 0);
+    paneScroll(here()).box.scrollTo(0, 0);
     arriveOnPage(box);
   }
   return box;
@@ -48,7 +48,7 @@ function closeAside() {
   const back = asideReturn;
   asideReturn = null;
   if (!back) return;
-  window.scrollTo(0, back.top);
+  paneScroll(here()).box.scrollTo(0, back.top);
   const focus = focusAgain(back.focus);
   if (focus && focus !== document.body) focus.focus({ preventScroll: true });
 }
@@ -67,9 +67,9 @@ function transcriptOpen() {
   return Boolean(layout && layout.dataset.aside === 'transcript' && sourcePage);
 }
 
-function holdAside(id) {
-  if (!asideOpen()) return null;
-  const kind = inPane('.note-layout').dataset.aside;
+function holdAside(id, p = here()) {
+  if (!asideOpen(p)) return null;
+  const kind = inPane('.note-layout', p).dataset.aside;
   if (kind === 'file' && fileAside) return { kind, file: fileAside, back: asideReturn };
   if (kind === 'transcript' && sourcePage && sourcePage.note === id) return { kind, back: asideReturn };
   return null;
@@ -102,12 +102,12 @@ async function showRecordingSources(query = '') {
 async function loadSourcePage(source, cursor, back) {
   const page = sourcePage;
   const mine = seq;
-  const query = ($('#source-query') && $('#source-query').value) || '';
+  const query = inPane('#source-query')?.value || '';
   const answer = await fetchSources(page.note, query, source, cursor);
-  if (mine !== seq || sourcePage !== page || !$('#source-query')) return;
+  if (mine !== seq || sourcePage !== page || !inPane('#source-query')) return;
   sourcePage = { ...page, ...answer, back };
   drawRecordingSources();
-  const list = $('#source-passages');
+  const list = inPane('#source-passages');
   if (list) list.scrollIntoView({ block: 'start' });
 }
 
@@ -213,7 +213,7 @@ function sourceLength(page) {
 function drawRecordingSources(query = '') {
   const active = document.activeElement;
   const focus = active && active.closest && active.closest('#note-aside') ? { id: active.id, passage: active.dataset.passage, point: active.dataset.point } : null;
-  query = query || ($('#source-query') && $('#source-query').value) || '';
+  query = query || inPane('#source-query')?.value || '';
   const page = sourcePage;
   const { head } = page.page;
   const many = page.list.length > 1;
@@ -244,11 +244,11 @@ function drawRecordingSources(query = '') {
       const page = sourcePage;
       if (!page) return;
       const mine = seq;
-      const q = $('#source-query') ? $('#source-query').value : '';
+      const q = $('#source-query', box)?.value || '';
       const answer = await fetchSources(page.note, q, page.page.head.id, page.page.at).catch(() => null);
-      if (!answer || mine !== seq || sourcePage !== page || !$('#source-found')) return;
+      if (!answer || mine !== seq || sourcePage !== page || !$('#source-found', box)) return;
       sourcePage = { ...page, matches: answer.matches };
-      $('#source-found').innerHTML = sourceMatches(sourcePage);
+      $('#source-found', box).innerHTML = sourceMatches(sourcePage);
     }, 300);
   };
   $('#source-query', box).addEventListener('input', () => {
@@ -319,7 +319,7 @@ async function saveSpeaker(from, to, merge) {
     if (e.status === 409) throw new Error('This recording changed while you were renaming. Close the transcript and open it again.');
     throw e;
   }
-  if (mine !== seq || sourcePage !== page || !$('#source-query')) return;
+  if (mine !== seq || sourcePage !== page || !inPane('#source-query')) return;
   await loadSourcePage(head.id, page.page.at, page.back);
   toast(merge ? `${from} is now part of ${to} in this recording.` : `${from} is now ${to} in this recording.`);
 }

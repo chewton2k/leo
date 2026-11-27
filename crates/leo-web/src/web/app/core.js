@@ -533,6 +533,7 @@ const paneOf = (s) => (s ? panes.find((p) => p.s === s) : undefined);
 const here = () => paneOf(state.session) || panes[0];
 const paneWith = (id) => panes.find((p) => p.s && p.s.note.id === id);
 const split = () => panes.some((p) => p !== panes[0] && p.s);
+const paneScroll = (p) => (p === panes[0] ? { box: window, top: window.scrollY } : { box: p.el, top: p.el.scrollTop });
 const inFolder = (dir, folder) => dir === folder || dir.startsWith(`${folder}/`);
 const panesIn = (folder) => (state.view === 'note' ? panes.filter((p) => p.s && inFolder(p === panes[0] ? state.dir || '' : p.s.note.directory || '', folder)) : []);
 function reloadOpen(id) {
@@ -921,7 +922,7 @@ async function showNote(id, { fresh = null, draft = null, pane = panes[0] } = {}
     delete note.unopened;
     noteOpened(note.id);
   }
-  const held = note.id && pane.s && pane.s.note.id === note.id ? holdAside(note.id) : null;
+  const held = note.id && pane.s && pane.s.note.id === note.id ? holdAside(note.id, pane) : null;
   const other = paneOf(state.session) && paneOf(state.session) !== pane ? state.session : null;
   let s;
   const draw = () => {
@@ -956,7 +957,7 @@ async function showNote(id, { fresh = null, draft = null, pane = panes[0] } = {}
     s.doc = leoDoc.mount(inPane('#doc', pane), { source: s.edit.body, outline: inPane('.note-outline', pane), onChange: (text) => { changed(s, text); marginEdited(s); readSoon(s, text); }, placeholder: 'Write, or paste anything', dir: note.directory || '', onPictures: (files) => addPictures(s, files), onSelection: (has) => placeAskFloat(has), noteTools: true, foldKey: note.id || '', active: () => here() === pane, scroller: main ? window : pane.el });
     inPane('#doc', pane).addEventListener('leo-folds', () => { if (pane.s === s) withPane(pane, marginDraw); });
     withPane(pane, () => marginMount(s, current)).catch(fail);
-    restoreAside(held);
+    withPane(pane, () => restoreAside(held));
     if (citedLines && citedLines.id === note.id) showCitedLines();
     else if (main && passage && highlightSearch(inPane('article.note', pane), passage.query)) {
       clearTimeout(reading.timer);
