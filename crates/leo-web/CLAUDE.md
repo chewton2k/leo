@@ -85,7 +85,7 @@ directory with `keep()` just to pass its path to a fixture.
   chat-save, import, picture, preferences and dictation routes keep their own limits.
 - Page CSP: no inline JS (`script-src 'self'`), `data:` images, `frame-src
   'self'` (original viewer), `font-src 'self'` (KaTeX and the bundled
-  fonts). Mermaid 11.17.2, KaTeX 0.16.11, CodeMirror parsers and the latin
+  fonts). Mermaid 11.17.2, KaTeX 0.16.47, CodeMirror parsers and the latin
   variable fonts Instrument Sans (note titles and text, `--writing-font`, roman and italic) and
   Newsreader (Felix's margin voice, `--voice`, roman and italic; SIL OFL,
   @fontsource-variable 5.3.0) are vendored under `web/vendor/` (served
@@ -641,7 +641,7 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   the explorer to its rail while the room is short (unfolding it then opens the narrow-window drawer,
   `side-drawer`, over both panes), and a window with less room closes beside ("Not enough room for two
   notes"). Each pane saves and restores its own reading place (`readingScrolled`, `restoreReading`, `p.reading`). Open beside
-  is in the explorer note menu (with Close split view while split) and a right-third drop zone
+  is in the explorer note menu (with Close split view while split) and a right-half drop zone
   ("Open here" / "Open beside", the files overlay's style, never for files, Felix first); exit by the
   `.pane-close` × on each pane, the ⋯ menu's Close this pane or any page that is not a note (beside is
   saved first; a failed save keeps it with Close anyway when the draft is kept). Closing the left

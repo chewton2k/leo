@@ -112,7 +112,7 @@ async function appChange(change) {
 let updateChecking = false;
 function updateAppStatus() {
   updateOnboardingPermissions();
-  updateUpdateBanner();
+  updateOfferButton();
   const checked = updateChecking && desktopApp?.updates?.state === 'current';
   updateChecking = desktopApp?.updates?.state === 'checking';
   if (state.view === 'settings' && state.section === 'updates') {
@@ -171,19 +171,30 @@ function updatesCard(view) {
     ${update.notes ? `<section class="set-card"><header><h3>What’s new${update.version ? ' in ' + esc(update.version) : ''}</h3></header><div class="prose">${md.render(Array.from(String(update.notes)).slice(0, 8192).join(''), { interactive: false })}</div></section>` : ''}
     <section class="set-card about" data-find="updates-about"><header><h3>About leo</h3><a class="set-link" href="https://github.com/chewton2k/leo-cli/releases" target="_blank" rel="noopener noreferrer">Release notes</a></header>${unsigned}<div class="set-row"><span class="set-label">Notes</span>${middlePath(view.paths?.notes)}</div><div class="set-row"><span class="set-label">Speech models</span>${middlePath(view.paths?.models)}</div><div class="set-row"><code class="set-label">leo uninstall</code><span class="hint">Removes leo; your notes stay</span></div><div class="about-colophon"><p>Your notes are Markdown files on this computer.</p><div class="set-row"><span class="set-label">Version</span><span class="set-value-text">${esc(view.version)}</span></div><div class="set-row"><span class="set-label">Note text</span><span class="colophon-face">Instrument Sans <span>· what you write</span></span></div><div class="set-row"><span class="set-label">Felix’s voice</span><span class="colophon-face">${window.leoTheme?.felixLetters?.() === 'notes' ? 'Instrument Sans' : 'Newsreader'} <span>· what Felix says in the margin and chat</span></span></div><div class="set-row"><span class="set-label">Licences</span><span class="hint">MIT, fonts under the SIL Open Font License</span><a class="set-link" href="https://github.com/chewton2k/leo-cli/blob/main/NOTICE" target="_blank" rel="noopener noreferrer">NOTICE</a></div></div></section>`;
 }
-function updateUpdateBanner() {
-  const banner = $('#app-update-banner');
-  if (!banner) return;
+function updateOffer() {
   const update = desktopApp?.updates || {};
-  const ready = update.state === 'ready';
-  banner.hidden = !ready;
-  if (!ready) return;
-  if (banner.dataset.version !== update.version) {
-    banner.dataset.version = update.version;
-    banner.innerHTML = `<span class="grow">leo ${esc(update.version)} is ready</span><button class="btn primary sm" data-action="app-command" data-app-action="restart_update">Restart to update</button><span class="hint" data-update-wait></span>`;
-  }
-  const button = banner.querySelector('button');
-  if (button) button.disabled = Boolean(update.busy);
-  const wait = banner.querySelector('[data-update-wait]');
-  if (wait) wait.textContent = update.busy ? 'After recording or dictation finishes.' : '';
+  return ['available', 'downloading', 'ready'].includes(update.state) ? { state: update.state, version: String(update.version || ''), busy: Boolean(update.busy) } : null;
+}
+function updateOfferLabel(offer) {
+  const name = offer?.version ? `leo ${offer.version}` : 'leo';
+  return !offer ? 'Update' : offer.state === 'ready' ? `Restart to update to ${name}` : offer.state === 'downloading' ? `Downloading ${name}` : `Update to ${name}`;
+}
+function updateOfferButton() {
+  const button = $('#side [data-action="update-offer"]');
+  if (!button) return;
+  const offer = updateOffer();
+  const label = updateOfferLabel(offer);
+  button.hidden = !offer;
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  if (offer) button.dataset.state = offer.state; else delete button.dataset.state;
+}
+function offerUpdate() {
+  const offer = updateOffer();
+  if (!offer) return;
+  if (offer.state === 'downloading') return go('#/settings/updates');
+  const version = esc(offer.version);
+  if (offer.state === 'available') confirmSheet({ title: `Update to leo ${version}?`, text: 'leo downloads it in the background, then asks before restarting.', yes: 'Download', action: 'app-command', data: ' data-app-action="download_update"', danger: false });
+  else if (offer.busy) toast('Finish recording or dictation first, then restart to update.');
+  else confirmSheet({ title: `Restart to update to leo ${version}?`, text: 'Your notes are saved. leo reopens in a moment.', yes: 'Restart', action: 'app-command', data: ' data-app-action="restart_update"', danger: false });
 }

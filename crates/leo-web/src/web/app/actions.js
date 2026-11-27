@@ -1,6 +1,7 @@
 const actions = {
   'app-command': (el) => appChange({action:el.dataset.appAction}),
   'quit-leo': confirmQuit,
+  'update-offer': offerUpdate,
   'health-refresh': () => loadHealth(true),
   'onboarding-next': finishOnboarding,
   'onboarding-model': onboardingModel,

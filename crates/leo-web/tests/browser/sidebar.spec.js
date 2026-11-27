@@ -54,6 +54,8 @@ async function sidebarFixture(browser, run) {
     ${core.slice(core.indexOf('const moving'), core.indexOf('function rel('))}
     ${core.slice(core.indexOf('const SHORTCUT_KEYS'), core.indexOf('async function dictateHint'))}
     const overlapOut=()=>{}, marginPage={reading:false};
+    let desktopApp=null;
+    ${read('app/app-settings.js').slice(read('app/app-settings.js').indexOf('function updateOffer()'), read('app/app-settings.js').indexOf('function updateOfferButton'))}
     const app=document.querySelector('main');
     ${paneHelpers()}
     panes[0].margin=marginPage;

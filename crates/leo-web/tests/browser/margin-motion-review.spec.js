@@ -89,7 +89,7 @@ async function fixture(browser, run, { width = 1280, height = 800, layout = 'rig
   const server = http.createServer((req, res) => {
     if (req.url === '/fixture.js') { res.setHeader('Content-Type', 'text/javascript; charset=utf-8'); return res.end(fixtureScript); }
     if (req.url === '/style.css') { res.setHeader('Content-Type', 'text/css; charset=utf-8'); return res.end(css()); }
-    const katex = req.url.match(/^\/vendor\/katex-0\.16\.11\/([\w./-]+)$/);
+    const katex = req.url.match(/^\/vendor\/katex-[\d.]+\/([\w./-]+)$/);
     if (req.url === '/release') { held.splice(0).forEach((send) => send()); return res.end('ok'); }
     if (katex) {
       const send = () => { res.setHeader('Content-Type', { js: 'text/javascript', css: 'text/css', woff2: 'font/woff2' }[katex[1].split('.').pop()]); res.end(fs.readFileSync(path.join(web, 'vendor/katex', katex[1]))); };

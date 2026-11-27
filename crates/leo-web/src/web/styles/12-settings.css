@@ -1,6 +1,5 @@
 /* Settings: a full-height section sidebar pinned to the left, content to its right. */
 body.on-settings main { max-width: none; margin: 0; padding: 0; container: settingsmain / inline-size; }
-body.on-settings .app-update-banner { max-width: none; margin: 0; border-radius: 0; padding-inline: 20px; }
 [data-model-row] .set-label { width: auto; flex: 1; min-width: min(180px, 100%); }
 [data-model-row] + [data-model-row] { border-top: 1px solid var(--line); }
 .settings-layout { --bar-h: var(--bar-height); --settings-gap: clamp(16px, 2.5vw, 32px); display: grid; grid-template-columns: minmax(0, 1fr) 220px minmax(0, min(760px, calc(100% - 220px - 3 * var(--settings-gap)))) minmax(0, 1fr); align-items: start; gap: var(--settings-gap); padding: var(--settings-gap) var(--settings-gap) 0; min-height: calc(100vh - var(--bar-h)); background: var(--page); }
