@@ -627,3 +627,17 @@ test('a wiki link or a related note inside the right pane opens in the right pan
   await expect(page.locator('#app #title')).toHaveText(a.title);
   expect(new URL(page.url()).hash).toBe(`#/n/${a.id}`);
 });
+
+test('a failed reload of the right pane after a Felix change closes only that pane', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1000 });
+  const [a, b] = await notes(page, 'Left.', 'Right.');
+  await split(page, a, b);
+  await page.route(`**/api/notes/${b.id}`, (route) => (route.request().method() === 'GET' ? route.fulfill({ status: 404, json: { error: 'That note is not there any more.' } }) : route.fallback()));
+  await page.route('**/api/chat', (route) => route.fulfill({ status: 200, headers: { 'content-type': 'application/x-ndjson' }, body: [{ sources: [] }, { proposal: { kind: 'move_note', note: b.id, title: b.title, state: 'applied' } }, { t: 'Moved it.' }, { done: true }].map((l) => JSON.stringify(l)).join('\n') + '\n' }));
+  await page.locator('#chat-toggle').click();
+  await page.locator('#chat #chat-input').fill('move the right note');
+  await page.locator('#chat #chat-input').press('Enter');
+  await expect(page.locator('#beside')).toBeHidden();
+  await expect(page.locator('#app #title')).toHaveText(a.title);
+  expect(new URL(page.url()).hash).toBe(`#/n/${a.id}`);
+});

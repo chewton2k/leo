@@ -355,9 +355,9 @@ async function saveCombined(made, from, into, id) {
 }
 
 async function afterCombine(id) {
-  const open = paneWith(id);
-  if (open && !saving.get(open.s.key)) {
-    await showNote(id, { pane: open });
+  const reload = reloadOpen(id);
+  if (reload) {
+    await reload;
     loadSideFolders();
   } else await showLatest();
 }

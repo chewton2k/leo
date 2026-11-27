@@ -877,8 +877,7 @@ async function explorerCombineMenu(note, owner) {
 }
 
 async function afterExplorerNote(id) {
-  const open = paneWith(id);
-  if (open && !saving.get(open.s.key)) await showNote(id, { pane: open });
+  await reloadOpen(id);
   await loadSideFolders();
 }
 

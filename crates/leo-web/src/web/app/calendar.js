@@ -1362,8 +1362,7 @@ async function setTaskDone(id, done, on = null) {
     tickTaskBoxes(id, done, on);
   }
   if (done) toast(`Marked “${task?.title || 'Untitled'}” done`, { action: 'Undo', run: () => setTaskDone(id, false, on) });
-  const open = task && task.note && paneWith(task.note.id);
-  if (open && !saving.get(open.s.key)) showNote(task.note.id, { pane: open });
+  if (task && task.note) reloadOpen(task.note.id);
 }
 
 function pickerBody(box, value, { meeting = false, onChange = () => {} } = {}) {

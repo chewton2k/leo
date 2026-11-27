@@ -95,14 +95,11 @@ const chat = felix.create({
   onUndone: (note, removed) => {
     const open = paneWith(note.id);
     if (open && removed) paneGone(open, folderHash(state.dir || ''));
-    else if (open && !saving.get(open.s.key)) showNote(note.id, { pane: open });
-    else showLatest().catch(() => {});
+    else if (!reloadOpen(note.id)) showLatest().catch(() => {});
     toast(removed ? `Moved “${note.title}” to the trash` : `Undid the change to “${note.title}”`);
   },
   onChanged: (note) => {
-    const open = paneWith(note.id);
-    const typing = open && saving.get(open.s.key);
-    if (open && !typing) showNote(note.id, { pane: open });
+    const typing = paneWith(note.id) && !reloadOpen(note.id);
     if (tasksAtHome()) loadHomeRecent();
     toast(typing ? 'Felix changed this note while you were typing; reopen it to see the change.' : `Changed “${note.title}”`, { action: 'Open', run: () => go(noteHash(note.id)) });
   },
@@ -121,10 +118,10 @@ const chat = felix.create({
     }
     if (state.view === 'calendar') loadSchedule(seq);
     loadTasksWindow().catch(() => {});
-    const open = panes.filter((p) => p.s && p.s.note.id && !saving.get(p.s.key));
-    if (open.length) {
+    const reloads = panes.filter((p) => p.s && p.s.note.id).map((p) => [p, reloadOpen(p.s.note.id)]).filter(([, reload]) => reload);
+    if (reloads.length) {
       loadSideFolders().catch(() => {});
-      for (const p of open) showNote(p.s.note.id, { pane: p }).catch(() => go(folderHash(state.dir || ''), { replace: true }));
+      for (const [p, reload] of reloads) reload.catch(() => (p === panes[0] ? go(folderHash(state.dir || ''), { replace: true }) : paneGone(p)));
     } else showLatest().catch(() => {});
   },
   onAdd: (picked) => {
@@ -536,6 +533,10 @@ const paneOf = (s) => (s ? panes.find((p) => p.s === s) : undefined);
 const here = () => paneOf(state.session) || panes[0];
 const paneWith = (id) => panes.find((p) => p.s && p.s.note.id === id);
 const split = () => panes.some((p) => p !== panes[0] && p.s);
+function reloadOpen(id) {
+  const open = paneWith(id);
+  return open && !saving.get(open.s.key) ? showNote(id, { pane: open }) : null;
+}
 const inPane = (selector, p = here()) => $(selector, p.el);
 function withPane(p, fn) {
   const at = state;
