@@ -50,7 +50,7 @@ async function fixture(browser, run, { width = 1280, height = 800, layout = 'rig
     const requestId=()=>'r1';
     const felix={felix:(size,cls)=>'<span class="felix '+cls+'" data-mascot></span>'};
     const chat={isOpen:()=>false,isBusy:()=>false,attachSelection(){}};
-    const saving={unsaved:()=>false};
+    const saving={unsaved:()=>false,get:()=>undefined};
     const flush=async()=>{};
     const showNote=async()=>{};
     const drawSide=()=>{};const sideRedrawSoon=()=>{};

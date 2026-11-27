@@ -305,6 +305,7 @@ body:not(.beside-on) .beside-resize::before { left: auto; right: 3px; background
 .pane-close { display: none; width: 32px; height: 32px; color: var(--muted); }
 .pane-close svg { width: 16px; height: 16px; }
 body.split .pane-close { display: grid; }
+body.split .page-bar { margin-right: 4px; }
 body.split :is(main, #beside):not(.pane-on) :is(.note-meta, .note-meta .margin-mode) { color: var(--faint); }
 @media print {
   body.beside-on main, body.split:not(.beside-on) #beside { display: none !important; }

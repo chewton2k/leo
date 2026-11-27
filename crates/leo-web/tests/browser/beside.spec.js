@@ -184,7 +184,7 @@ test('the right pane × saves and returns to one note, and a page that is not a 
 });
 
 test('Felix follows the last clicked pane, and an open chat keeps its messages', async ({ page }) => {
-  await page.setViewportSize({ width: 1920, height: 1000 });
+  await page.setViewportSize({ width: 1440, height: 900 });
   const [a, b] = await notes(page, 'Left words.', 'Right words.');
   const asked = [];
   await page.route('**/api/chat', async (route) => {
@@ -194,6 +194,12 @@ test('Felix follows the last clicked pane, and an open chat keeps its messages',
   await split(page, a, b);
   await page.locator('#chat-toggle').click();
   const chat = page.locator('#chat');
+  await expect(page.locator('body')).toHaveClass(/\bchat-open\b/);
+  await expect(page.locator('body')).toHaveClass(/\bside-mini\b/);
+  await expect(page.locator('body')).toHaveClass(/\bsplit\b/);
+  await expect(page.locator('#beside #title')).toHaveText(b.title);
+  expect(await page.locator('#beside').evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThanOrEqual(380);
+  expect(await page.locator('#app').evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThanOrEqual(380);
   await page.locator('#app #note-facts').click();
   await chat.locator('#chat-input').fill('about the left');
   await chat.locator('#chat-input').press('Enter');
@@ -374,4 +380,90 @@ test('the explorer marks both open notes', async ({ page }) => {
   await expect(page.locator(`#side .side-note[data-id="${a.id}"]`)).toHaveAttribute('aria-current', 'page');
   await expect(page.locator(`#side .side-note[data-id="${b.id}"]`)).toHaveAttribute('aria-current', 'page');
   await expect(page.locator(`#side .side-note[data-id="${c.id}"]`)).not.toHaveAttribute('aria-current', /.*/);
+});
+
+test('a right pane reloaded by Felix while focused stays the focused pane', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1000 });
+  const [a, b] = await notes(page, 'Left stays put.', 'Right words.');
+  await split(page, a, b);
+  await page.locator('#beside #note-facts').click();
+  await page.request.patch(`/api/notes/${b.id}`, { data: { body: 'Right words, changed by Felix.' } });
+  await page.route('**/api/chat', async (route) => {
+    const applied = { kind: 'edit', note: b.id, title: b.title, find: 'words', replace: 'words, changed by Felix', why: '', state: 'applied', before: 'Right words.', after: 'v' };
+    await route.fulfill({ status: 200, headers: { 'content-type': 'application/x-ndjson' }, body: [{ sources: [] }, { proposal: applied }, { t: 'Changed it.' }, { done: true }].map((l) => JSON.stringify(l)).join('\n') + '\n' });
+  });
+  await page.locator('#chat-toggle').click();
+  await page.locator('#chat #chat-input').fill('change the right note');
+  await page.locator('#chat #chat-input').press('Enter');
+  await expect(page.locator('#beside #doc')).toContainText('changed by Felix');
+  await expect(page.locator('#beside')).toHaveClass(/\bpane-on\b/);
+  await page.evaluate(() => document.activeElement.blur());
+  await page.keyboard.press('ControlOrMeta+a');
+  const inside = await page.evaluate(() => { const at = getSelection(); return Boolean(at.anchorNode && document.querySelector('#beside').contains(at.anchorNode)) && at.toString().includes('changed by Felix'); });
+  expect(inside).toBe(true);
+});
+
+test('an explorer click with the right pane focused replaces the right note, saving it, and leaves the left pane and address alone', async ({ page }) => {
+  const [a, b, c] = await notes(page, 'Left.', 'Right.', 'Third.');
+  await split(page, a, b);
+  await typeIn(page, '#beside', ' typed before switching');
+  await page.locator(`#side .side-note[data-id="${c.id}"]`).click();
+  await expect(page.locator('#beside #title')).toHaveText(c.title);
+  await expect(page.locator('#app #title')).toHaveText(a.title);
+  expect(new URL(page.url()).hash).toBe(`#/n/${a.id}`);
+  expect((await (await page.request.get(`/api/notes/${b.id}`)).json()).body).toContain('typed before switching');
+});
+
+test('hovering a margin mark in the pane that is not focused lights it', async ({ page }) => {
+  const [a, b] = await notes(page, 'Left words here.', 'The quote just checks if it matches the passage.');
+  await page.request.post(`/api/notes/${b.id}/margin/threads`, { data: { version: b.version, quote: 'just checks if it matches', question: 'Why?' } });
+  await split(page, a, b);
+  await page.locator('#app #note-facts').click();
+  const mark = page.locator('#beside .margin-mark').first();
+  await expect(mark).toBeVisible();
+  await expect(mark).not.toHaveAttribute('data-active', /.*/);
+  await mark.hover();
+  await expect(mark).toHaveAttribute('data-active', '');
+  await expect(page.locator('#app')).toHaveClass(/\bpane-on\b/);
+});
+
+test('printing with the right pane focused prints only the right note', async ({ page }) => {
+  const [a, b] = await notes(page, 'Left.', 'Right.');
+  await split(page, a, b);
+  await page.locator('#beside #note-facts').click();
+  await page.emulateMedia({ media: 'print' });
+  await expect(page.locator('#app')).toBeHidden();
+  await expect(page.locator('#beside #doc')).toBeVisible();
+  await page.emulateMedia({ media: 'screen' });
+  await page.locator('#app #note-facts').click();
+  await page.emulateMedia({ media: 'print' });
+  await expect(page.locator('#beside')).toBeHidden();
+  await expect(page.locator('#app #doc')).toBeVisible();
+  await page.emulateMedia({ media: 'screen' });
+});
+
+test('the right pane opens at its saved reading place, in its own scroll', async ({ page }) => {
+  const body = Array.from({ length: 80 }, (_, i) => `Paragraph number ${i} keeps the note long enough to scroll.`).join('\n\n');
+  const [a, b] = await notes(page, 'Left.', body);
+  await page.request.put(`/api/notes/${b.id}/reading`, { data: { anchor: { line: 100, text: 'Paragraph number 50 keeps the note long e', dy: 0 } } });
+  await split(page, a, b);
+  await expect.poll(() => page.locator('#beside').evaluate((el) => el.scrollTop)).toBeGreaterThan(200);
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  const top = await page.locator('#beside #doc .blk', { hasText: 'Paragraph number 50 ' }).evaluate((el) => el.getBoundingClientRect().top);
+  expect(top).toBeLessThan(200);
+});
+
+test('a right pane whose save fails stays open and offers Close anyway', async ({ page }) => {
+  const [a, b] = await notes(page, 'Left.', 'Right.');
+  await split(page, a, b);
+  await page.route(`**/api/notes/${b.id}`, (route) => (route.request().method() === 'PATCH' ? route.fulfill({ status: 400, json: { error: 'Refused for the test.' } }) : route.fallback()));
+  await typeIn(page, '#beside', ' cannot save');
+  await page.locator('#beside .pane-close').click();
+  const toast = page.locator('.toast');
+  await expect(toast).toContainText('Refused for the test.');
+  await expect(page.locator('#beside')).toBeVisible();
+  await expect(page.locator('body')).toHaveClass(/\bsplit\b/);
+  await toast.getByRole('button', { name: 'Close anyway' }).click();
+  await expect(page.locator('#beside')).toBeHidden();
+  await expect(page.locator('#app #title')).toHaveText(a.title);
 });

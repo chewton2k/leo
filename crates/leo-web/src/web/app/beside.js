@@ -105,12 +105,7 @@ async function besideOpen(id, into = besidePane) {
     return;
   }
   if (into !== besidePane || state.view !== 'note' || !panes[0].s) return go(noteHash(id));
-  if (!split() && sideWide() && !side.mini && besideRoom() < SPLIT_ROOM) {
-    side.mini = true;
-    document.body.classList.add('side-mini');
-    drawSide();
-  }
-  if (besideRoom() < SPLIT_ROOM) return toast('Not enough room for two notes');
+  if (!besideRoomy()) return toast('Not enough room for two notes');
   if (split()) {
     besidePane.s.doc.stop();
     try { await flush(besidePane.s); } catch (error) { return fail(error); }
@@ -131,9 +126,19 @@ async function besideOpen(id, into = besidePane) {
   drawSide();
 }
 
+function besideRoomy() {
+  if (sideWide() && !side.mini && besideRoom() < SPLIT_ROOM) {
+    side.mini = true;
+    document.body.classList.add('side-mini');
+    drawSide();
+  }
+  return besideRoom() >= SPLIT_ROOM;
+}
+
 function besideFits() {
+  const roomy = !split() || besideRoomy();
   besideResize.fit();
-  if (!split() || besideRoom() >= SPLIT_ROOM) return;
+  if (roomy) return;
   const id = besidePane.s.note.id;
   besideShut().then((closed) => { if (closed) toast('Not enough room for two notes', id ? { action: 'Open', run: () => go(noteHash(id)) } : {}); }).catch(fail);
 }

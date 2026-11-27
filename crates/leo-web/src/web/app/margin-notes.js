@@ -1374,7 +1374,7 @@ function marginFocus(e) {
   marginPaint();
 }
 
-document.addEventListener('pointermove', marginHover, { passive: true });
+document.addEventListener('pointermove', (e) => { for (const p of panes) withPane(p, () => marginHover(e)); }, { passive: true });
 addEventListener('resize', marginRedrawAll);
 document.documentElement.addEventListener('pointerleave', () => {
   if (!marginPage.hover) return;
@@ -2533,8 +2533,10 @@ document.addEventListener('change', async (e) => {
 
 
 document.addEventListener('pointerdown', (e) => {
-  if (!e.target.closest?.('#margin-mode, #margin-mode-menu')) marginModeMenu(false);
-  if (!e.target.closest?.('#margin-persona, #margin-persona-menu')) marginPersonaMenu(false);
+  for (const p of panes) withPane(p, () => {
+    if (!e.target.closest?.('#margin-mode, #margin-mode-menu')) marginModeMenu(false);
+    if (!e.target.closest?.('#margin-persona, #margin-persona-menu')) marginPersonaMenu(false);
+  });
 });
 
 function marginShown() {
