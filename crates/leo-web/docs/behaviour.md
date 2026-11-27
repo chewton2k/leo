@@ -283,7 +283,7 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   as `none` for a backwards range. Dragging carries on across the lines (`dragAnchor`), Shift+click selects,
   copy and cut give the Markdown (and, when the selection holds a picture, also HTML in which each picture is a `data:` URL, so it
   pastes into other apps: `leoMarkdown.selectionCopy`, text and links only, never script, handlers or leo's own addresses, a picture over
-  3 MB or past 8 MB in all left as its alt text; the same in Felix's answers, 2026-11-18, the owner's call), and typing, Enter, Delete or paste replace it
+  3 MB or past 8 MB in all left as its alt text; the same in Felix's answers, 2026-11-18, the owner's call; text with exactly one picture also puts the picture on the clipboard as a PNG so apps that take only pasted image files, such as T3 Code, get it, while pasting leo's own copy back into leo or Felix adds no file), and typing, Enter, Delete or paste replace it
   through the raw lines, then only the caret's line stays open.
   Autosave PATCHes 700 ms after the last change with `base` = the loaded
   `version` (FNV-1a); 409 → "<title> (conflict from leo)". `saving.js`
@@ -393,7 +393,7 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   a corner handle: drag, arrow keys (Shift for 100 px) or double-click to
   reset; the change is written by `editing.setPictureWidth` and saved like any
   edit. It counts only pictures the page draws (not outside links or
-  `code`), so the size lands on the picture that was framed. A click beside a picture that is alone on its line frames it too (2026-11-15, the user's call); a broken picture, a line of several pictures or Shift opens the Markdown instead. Double-clicking the picture, or beside a lone one, edits its Markdown; Escape closes only the
+  `code`), so the size lands on the picture that was framed. A click beside a picture frames it too where no text sits on that side (2026-11-26, the user's call: pictures never turn into Markdown when the caret arrives, wherever they sit in a line). While a line with pictures is open they stay drawn and only the text the caret is in becomes editable; ArrowLeft and ArrowRight step over a picture, ArrowUp and ArrowDown past one frame it, Enter on a framed picture starts a line after it (continuing a list), a printable key typed on one goes into the line after it, a picture inserted or pasted into a list item stays in that item (no new line), and Backspace or Delete beside a picture removes it. A broken picture, one inside a link or bold, a heading line, Shift-click and a double-click beside a lone picture open the Markdown instead. Double-clicking the picture frames it; Escape closes only the
   frame.
 
 - Upload names (`safe_file_name`) drop trailing dots and spaces and dash
@@ -413,8 +413,12 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   at weight 500), the drawn rule (`.home-rule`, the same pencil line as a Markdown
   `---`), the quick bar, then the rows: Earlier (open tasks from before today, the
   weekday on the right, no red) and Today (every task due today, done ones ticked
-  and faint until midnight, "n of m done" on the right), six rows at most, then
-  "N more in Calendar" (`#/calendar`). A group with no rows is left out. The foot
+  and faint until midnight, "n of m done" on the right), five rows at most across
+  events and tasks (at least two Earlier rows stay), then "N more in Calendar"
+  (`#/calendar`) counting the events and tasks left out. An event row carries a text
+  Record link in one right-aligned column, underlined in pencil like a marked word, shown
+  on the event happening now or starting within 15 minutes, on the row under the pointer or
+  keyboard focus, and always where there is no hover. A group with no rows is left out. The foot
   says "Open a note, or start a new one." (narrow: "from Folders") beside New note;
   on the first day (no notes, no tasks) it says "Notes you write appear on the
   left." with the drawn arrow. The sentence is `schedule.dateline` (pure, tested in
@@ -435,6 +439,16 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   (`/api/trash/restore {ids, dirs}`); rename `/api/dirs/rename`; drag and drop
   (`drag.js`) moves notes and folders (`Store::move_dir` refuses itself, its
   own subfolder, or a taken name), files dropped open the upload sheet.
+  Focus on this folder (2026-11-26, the user's call, in a folder's menu): `side.root`, saved per
+  device as `leo-focus`, makes the explorer start at that folder (its children at the root
+  indentation, so guide lines align as unfocused), with a row above the tree only while focused
+  that names the folder behind a × (a click shows all notes; a right click, Shift+F10 or the menu key
+  opens that folder's own menu, so it can still be renamed, moved or trashed, and the edit box sits
+  over the row's name). New note, New folder and the top-level drop target (`data-drop-dir=""`,
+  `dirOf`; a drag over the top level marks the New note row, as unfocused, and its title names the
+  folder) stay inside it (`creationDir` falls back to the folder for anything outside); an in-leo rename or
+  move rewrites it (`moveOpenFolders`), and a load that no longer finds the folder clears it with
+  one toast. Search, Felix, Calendar and Boards still see every note.
   Dropping a note on another opens Combine (`combine.rs`: the AI writes one
   note, leo puts back anything it dropped). In the explorer (2026-11-09, the user's call, after a 6-persona
   simulation) a note held on another note's row for `SPRING_MS` arms it (the folder spring's timer slot, keyed
@@ -626,6 +640,11 @@ save retains the editor and address. Only a draft successfully persisted in this
 browser offers an explicit Leave, draft kept action, which rechecks session and
 persistence at activation; an in-memory-only draft cannot bypass the save.
 
+Opening a note from the Calendar or Boards leaves that page and its layout exactly
+as they were until the note arrives; the note, the Tasks card and the page's own
+fade then appear together, and coming back to the same note through another page
+fades it in again.
+
 The browser draft is written at most four times a second while typing, and at
 once before a save starts, when the window hides and when leo quits. A draft up
 to 256 KB lives in localStorage; a larger one is one whole IndexedDB record
@@ -641,6 +660,21 @@ outside clicks dismiss the heading list without swallowing the destination click
 
 The heading disclosure opens on mouse hover without taking focus, stays open across its summary and menu, and closes on leaving both. Click, keyboard and touch disclosure and outside dismissal remain available. Felix draws only when the user asks to see, draw or visualize something (2026-11-14, the user's call, replacing the 2026-11-09 complexity threshold): one ```svg (320 wide, theme colour tokens): one picture, split into 2 to 5 `data-step` groups only when it unfolds in order (a process, derivation or cycle; 2026-11-15, the user's call), never Mermaid and never text characters. Margin reads never draw; margin replies and asks draw on request (Visualize). The after-reply drawing pass (`drawing::drawn`) runs only when the user's message asks for a drawing (`drawing::asks_to_see`) and keeps only one clean ```svg block (`drawing::picked`); a root without `fill` defaults to `var(--text)`, so unpainted text and shapes follow the theme. User-written ```mermaid in notes and old replies still renders strictly, and SVG stays an inert image. `BASE` stays under 4,500 bytes.
 
+
+- Split view (2026-11-26, the user's call): drag a note from the explorer onto the right third of
+  the note ("Open beside") or choose Open beside in its menu, and it opens as a second full note on
+  the right, with its own margin notes, outline, width bars (in a pane 900 px or wider) and scroll.
+  Dragging onto the left or centre ("Open here") replaces the note under the pointer. The bar between
+  the notes drags to resize them (remembered; double-click for half and half; arrow keys when
+  focused). Clicking or typing in a note makes it the active one: Felix talks about it, the window
+  title names it, a soft shade falls on it from the divider and the other note's header row goes
+  faint. A click in the explorer replaces the active note. Leave with the × at the end of either
+  note's header row, Close this pane in the ⋯ menu, Close split view in the explorer menu, or by
+  opening any page that is not a note (the right note is saved first). Closing the left note moves the
+  right one to the left with whatever you typed. Back and Forward move the left note only. A note
+  already open is not opened twice: leo says so and switches to it. A window too narrow for two notes
+  (under 760 px beside the explorer's rail) closes the right note with a toast. Printing prints the
+  active note. The second note is not reopened after a restart.
 
 ## Felix
 
@@ -1409,6 +1443,10 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
   (times and ETag / Last-Modified in leo.db); `ics::read_from` expands repeats, EXDATE and
   moved instances, all-day items are dates. GET `/api/schedule?from&to&live`
   (≤43 days); the page refreshes every 2.5 min while visible.
+  Pasting a link that passes `calendarAddressError` into Settings → Calendar connects it at once
+  (`addCalendar`, one request while Connect is checking). A Google share link (`?cid=`) is refused as
+  before, with a link to that calendar's own settings page where its secret address is
+  (`calendarSettingsLink`, an id of letters, digits, `_`, `-` and `=` only; format unverified).
 
 - Offer to record (2026-11-09, item L1): `calendar::offer_to_record`, a 60 s
   background task (stops with the engine; only when `Powers.app_settings` is
@@ -1478,7 +1516,12 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
   repeating tasks ask Only this one / Every time (Every time shifts `date` and
   the weekdays by the day moved). Polls that land mid-drag or mid-compose wait
   (`cal.stale`), and so does every redraw while the pointer is down or a new task is being typed
-  (`cal.redraw`). Clicking anywhere on an item but its checkbox opens a side peek in the tray's place
+  (`cal.redraw`). A right click or a Control-click opens a `popupMenu` (`calMenu`, skipped
+  during a drag; a press that has not started dragging is let go first), and Shift+F10 or the menu
+  key opens it on a focused task, event or month day number: empty time (New task at its time, Go to today, Day, Week, Month), a month or
+  all-day cell (New task on that date and the same rows), a task wherever it shows (grid, All day row,
+  month, tray: Open, Mark done or Mark not done, Delete task with its Undo) and an event (Details,
+  and, for a timed event, Record this event until it has ended). Clicking anywhere on an item but its checkbox opens a side peek in the tray's place
   (`#cal-side.peek`, 340 px): title, done, date/start/end with a This one /
   Every time scope for repeats, repeat days, type, a description that autosaves
   600 ms after typing and on blur, note, Google, .ics, Delete; events are

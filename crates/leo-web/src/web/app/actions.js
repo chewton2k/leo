@@ -61,10 +61,7 @@ const actions = {
   },
   'cal-prev': () => calStep(-1),
   'cal-next': () => calStep(1),
-  'cal-today': () => {
-    cal.selected = S.dayKey(new Date());
-    calGo();
-  },
+  'cal-today': () => calToday(),
   'cal-view': (el) => calSetView(el.dataset.view),
   'cal-mini': (el) => {
     const at = S.fromKey(cal.selected);
@@ -108,6 +105,7 @@ const actions = {
   'set-effort': (el) => changeSetting({ set: 'effort', value: el.dataset.effort === 'default' ? '' : el.dataset.effort }),
   'side-twist': (el) => twistFolder(el.dataset.dir, el),
   'side-sort': sideSortMenu,
+  'side-unfocus': () => sideFocus(''),
   'side-notes': (el) => loadSideNotes(el.dataset.dir, Number(el.dataset.offset || 0), true),
   'open-title': (el) => openTitle(el.dataset.title || ''),
   'toggle-search': () => toggleQuickLeo(),
@@ -246,6 +244,7 @@ const actions = {
   move: (el) => moveSheet(el),
   share: (el) => shareMenu(el),
   'note-menu': (el) => noteMenu(el),
+  'pane-close': (el) => paneClose(panes.find((p) => p.el.contains(el))),
   delete: () => trashNote(),
   restore: (el) => restore(el.dataset.id, false),
   'trash-select': () => {

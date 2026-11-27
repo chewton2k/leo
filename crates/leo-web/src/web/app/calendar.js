@@ -64,7 +64,8 @@ async function showCalendar() {
   cal.peek = null;
   cal.scrolled = '';
   cal.ringAt = null;
-  app.innerHTML = '<div class="cal-page" id="cal-page"><section class="cal-main" id="cal-main" aria-label="Calendar"></section><aside class="cal-side" id="cal-side"></aside></div>';
+  swap('calendar', () => { app.innerHTML = '<div class="cal-page" id="cal-page"><section class="cal-main" id="cal-main" aria-label="Calendar"></section><aside class="cal-side" id="cal-side"></aside></div>'; });
+  drawTasksWindow();
   calSized.disconnect();
   calSized.observe($('#cal-main'));
   drawCalendar();
@@ -527,6 +528,11 @@ function calStep(step) {
   calGo();
 }
 
+function calToday() {
+  cal.selected = S.dayKey(new Date());
+  calGo();
+}
+
 function calGo() {
   cal.more = '';
   drawCalendar();
@@ -593,6 +599,12 @@ const calHM = (t) => (t ? String(t).slice(0, 5) : null);
 function calMinutesIn(col, y) {
   const rect = col.getBoundingClientRect();
   return ((y - rect.top) / CAL_HOUR_PX) * 60;
+}
+
+function calSlotAt(col, y) {
+  const raw = calMinutesIn(col, y);
+  const slack = raw % 60 >= 58 ? 2 : 0;
+  return Math.min(24 * 60 - CAL_SNAP, Math.floor((raw + slack) / CAL_SNAP) * CAL_SNAP);
 }
 
 function calColumnAt(x, y) {
@@ -945,9 +957,7 @@ document.addEventListener('pointerdown', (e) => {
     d = { mode: grip ? 'resize' : item.classList.contains('cal-tray-row') ? 'tray' : 'move', id: task.id, on: task.on || null, task, source: item, col, day: item.dataset.day || null, start: span ? span.start : 0, length: Math.max(CAL_SNAP, length), offset: span ? calMinutesIn(col, e.clientY) - span.start : 0 };
   } else if (e.target.classList.contains('cal-col')) {
     const col = e.target;
-    const raw = calMinutesIn(col, e.clientY);
-    const slack = raw % 60 >= 58 ? 2 : 0;
-    d = { mode: 'create', col, day: col.dataset.day, start: Math.min(24 * 60 - CAL_SNAP, Math.floor((raw + slack) / CAL_SNAP) * CAL_SNAP) };
+    d = { mode: 'create', col, day: col.dataset.day, start: calSlotAt(col, e.clientY) };
   } else if (e.target.classList.contains('cal-cell') || e.target.classList.contains('cal-allday-cell')) {
     d = { mode: 'cell', day: e.target.dataset.day };
   } else if (e.target.closest('#cal-main, #cal-side:not(.peek)')) d = { mode: 'press' };
@@ -981,13 +991,53 @@ document.addEventListener('pointerup', (e) => {
   calRelease();
   if (d.mode === 'resize') return calOpenPeek('task', d.id, d.on);
   if (d.mode !== 'create' && d.mode !== 'cell') return;
+  calNewTask(d.day, d.mode === 'create' ? d.start : null);
+});
+
+function calNewTask(day, start) {
   if (cal.more) {
     cal.more = '';
     drawCalendar();
   }
   calClosePeek();
-  if (d.mode === 'create') calCompose(d.day, d.start, Math.min(24 * 60, d.start + 60));
-  else calCompose(d.day, null, null);
+  calCompose(day, start, start === null ? null : Math.min(24 * 60, start + 60));
+}
+
+function calMenu(target, point = null) {
+  const item = target.closest('.cal-item, .cal-tray-row');
+  const spot = target.closest('.cal-col, .cal-cell, .cal-allday-cell');
+  if (!item && !spot) return;
+  let rows;
+  if (item) {
+    const { id, kind, on = null } = item.dataset;
+    const event = kind === 'event' && ((cal.data && cal.data.events) || []).find((e) => e.id === id);
+    const task = kind === 'task' && calFind(id);
+    if (event) rows = [{ text: 'Details', icon: ICON.note, run: () => calOpenPeek('event', id) }, ...(!event.all_day && new Date(event.end) > Date.now() ? [{ text: 'Record this event', icon: ICON.mic, run: () => go(recordHref(event)) }] : [])];
+    else if (task) {
+      const done = taskDoneOn(task, on);
+      rows = [{ text: 'Open', icon: ICON.note, run: () => calOpenPeek('task', id, on) }, { text: done ? 'Mark not done' : 'Mark done', icon: ICON.check, run: () => setTaskDone(id, !done, on) }, { line: true }, { text: 'Delete task', icon: ICON.trash, danger: true, run: () => deleteTask(id) }];
+    } else return;
+  } else {
+    const day = spot.dataset.day;
+    const start = spot.classList.contains('cal-col') ? calSlotAt(spot, point.y) : null;
+    const text = start === null ? `New task on ${S.fromKey(day).toLocaleDateString(calLocale(), { weekday: 'short', month: 'short', day: 'numeric' })}` : `New task at ${calTime(start)}`;
+    rows = [{ text, icon: ICON.plus, run: () => calNewTask(day, start) }, { text: 'Go to today', icon: ICON.calendar, run: calToday }, { line: true }, ...CAL_VIEWS.map(([view, label]) => ({ text: label, checked: view === cal.view, run: () => calSetView(view) }))];
+  }
+  popupMenu(target, { label: 'Calendar options', point, rows });
+}
+
+document.addEventListener('contextmenu', (e) => {
+  if (state.view !== 'calendar' || e.target.closest('.cal-compose') || !e.target.closest('.cal-item, .cal-tray-row, .cal-col, .cal-cell, .cal-allday-cell')) return;
+  e.preventDefault();
+  if (cal.drag?.live) return;
+  if (cal.drag) calRelease();
+  calMenu(e.target, { x: e.clientX, y: e.clientY });
+});
+
+document.addEventListener('keydown', (e) => {
+  if (state.view !== 'calendar' || !(e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) || !e.target.closest('.cal-item, .cal-tray-row, .cal-cell')) return;
+  e.preventDefault();
+  calMenu(e.target);
 });
 
 document.addEventListener('pointercancel', (e) => {
@@ -1116,6 +1166,12 @@ function eventDetailsHtml(event) {
 
 function calEventSoon(event) {
   return !event.all_day && new Date(event.start) - Date.now() < 15 * 60000 && new Date(event.end) > Date.now();
+}
+
+function recordHref(e) {
+  const kind = /https?:\/\//.test(`${e.location || ''} ${e.context || ''}`) ? 'call' : 'microphone';
+  const uid = e.feed && e.id.startsWith(`${e.feed}:`) ? e.id.slice(e.feed.length + 1) : e.id;
+  return `#/record?event=${enc(uid)}&kind=${kind}`;
 }
 
 function calPeekEvent(side, id) {
@@ -1306,7 +1362,7 @@ async function setTaskDone(id, done, on = null) {
     tickTaskBoxes(id, done, on);
   }
   if (done) toast(`Marked “${task?.title || 'Untitled'}” done`, { action: 'Undo', run: () => setTaskDone(id, false, on) });
-  if (state.view === 'note' && task && task.note && state.session && state.session.note.id === task.note.id && !saving.unsaved()) showNote(task.note.id);
+  if (task && task.note) reloadOpen(task.note.id);
 }
 
 function pickerBody(box, value, { meeting = false, onChange = () => {} } = {}) {
@@ -1908,7 +1964,7 @@ function refocusTasks(host, focus) {
 
 const tasksInked = (id) => document.querySelectorAll(`.tasks-row[data-task="${CSS.escape(id)}"]`);
 
-const HOME_ROWS = 6;
+const HOME_ROWS = 5;
 const HOME_RECENT_WAIT = 20000;
 let homeMidnight = 0;
 
@@ -1920,16 +1976,18 @@ function drawHomeToday() {
   const tasks = known ? withWindow(known) : [];
   const { earlier, today } = S.homeDay(tasks, now, new Set(tasksWin.finished.keys()));
   const meets = homeEvents(now);
-  const early = earlier.slice(0, Math.max(2, HOME_ROWS - today.length));
-  const day = today.slice(0, HOME_ROWS - early.length);
-  const more = earlier.length + today.length - early.length - day.length;
+  const early = earlier.slice(0, Math.max(2, HOME_ROWS - today.length - meets.length));
+  const room = HOME_ROWS - early.length;
+  const shown = meets.slice(0, room);
+  const day = today.slice(0, room - shown.length);
+  const more = earlier.length + today.length + meets.length - early.length - day.length - shown.length;
   const focus = tasksFocus(box);
   const said = `${today.filter((t) => t.done).length} of ${today.length} done`;
-  box.hidden = !early.length && !day.length && !meets.length;
-  box.innerHTML = `${early.length ? `<div class="tasks-group">Earlier</div>${early.map((t) => tasksRow(t)).join('')}` : ''}${day.length || meets.length ? `<div class="tasks-group">Today${day.length ? `<span class="home-tally" title="${said}">${homeTally(today)}<span class="home-tally-said">${said}</span></span>` : ''}</div>${meets.map(homeEventRow).join('')}${day.map((t) => tasksRow(t)).join('')}` : ''}${more ? `<a class="home-more" href="#/calendar"><b>${more} more</b> in Calendar</a>` : ''}`;
+  box.hidden = !early.length && !day.length && !shown.length;
+  box.innerHTML = `${early.length ? `<div class="tasks-group">Earlier</div>${early.map((t) => tasksRow(t)).join('')}` : ''}${day.length || shown.length ? `<div class="tasks-group">Today${day.length ? `<span class="home-tally" title="${said}">${homeTally(today)}<span class="home-tally-said">${said}</span></span>` : ''}</div>${shown.map(homeEventRow).join('')}${day.map((t) => tasksRow(t)).join('')}` : ''}${more ? `<a class="home-more" href="#/calendar"><b>${more} more</b> in Calendar</a>` : ''}`;
   inkSettle(tasksInked);
   if (!box.hidden) refocusTasks(box, focus);
-  const root = side.notes.get('');
+  const root = side.notes.get(side.root);
   const notes = side.loaded && root && root.loaded && !side.tasks ? root.items.length + side.folders.length : null;
   const ready = known && (notes !== null || !sideActive() || (root && !root.loading));
   const parts = ready ? S.dateline({ tasks, events: tasksWin.events || [], now, notes, locale: calLocale() }) : [];
@@ -1949,15 +2007,12 @@ function homeEvents(now) {
   const today = S.dayKey(now);
   return (tasksWin.events || [])
     .filter((e) => !e.all_day && S.dayKey(new Date(e.start)) === today && new Date(e.end) > now)
-    .sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
-    .slice(0, HOME_ROWS);
+    .sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
 }
 
 function homeEventRow(e) {
   const at = new Date(e.start).toLocaleTimeString(calLocale(), { hour: 'numeric', minute: '2-digit' });
-  const kind = /https?:\/\//.test(`${e.location || ''} ${e.context || ''}`) ? 'call' : 'microphone';
-  const uid = e.feed && e.id.startsWith(`${e.feed}:`) ? e.id.slice(e.feed.length + 1) : e.id;
-  return `<div class="tasks-row home-event" style="--tone: var(${toneOfEvent(e)})"><span class="tasks-when home-event-at">${esc(at)}</span><span class="tasks-title">${esc(e.title || 'Untitled event')}</span>${e.location && !/^https?:/.test(e.location) ? `<span class="home-recent-line">${esc(e.location)}</span>` : ''}<a class="btn plain sm home-event-rec" href="#/record?event=${enc(uid)}&kind=${kind}" aria-label="${esc(`Record ${e.title || 'this event'}`)}">${ICON.mic}Record</a></div>`;
+  return `<div class="tasks-row home-event${calEventSoon(e) ? ' soon' : ''}" style="--tone: var(${toneOfEvent(e)})"><span class="tasks-when home-event-at">${esc(at)}</span><span class="tasks-title">${esc(e.title || 'Untitled event')}</span>${e.location && !/^https?:/.test(e.location) ? `<span class="home-recent-line">${esc(e.location)}</span>` : ''}<a class="home-event-rec" href="${recordHref(e)}" aria-label="${esc(`Record ${e.title || 'this event'}`)}">Record</a></div>`;
 }
 
 function homeTally(today) {
@@ -2063,15 +2118,17 @@ function drawHomeRecent() {
   if (at) box.querySelector(`[href="${CSS.escape(at)}"]`)?.focus({ preventScroll: true });
 }
 
-function drawTasksWindow() {
+function drawTasksWindow(arrived = false) {
   const tasks = tasksWin.tasks || (cal.data && cal.data.tasks) || [];
   const groups = tasksGroups(tasks, true);
   const open = groups.reduce((n, [, list]) => n + list.length, 0);
   const home = tasksAtHome();
   if (home) drawHomeToday();
   // Calendar and Home list these tasks themselves, and on Boards the panel would cover the columns.
-  const here = home || /^#\/(?:calendar|boards)(?:\/|$)/.test(location.hash);
+  const here = home || ['calendar', 'boards'].includes(state.view);
+  const hidden = tasksBox.hidden;
   tasksBox.hidden = !open || here || state.view === 'locked';
+  if (hidden) tasksBox.classList.toggle('still', arrived);
   tasksSync();
   if (tasksBox.hidden) { fitTasksWindow(); return; }
   const late = groups.find(([name]) => name === 'Overdue');
@@ -2105,7 +2162,7 @@ function fitTasksWindow() {
   if (!tasksBox.classList.contains('open')) document.body.style.setProperty('--dock-room', `${Math.ceil(innerHeight - dock().getBoundingClientRect().top + 16)}px`);
 }
 
-new MutationObserver(() => (tasksBox.hidden && tasksWin.tasks?.length ? drawTasksWindow() : fitTasksWindow())).observe(app, { childList: true });
+new MutationObserver(() => (tasksBox.hidden && tasksWin.tasks?.length ? drawTasksWindow(true) : fitTasksWindow())).observe(app, { childList: true });
 let railFit = 0;
 new MutationObserver(() => {
   if (railFit || !(app.querySelector('.outline-ticks') || tasksBox.style.getPropertyValue('--tasks-room'))) return;

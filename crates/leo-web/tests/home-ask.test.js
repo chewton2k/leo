@@ -67,7 +67,7 @@ function dropped(view, target) {
   const calls = [];
   const context = {
     folderLabel: (v) => v, felix: {NOTE_DRAG: 'x-note'}, clearTimeout() {},
-    document: {addEventListener(type, fn) { listeners[type] = fn; }, querySelectorAll: () => [], body: {classList: {remove() {}, add() {}, toggle() {}}}},
+    document: {addEventListener(type, fn) { listeners[type] = fn; }, querySelectorAll: () => [], body: {dataset: {}, classList: {remove() {}, add() {}, toggle() {}}}},
     state: {view},
     $: () => null,
     uploadSheet: async (...args) => { calls.push(['upload', ...args]); },

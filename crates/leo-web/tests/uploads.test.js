@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { paneHelpers } = require('./page-source');
 const source = fs.readFileSync(path.join(__dirname, '../src/web/app/uploads.js'), 'utf8');
 const slice = (from, to) => source.slice(source.indexOf(from), source.indexOf(to));
 const head = slice('const UPLOAD_PARALLEL', 'async function shrink(');
@@ -43,8 +44,10 @@ function page({ reject = () => false } = {}) {
       log.posts.push({ url, options });
       return { id: 'job-1' };
     },
+    app: {}, marginPage: null,
   };
   vm.createContext(context);
+  vm.runInContext(paneHelpers(), context);
   vm.runInContext(`${head}\nasync function shrink(file) { return { name: file.name, type: file.type, blob: file }; }\n${sending}\npicked = []; this.run = async (files) => { picked = files; await uploadGo(); }; this.sendFiles = sendFiles;`, context);
   return context;
 }
@@ -120,7 +123,7 @@ test('a picture of any size is sent as one streamed PUT of its blob, with no siz
     fail: (e) => calls.push(`failed: ${e.message}`),
   });
   const session = { doc: { insert: (text) => inserted.push(text) } };
-  c.state.session = session;
+  c.state.main = c.state.session = session;
   c.fetch = async (url, init) => {
     c.log.puts.push({ url, init });
     return { ok: true, status: 201, json: async () => ({ path: 'attachments/a.png' }) };
@@ -158,4 +161,18 @@ test('a section added to a note is named by its job and its text is never sent b
   calls.length = 0;
   await c.addSection({ id: 'n1', title: 'Heaps' }, '');
   assert.equal(calls.length, 0);
+});
+
+test('an original of the note in the second pane opens beside that note, not in the focused pane', async () => {
+  const main = { note: { id: 'main' } };
+  const context = { state: { view: 'note', session: main, main }, app: { id: 'app' }, marginPage: { id: 'main-margin' }, enc: encodeURIComponent, esc: (t) => String(t), sourcePage: 'kept', viewKind: () => 'pdf', backLink: '' };
+  vm.createContext(context);
+  vm.runInContext(paneHelpers(), context);
+  vm.runInContext("panes[0].margin = marginPage; panes.push({ el: { id: 'beside' }, s: { note: { id: 'side' } }, margin: { id: 'side-margin' } }); let fileAside = null;", context);
+  const opened = [];
+  context.openAside = (kind) => { opened.push([kind, vm.runInContext('here().el.id', context), vm.runInContext('marginPage.id', context)]); return {}; };
+  vm.runInContext(`${slice('async function viewOriginal(', 'async function fillTextFile(')}\nthis.viewOriginal = viewOriginal;`, context);
+  await context.viewOriginal('side', 'slides.pdf');
+  assert.deepEqual(opened, [['file', 'beside', 'side-margin']]);
+  assert.equal(vm.runInContext('here().el.id', context), 'app');
 });

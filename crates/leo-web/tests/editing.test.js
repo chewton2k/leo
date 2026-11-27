@@ -67,6 +67,14 @@ test('resizing counts only the pictures the page draws, so outside images and co
   assert.equal(ed.setPictureWidth(line, 2, 200), line, 'there is no third drawn picture');
 });
 
+test('a line names where each drawn picture sits, the same ones resizing and removing count', () => {
+  const line = '`![code](a.png)` ![Logo](https://example.com/logo.png) Before ![Tree|400](attachments/tree.png) and ![[graph.png|250]] after';
+  const spans = ed.pictureSpans(line);
+  assert.deepEqual(spans, [{ at: line.indexOf('![Tree'), length: '![Tree|400](attachments/tree.png)'.length }, { at: line.indexOf('![[graph'), length: '![[graph.png|250]]'.length }]);
+  spans.forEach(({ at }, i) => assert.equal(ed.removePicture(line, i).at, at));
+  assert.deepEqual(ed.pictureSpans('no pictures'), []);
+});
+
 test('removing a picture takes out only the chosen drawn one, never code or outside images', () => {
   const line = '`![code](a.png)` ![Logo](https://example.com/logo.png) Before ![Tree|400](attachments/tree.png) and ![[graph.png|250]] after';
   assert.deepEqual(ed.removePicture(line, 0), { text: line.replace('![Tree|400](attachments/tree.png)', ''), at: line.indexOf('![Tree') });
@@ -578,6 +586,21 @@ test('a \\[ block and a \\begin{aligned} block are each one block to edit', () =
 test('a $$ math block is one block to edit, and a one-line $$x$$ is a line', () => {
   const lines = ['intro', '$$', 'a^2 + b^2', '= c^2$$', 'after', '$$x$$'];
   assert.deepEqual(ed.splitBlocks(lines).map((b) => [b.start, b.end, b.kind]), [[0, 1, 'line'], [1, 4, 'math'], [4, 5, 'line'], [5, 6, 'line']]);
+});
+
+test('leoCopied recognises leo\'s own copy by its html marker and text, and nothing else', () => {
+  const source = 'Before the picture.\n\n![Pasted picture](attachments/a.png)';
+  const html = (kept, from) => `<div data-leo="${md.escape(kept)}" data-leo-from="${md.escape(from)}"><p>x</p></div>`;
+  assert.deepEqual(ed.leoCopied(html(source, 'work'), 'Before the picture.'), { source, from: 'work', alone: false });
+  assert.deepEqual(ed.leoCopied(html('![Box](attachments/a.png)', ''), ''), { source: '![Box](attachments/a.png)', from: '', alone: true });
+  assert.equal(ed.leoCopied(html(source, ''), 'Something else'), null, 'text that is not the copy\'s own');
+  assert.equal(ed.leoCopied(html('![x](https://example.com/a.png)', ''), ''), null, 'a picture outside leo');
+  assert.equal(ed.leoCopied('<div><p>plain</p></div>', 'plain'), null);
+  assert.equal(ed.leoCopied('', ''), null);
+  const clip = (h, t) => ({ getData: (type) => (type === 'text/html' ? h : t) });
+  assert.equal(ed.ownTextCopy(clip(html(source, 'work'), 'Before the picture.')), true, 'text with a picture skips the files');
+  assert.equal(ed.ownTextCopy(clip(html('![Box](attachments/a.png)', ''), '')), false, 'a picture alone keeps them');
+  assert.equal(ed.ownTextCopy(clip('', '')), false);
 });
 
 setImmediate(() => {

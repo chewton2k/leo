@@ -2056,28 +2056,47 @@ test.describe('pictures', () => {
     await expect.poll(() => page.locator('#doc img.note-img').evaluate((el) => el.naturalWidth)).toBe(320);
   });
 
-  test('copying a selection with a picture puts the picture on the clipboard as a data url, and one without puts text only', async ({ page }) => {
+  test('copying text with one picture puts text, html and a png on the clipboard, and pasting that into Felix adds only the text', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     const note = await (await page.request.post('/api/notes', { data: { title: `Copied ${test.info().project.name}`, body: 'Before the picture.' } })).json();
     await page.goto(`/#/n/${note.id}`);
     await expect(page.locator('#doc')).toContainText('Before the picture.');
     await pastePicture(page, '#doc');
     const img = page.locator('#doc img.note-img');
     await expect.poll(() => img.evaluate((el) => el.naturalWidth)).toBe(320);
-    const copy = (selector) => page.evaluate((target) => {
-      getSelection().selectAllChildren(document.querySelector(target));
-      const data = new DataTransfer();
-      document.dispatchEvent(new ClipboardEvent('copy', { clipboardData: data, bubbles: true, cancelable: true }));
-      return { text: data.getData('text/plain'), html: data.getData('text/html') };
-    }, selector);
-    const both = await copy('#doc');
+    const held = () => page.evaluate(async () => {
+      const [item] = await navigator.clipboard.read();
+      const read = async (type) => (item.types.includes(type) ? (await item.getType(type)).text() : '');
+      return { types: item.types, text: await read('text/plain'), html: await read('text/html'), size: item.types.includes('image/png') ? (await item.getType('image/png')).size : 0 };
+    });
+    await page.evaluate(() => { getSelection().selectAllChildren(document.querySelector('#doc')); });
+    await page.keyboard.press('ControlOrMeta+c');
+    await expect.poll(async () => (await held()).types).toContain('image/png');
+    const both = await held();
+    expect(both.types).toEqual(expect.arrayContaining(['text/plain', 'text/html', 'image/png']));
+    expect(both.size).toBeGreaterThan(100);
     expect(both.text).toBe('Before the picture.');
     expect(both.html).toMatch(/^<div data-leo="Before the picture\.\n\n!\[Pasted picture\]\(attachments\/\d{8}-\d{6}-pasted-1\.png\)"/);
     expect(both.html).toMatch(/<img src="data:image\/png;base64,[A-Za-z0-9+/=]+" alt="Pasted picture">/);
     expect(both.html).toContain('style="color:inherit"');
     expect(both.html).not.toMatch(/\/api\/|127\.0\.0\.1|localhost|<script|onerror|onclick/);
-    const plain = await copy('#doc .blk:first-child');
+    const plain = await page.evaluate(() => {
+      getSelection().selectAllChildren(document.querySelector('#doc .blk:first-child'));
+      const data = new DataTransfer();
+      document.dispatchEvent(new ClipboardEvent('copy', { clipboardData: data, bubbles: true, cancelable: true }));
+      return { text: data.getData('text/plain'), html: data.getData('text/html') };
+    });
     expect(plain.text).toBe('Before the picture.');
     expect(plain.html).toBe('');
+    const uploads = [];
+    page.on('request', (request) => { if (request.url().includes('/api/pictures')) uploads.push(request.url()); });
+    await page.locator('#chat-toggle').click();
+    await page.locator('#chat-input').focus();
+    await page.keyboard.press('ControlOrMeta+v');
+    await expect(page.locator('#chat-input')).toHaveValue('Before the picture.');
+    await expect(page.locator('#chat-refs .file-card')).toHaveCount(0);
+    expect(uploads).toEqual([]);
+    await page.evaluate(() => navigator.clipboard.writeText(''));
   });
 
   test('a clicked picture copies as a picture and pastes back as the same markdown, without another upload', async ({ page, context }) => {
@@ -2139,6 +2158,31 @@ test.describe('pictures', () => {
     await copied('#doc');
     release();
     await expect.poll(html).toMatch(/Before the picture\.[\s\S]*<img src="data:image\/png;base64,/);
+  });
+
+  test('a picture that fails to load while it is copied still leaves the text on the clipboard', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const note = await (await page.request.post('/api/notes', { data: { title: `Failed ${test.info().project.name}`, body: 'Before the picture.' } })).json();
+    await page.goto(`/#/n/${note.id}`);
+    await expect(page.locator('#doc')).toContainText('Before the picture.');
+    await pastePicture(page, '#doc');
+    await expect.poll(async () => (await (await page.request.get(`/api/notes/${note.id}`)).json()).body).toContain('![Pasted picture]');
+    let release;
+    const held = new Promise((done) => { release = done; });
+    await page.route('**/api/image**', async (route) => {
+      await held;
+      await route.abort();
+    });
+    await page.reload();
+    await expect(page.locator('#doc img.note-img')).toHaveCount(1);
+    await page.evaluate(() => navigator.clipboard.writeText('old'));
+    await page.evaluate(() => {
+      getSelection().selectAllChildren(document.querySelector('#doc'));
+      document.dispatchEvent(new ClipboardEvent('copy', { clipboardData: new DataTransfer(), bubbles: true, cancelable: true }));
+    });
+    release();
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('Before the picture.');
+    await expect(page.locator('#code-said'), 'no Could not copy').toHaveCount(0);
   });
 
   test('a paste that only looks like leo is not taken as one', async ({ page }) => {
@@ -4133,6 +4177,39 @@ test('a calendar is connected in Settings by pasting one link, and can be remove
   await expect(page.locator('.cal-card')).toContainText('Not connected');
 });
 
+test("pasting a calendar link connects it, and a Google share link offers that calendar's settings", async ({ page }) => {
+  let linked = [];
+  const posts = [];
+  await page.route('**/api/calendar', async (route) => {
+    if (route.request().method() === 'POST') {
+      posts.push(route.request().postDataJSON().link);
+      linked = [{ id: 'c1', name: 'Classes', added_at: new Date().toISOString(), problem: null }];
+    }
+    return route.fulfill({ json: { connected: linked.length > 0, calendars: linked, events: [], refreshing: false } });
+  });
+  await page.goto('/#/settings/calendar');
+  const card = page.locator('.cal-card');
+  const field = card.locator('#calendar-link');
+  const error = card.locator('#calendar-error');
+  const paste = (value, times = 1) => field.evaluate((el, [text, count]) => {
+    el.value = text;
+    for (let i = 0; i < count; i++) el.dispatchEvent(new InputEvent('input', { inputType: 'insertFromPaste', bubbles: true }));
+  }, [value, times]);
+  await paste('https://calendar.google.com/calendar/u/0?cid=YWJjQGV4YW1wbGUuY29t');
+  await expect(error).toContainText('That is the share link');
+  const link = error.locator('a');
+  await expect(link).toHaveText('Open this calendar\'s settings');
+  await expect(link).toHaveAttribute('href', 'https://calendar.google.com/calendar/u/0/r/settings/calendar/YWJjQGV4YW1wbGUuY29t');
+  await expect(link).toHaveAttribute('target', '_blank');
+  await paste('https://calendar.google.com/calendar/u/0?cid=a%22%3E%3Cb');
+  await expect(error).toContainText('That is the share link');
+  await expect(error.locator('a'), 'an odd calendar id never becomes a link').toHaveCount(0);
+  expect(posts).toEqual([]);
+  await paste('https://calendar.google.com/calendar/ical/me/private-abc/basic.ics', 2);
+  await expect(page.locator('.cal-card')).toContainText('Classes');
+  expect(posts, 'a paste connects once').toEqual(['https://calendar.google.com/calendar/ical/me/private-abc/basic.ics']);
+});
+
 test('dropping one note on another combines them in the background with progress, then shows the result first, and Undo brings both back', async ({ page }) => {
   const tag = Date.now().toString(36);
   const folder = `combine-${tag}`;
@@ -5921,8 +5998,9 @@ test('Backspace or Delete on a selected picture takes it out of the note and sta
   await page.keyboard.press('Backspace');
   await expect.poll(body, { timeout: 5000 }).not.toContain('![Box]');
   expect(await body()).toMatch(/^Intro line\n\n *!\[Two\]\(data:image[^)]*\)\n\nAfter line$/);
-  await expect(page.locator('.pic-frame')).toHaveCount(0);
-  await expect(page.locator('#doc textarea')).toBeFocused();
+  await expect(img).toHaveCount(1);
+  await expect(img).toHaveClass(/picked/);
+  await expect(page.locator('#doc textarea')).toHaveCount(0);
   expect(page.url()).toContain(`#/n/${note.id}`);
   await page.keyboard.press('Escape');
   const backspace = (selector) => page.evaluate((s) => { const el = s ? document.createElement(s) : document.body; if (s) document.body.append(el); const e = new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }); el.dispatchEvent(e); if (s) el.remove(); return e.defaultPrevented; }, selector);
@@ -5987,7 +6065,7 @@ test('a click or a double-click on a picture outlines it once and opens no edito
   await page.request.delete(`/api/notes/${note.id}`);
 });
 
-test('in a checkbox item a click on a picture selects it, a click beside it puts the caret after it, and Enter there starts a checkbox', async ({ page }) => {
+test('in a checkbox item a click on a picture or beside it selects it, and Enter there starts a checkbox', async ({ page }) => {
   const svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="150"><rect width="300" height="150" fill="#9ab"/></svg>');
   const note = await (await page.request.post('/api/notes', { data: { title: `Boxed ${Date.now().toString(36)}`, body: `- [ ] ![Box](data:image/svg+xml;utf8,${svg})` } })).json();
   await page.goto(`/#/n/${note.id}`);
@@ -5999,13 +6077,183 @@ test('in a checkbox item a click on a picture selects it, a click beside it puts
   await expect(page.locator('.pic-handle')).toBeVisible();
   await expect(area).toHaveCount(0);
   const right = await img.boundingBox();
+  await page.keyboard.press('Escape');
   await page.mouse.click(right.x + right.width + 40, right.y + right.height / 2);
-  await expect(area).toHaveValue(/^!\[Box\]\(data:image/);
-  expect(await area.evaluate((el) => el.selectionStart === el.value.length)).toBe(true);
+  await expect(img).toHaveClass(/picked/);
+  await expect(img).toBeVisible();
+  await expect(area).toHaveCount(0);
   await page.keyboard.press('Enter');
   await expect(area).toHaveValue('');
   await expect(page.locator('#doc input[data-box]')).toHaveCount(2);
   await expect(page.locator('#doc .blk').first().locator('img.note-img')).toHaveCount(1);
+  await page.request.delete(`/api/notes/${note.id}`);
+});
+
+test('arrowing up and down past a picture frames it and never opens its Markdown', async ({ page }) => {
+  const svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="150"><rect width="300" height="150" fill="#9ab"/></svg>');
+  const note = await (await page.request.post('/api/notes', { data: { title: `Arrowed ${Date.now().toString(36)}`, body: `Intro line\n\n![Box](data:image/svg+xml;utf8,${svg})\n\nAfter line` } })).json();
+  await page.goto(`/#/n/${note.id}`);
+  const img = page.locator('#doc img.note-img');
+  const area = page.locator('#doc textarea');
+  await expect(img).toBeVisible();
+  await page.locator('#doc .blk').first().click();
+  await expect(area).toHaveValue('Intro line');
+  for (const [key, value] of [['ArrowDown', ''], ['ArrowDown', null], ['ArrowDown', ''], ['ArrowDown', 'After line'], ['ArrowUp', ''], ['ArrowUp', null], ['ArrowUp', ''], ['ArrowUp', 'Intro line']]) {
+    await page.keyboard.press(key);
+    await expect(img).toBeVisible();
+    if (value === null) {
+      await expect(img).toHaveClass(/picked/);
+      await expect(area).toHaveCount(0);
+    } else {
+      await expect(area).toHaveValue(value);
+      await expect(img).not.toHaveClass(/picked/);
+    }
+  }
+  await page.request.delete(`/api/notes/${note.id}`);
+});
+
+test('ArrowLeft and ArrowRight step over a mid-line picture, and Backspace or Delete beside it removes it', async ({ page }) => {
+  const svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="150"><rect width="300" height="150" fill="#9ab"/></svg>');
+  const note = await (await page.request.post('/api/notes', { data: { title: `Stepped ${Date.now().toString(36)}`, body: `- Before ![Box](data:image/svg+xml;utf8,${svg}) after\`` } })).json();
+  const body = async () => (await (await page.request.get(`/api/notes/${note.id}`)).json()).body;
+  await page.goto(`/#/n/${note.id}`);
+  const img = page.locator('#doc img.note-img');
+  const area = page.locator('#doc textarea');
+  const caret = () => area.evaluate((el) => [el.selectionStart, el.selectionEnd]);
+  await expect(img).toBeVisible();
+  const [before, word] = await page.locator('#doc li').evaluate((el) => ['Before', 'after'].map((said) => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let text = walker.nextNode();
+    while (text && !text.data.includes(said)) text = walker.nextNode();
+    const range = document.createRange();
+    range.setStart(text, text.data.indexOf(said));
+    range.setEnd(text, text.data.indexOf(said) + 1);
+    const { x, y, height } = range.getBoundingClientRect();
+    return { x: x + 1, y: y + height / 2 };
+  }));
+  await page.mouse.click(word.x, word.y);
+  await expect(area).toHaveValue(' after`');
+  await expect(img).toBeVisible();
+  expect(await caret()).toEqual([1, 1]);
+  await page.mouse.click(before.x, before.y);
+  await expect(area).toHaveValue('Before ');
+  expect(await caret()).toEqual([0, 0]);
+  await page.mouse.click(word.x, word.y);
+  await expect(area).toHaveValue(' after`');
+  expect(await caret()).toEqual([1, 1]);
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await expect(img).toHaveClass(/picked/);
+  await expect(area).toHaveCount(0);
+  await page.keyboard.press('ArrowLeft');
+  await expect(area).toHaveValue('Before ');
+  await expect(img).toBeVisible();
+  expect(await caret()).toEqual([7, 7]);
+  await page.keyboard.press('ArrowRight');
+  await expect(img).toHaveClass(/picked/);
+  await page.keyboard.press('ArrowRight');
+  await expect(area).toHaveValue(' after`');
+  expect(await caret()).toEqual([0, 0]);
+  await page.keyboard.press('Backspace');
+  await expect(img).toHaveCount(0);
+  await expect.poll(body, { timeout: 5000 }).toBe('- Before  after`');
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(img).toBeVisible();
+  await expect(area).toHaveValue(' after`');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await expect(area).toHaveValue('Before ');
+  await page.keyboard.press('Delete');
+  await expect(img).toHaveCount(0);
+  await expect.poll(body, { timeout: 5000 }).toBe('- Before  after`');
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await expect(area).toHaveValue('Before ');
+  await page.keyboard.type('`');
+  await expect(area).toHaveValue(/^Before `!\[Box\]\(data:image[^)]*\) after`$/);
+  await expect(img).toHaveCount(0);
+  await page.request.delete(`/api/notes/${note.id}`);
+});
+
+test('after resizing a picture in a bullet or beside text, a click left or right of it keeps it drawn', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'the click is a mouse click');
+  const svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="150"><rect width="300" height="150" fill="#9ab"/></svg>');
+  for (const [lead, tail, sides] of [['- ', '', [-6, 40]], ['Before ', ' after', [40]]]) {
+    const note = await (await page.request.post('/api/notes', { data: { title: `Resized ${Date.now().toString(36)}`, body: `${lead}![Box](data:image/svg+xml;utf8,${svg})${tail}` } })).json();
+    const body = async () => (await (await page.request.get(`/api/notes/${note.id}`)).json()).body;
+    await page.goto(`/#/n/${note.id}`);
+    const img = page.locator('#doc img.note-img');
+    const area = page.locator('#doc textarea');
+    await expect(img).toBeVisible();
+    await img.click();
+    const shown = Math.round((await img.boundingBox()).width);
+    await page.locator('.pic-handle').press('ArrowLeft');
+    await expect.poll(body, { timeout: 5000 }).toContain(`![Box|${shown - 20}](data:image`);
+    await page.keyboard.press('Escape');
+    await expect(img).not.toHaveClass(/picked/);
+    const box = await img.boundingBox();
+    for (const side of sides) {
+      await page.mouse.click(side < 0 ? box.x + side : box.x + box.width + side, box.y + box.height / 2);
+      await expect(img).toBeVisible();
+      if (tail) await expect(area).toHaveValue(tail);
+      else {
+        await expect(img).toHaveClass(/picked/);
+        await expect(area).toHaveCount(0);
+      }
+      await page.keyboard.press('Escape');
+    }
+    await page.request.delete(`/api/notes/${note.id}`);
+  }
+});
+
+test('Enter on a framed picture in a bullet starts the next bullet', async ({ page }) => {
+  const svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="150"><rect width="300" height="150" fill="#9ab"/></svg>');
+  const note = await (await page.request.post('/api/notes', { data: { title: `Bulleted ${Date.now().toString(36)}`, body: `- ![Box](data:image/svg+xml;utf8,${svg})` } })).json();
+  const body = async () => (await (await page.request.get(`/api/notes/${note.id}`)).json()).body;
+  await page.goto(`/#/n/${note.id}`);
+  const img = page.locator('#doc img.note-img');
+  await expect(img).toBeVisible();
+  await img.click();
+  await expect(img).toHaveClass(/picked/);
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#doc li')).toHaveCount(2);
+  await expect(page.locator('#doc textarea')).toHaveValue('');
+  await expect(img).toBeVisible();
+  await expect.poll(body, { timeout: 5000 }).toMatch(/^- !\[Box\]\(data:image[^)]*\)\n- $/);
+  await page.keyboard.press('Escape');
+  await page.locator('#title').click();
+  await page.keyboard.press('Tab');
+  await expect(img).toHaveClass(/picked/);
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('#doc textarea')).toHaveValue('');
+  await page.request.delete(`/api/notes/${note.id}`);
+});
+
+test('undoing a cut of text and a picture on one line brings both back drawn', async ({ page }) => {
+  const svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="150"><rect width="300" height="150" fill="#9ab"/></svg>');
+  const text = `Before ![Box](data:image/svg+xml;utf8,${svg}) after`;
+  const note = await (await page.request.post('/api/notes', { data: { title: `Cut ${Date.now().toString(36)}`, body: text } })).json();
+  const body = async () => (await (await page.request.get(`/api/notes/${note.id}`)).json()).body;
+  await page.goto(`/#/n/${note.id}`);
+  const img = page.locator('#doc img.note-img');
+  await expect(img).toBeVisible();
+  await page.locator('#doc .blk').first().evaluate((el) => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const texts = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) texts.push(node);
+    const start = texts.find((node) => node.data.includes('Before'));
+    const end = texts.find((node) => node.data.includes('after'));
+    getSelection().setBaseAndExtent(start, start.data.indexOf('Before') + 2, end, end.data.indexOf('after') + 2);
+  });
+  await page.keyboard.press('ControlOrMeta+x');
+  await expect.poll(body, { timeout: 5000 }).toBe('Beter');
+  await expect(img).toHaveCount(0);
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect.poll(body, { timeout: 5000 }).toBe(text);
+  await expect(img).toBeVisible();
+  expect(await img.evaluate((el) => el.naturalWidth > 0)).toBe(true);
+  await expect(page.locator('#doc textarea')).toHaveValue(' after');
   await page.request.delete(`/api/notes/${note.id}`);
 });
 
@@ -6060,6 +6308,7 @@ test('beside a lone picture a double-click or a Shift-click opens its Markdown, 
   await expect(page.locator('#doc textarea')).toHaveValue(/^!\[Box\]\(data:image/);
   const broken = await make('Intro line\n\n![](missing.png)\n\nAfter line');
   await page.goto(`/#/n/${broken.id}`);
+  await expect.poll(() => page.locator('#doc img.note-img').evaluate((el) => el.complete)).toBe(true);
   const line = await page.locator('#doc .blk').nth(2).boundingBox();
   await page.mouse.click(line.x + 200, line.y + line.height / 2);
   await expect(page.locator('#doc textarea')).toHaveValue('![](missing.png)');
@@ -6757,6 +7006,37 @@ test.describe('round 2 redesign', () => {
     await expect(page.locator('#rec-title'), 'Record opens on the event it was pressed for').toHaveValue('Lab meeting');
   });
 
+  test("home's Today shows five rows across events and tasks, counts hidden events in more, and shows Record only on the event now", async ({ page }) => {
+    const now = new Date();
+    now.setHours(12, 0, 0, 0);
+    await page.clock.setFixedTime(now);
+    const at = (mins) => new Date(now.getTime() + mins * 60000).toISOString();
+    const day = now.toLocaleDateString('en-CA');
+    const events = [-10, 60, 120, 180, 240, 300, 360].map((mins, i) => ({ id: `feed:a:e${i}`, feed: 'feed:a', calendar: 'School', title: `Event ${i} ${tagOf()}`, start: at(mins), end: at(mins + 50), all_day: false, location: '', context: '' }));
+    const tasks = ['One', 'Two', 'Three'].map((name, i) => ({ id: `home-t${i}`, source: 'leo', title: `Task ${name} ${tagOf()}`, description: '', kind: 'other', done: false, date: day, time: null, end: null, note: null, found: true, promoted: false }));
+    await page.route('**/api/schedule?**', async (route) => {
+      const response = await route.fetch();
+      return route.fulfill({ response, json: { ...(await response.json()), events, tasks, total: tasks.length, window: [] } });
+    });
+    await page.goto('/#/');
+    await page.reload();
+    const rows = page.locator('#home-today .tasks-row');
+    await expect(rows).toHaveCount(5);
+    await expect(rows.locator('.tasks-title')).toHaveText(events.slice(0, 5).map((e) => e.title));
+    await expect(page.locator('#home-today .home-more'), 'the two hidden events and three tasks are all counted').toHaveText('5 more in Calendar');
+    const shown = () => page.locator('.home-event-rec').evaluateAll((links) => links.map((a) => getComputedStyle(a).opacity));
+    expect(await shown(), 'only the event happening now shows Record').toEqual(['1', '0', '0', '0', '0']);
+    await expect(page.locator('.home-event-rec').nth(1)).toHaveAttribute('href', '#/record?event=e1&kind=microphone');
+    await rows.nth(1).hover();
+    expect(await shown(), 'hovering a row shows its Record').toEqual(['1', '1', '0', '0', '0']);
+    await page.mouse.move(0, 0);
+    await page.locator('.home-event-rec').nth(2).focus();
+    expect(await shown(), 'so does keyboard focus').toEqual(['1', '0', '1', '0', '0']);
+    const boxes = await page.locator('.home-event-rec').evaluateAll((links) => links.map((a) => Math.round(a.getBoundingClientRect().right)));
+    expect(new Set(boxes).size, 'Record sits in one right-aligned column').toBe(1);
+    expect(await page.locator('.home-event-rec').first().evaluate((a) => getComputedStyle(a, '::after').content), 'it is underlined in pencil like a marked word').not.toBe('none');
+  });
+
   test('Quick Leo opens on recent notes, actions and Felix, and each row works from the keyboard', async ({ page }) => {
     const pinned = [];
     for (let i = 0; i < 3; i++) pinned.push(await makeNote(page, `Quick pinned ${i} ${tagOf()}`, 'x'));
@@ -6884,5 +7164,72 @@ test.describe('round 2 redesign', () => {
     await expect(page.locator('.cal-compose')).toBeVisible();
     await expect(page.locator('#cal-side .cal-peek-title'), 'the peek is gone while the new task is typed').toHaveCount(0);
     await expect(page.locator('#cal-side .cal-mini')).toBeVisible();
+  });
+
+  test('leaving the calendar or Boards for a note keeps that page and its layout until the note paints, and the Tasks card arrives with the note', async ({ page }) => {
+    test.skip(test.info().project.name !== 'desktop', 'the Tasks card is for wider screens');
+    const tag = tagOf();
+    const note = await makeNote(page, `Slow note ${tag}`, 'Body');
+    expect((await page.request.post('/api/tasks', { data: { title: `Dock task ${tag}` } })).ok()).toBe(true);
+    const board = await (await page.request.post('/api/boards', { data: { name: `Slow board ${tag}` } })).json();
+    for (const [hash, selector, shown] of [['#/calendar', '#cal-main', 'on-calendar'], [`#/boards/${board.id}`, '.kanban-cols', 'on-boards']]) {
+      await page.goto(hash);
+      await expect(page.locator(selector)).toBeVisible();
+      await expect(page.locator('body')).toHaveClass(new RegExp(shown));
+      const before = await page.locator(selector).boundingBox();
+      let reached;
+      const pending = new Promise((resolve) => { reached = resolve; });
+      let release;
+      const held = new Promise((resolve) => { release = resolve; });
+      await page.route(`**/api/notes/${note.id}`, async (route) => {
+        reached();
+        await held;
+        await route.continue();
+      });
+      await page.evaluate(() => {
+        window.leoFrames = [];
+        const look = () => {
+          if (!window.leoFrames) return;
+          const dock = document.getElementById('tasks-window');
+          window.leoFrames.push({ doc: Boolean(document.getElementById('doc')), dock: Boolean(dock && !dock.hidden), fading: dock ? dock.getAnimations().length : 0 });
+          requestAnimationFrame(look);
+        };
+        look();
+      });
+      await page.evaluate((id) => { location.hash = `#/n/${id}`; }, note.id);
+      await pending;
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await expect(page.locator('body'), `${hash} keeps its layout while the note loads`).toHaveClass(new RegExp(shown));
+      expect(await page.locator(selector).boundingBox(), `${hash} does not move while the note loads`).toEqual(before);
+      await expect(page.locator('#tasks-window'), 'the Tasks card does not show over the old page').toBeHidden();
+      release();
+      await expect(page.locator('#doc')).toBeVisible();
+      await expect(page.locator('body')).not.toHaveClass(new RegExp(shown));
+      await expect(page.locator('#tasks-window')).toBeVisible();
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      const frames = await page.evaluate(() => { const seen = window.leoFrames; window.leoFrames = null; return seen; });
+      expect(frames.filter((frame) => frame.doc !== frame.dock), 'the note and the Tasks card arrive in the same frame').toEqual([]);
+      expect(frames.filter((frame) => frame.fading), 'the card has no fade of its own').toEqual([]);
+      await page.unroute(`**/api/notes/${note.id}`);
+    }
+  });
+
+  test('a note fades in once when it is reached again through the calendar', async ({ page }) => {
+    const note = await makeNote(page, `Fade ${tagOf()}`, 'Body');
+    await page.evaluate(() => {
+      window.leoFades = 0;
+      const animate = Element.prototype.animate;
+      Element.prototype.animate = function (...args) {
+        if (this.id === 'doc') window.leoFades++;
+        return animate.apply(this, args);
+      };
+    });
+    await page.goto(`/#/n/${note.id}`);
+    await expect(page.locator('#doc')).toBeVisible();
+    await page.evaluate(() => { window.leoFades = 0; location.hash = '#/calendar'; });
+    await expect(page.locator('#cal-main')).toBeVisible();
+    await page.evaluate((id) => { location.hash = `#/n/${id}`; }, note.id);
+    await expect(page.locator('#doc')).toBeVisible();
+    expect(await page.evaluate(() => window.leoFades)).toBe(1);
   });
 });

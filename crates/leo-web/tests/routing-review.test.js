@@ -3,14 +3,16 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { paneHelpers } = require('./page-source');
 const core = fs.readFileSync(path.join(__dirname, '../src/web/app/core.js'), 'utf8');
 const events = fs.readFileSync(path.join(__dirname, '../src/web/app/events.js'), 'utf8');
 function fixture(persisted = true) {
   const calls = [], notices = [];
   const session = { persisted, note: { id: 'draft', directory: '' }, doc: { stop() {}, destroy() { calls.push('destroy'); } } };
-  const context = { seq: 1, state: { view: 'note', session }, location: { hash: '#/n/draft' }, history: { state: { leoAt: 3 }, replaceState(_state, _title, hash) { context.location.hash = hash; } }, clearSearchHighlight() {}, searchPassage: null, openingNote: null, route() { calls.push('route'); }, flush: async () => {}, fail: error => calls.push(error.message), toast: (text, options) => notices.push({ text, ...options }), Offline: class extends Error {}, Locked: class extends Error {}, noteHash: id => '#/n/' + id, enc: encodeURIComponent, marginLeave() {} };
+  const context = { seq: 1, state: { view: 'note', session, main: session }, app: {}, location: { hash: '#/n/draft' }, history: { state: { leoAt: 3 }, replaceState(_state, _title, hash) { context.location.hash = hash; } }, clearSearchHighlight() {}, searchPassage: null, openingNote: null, route() { calls.push('route'); }, flush: async () => {}, fail: error => calls.push(error.message), toast: (text, options) => notices.push({ text, ...options }), Offline: class extends Error {}, Locked: class extends Error {}, noteHash: id => '#/n/' + id, enc: encodeURIComponent, marginLeave() {} };
   const start = core.includes('function showSaveFailure(') ? core.indexOf('function showSaveFailure(') : core.indexOf('async function go(');
   vm.createContext(context);
+  vm.runInContext(paneHelpers(), context);
   vm.runInContext('let navigationRequest = 0;\n' + core.slice(start, core.indexOf('const folderHash', start)), context);
   let hashchange;
   context.window = { addEventListener: (_name, fn) => { hashchange = fn; } };

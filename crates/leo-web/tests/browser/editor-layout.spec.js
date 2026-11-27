@@ -2,7 +2,7 @@ const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
-const { pageCss } = require('../page-source');
+const { pageCss, paneHelpers } = require('../page-source');
 const { signIn } = require('./sign-in');
 
 const PICTURE_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAABgAAAAQCAIAAACDRijCAAAClUlEQVR4nBXSERuGMBiF4XEyicfJJB4nk3icTOKHk0k8TibxOJnE42TS7/j63h9wX+c65xVC0Al6gRIMglFgBJNgFjjBIlgFCDbBLoiCQ3AKsuAS3IIqeASvQAhJJ+klSjJIRomRTJJZ4iSLZJUg2SS7JEoOySnJkktyS6rkkbzygxSdolcoxaAYFUYxKWaFUyyKVYFiU+yKqDgUpyIrLsWtqIpH8aoP0nSaXqM0g2bUGM2kmTVOs2hWDZpNs2ui5tCcmqy5NLemah7Nqz/I0Bl6gzIMhtFgDJNhNjjDYlgNGDbDboiGw3AasuEy3IZqeAyv+SBLZ+ktyjJYRouxTJbZ4iyLZbVg2Sy7JVoOy2nJlstyW6rlsbz2gxydo3cox+AYHcYxOWaHcyyO1YFjc+yO6DgcpyM7LsftqI7H8boP8nSe3qM8g2f0GM/kmT3Os3hWD57Ns3ui5/Ccnuy5PLeneh7P6z8IOuj/yzDA+C+ECeZ/DhZY+d8GO0Q44IQMF9xQ4YH3ezUR6AJ9QAWGwBgwgSkwB1xgCawBAltgD8TAETgDOXAF7kANPIE3fFCki/QRFRkiY8REpsgccZElssZ/ki2yR2LkiJyRHLkid6RGnsgbPyjRJfqESgyJMWESU2JOuMSSWBMktsSeiIkjcSZy4krciZp4Em/6oEyX6TMqM2TGjMlMmTnjMktmzf9KtsyeiZkjc2Zy5srcmZp5Mm/+oEJX6AuqMBTGgilMhbngCkthLVDYCnshFo7CWciFq3AXauEpvOWDKl2lr6jKUBkrpjJV5oqrLJW1/rfZKnslVo7KWcmVq3JXauWpvPWDGl2jb6jG0BgbpjE15oZrLI21QWNr7I3YOBpnIzeuxt2ojafxNn6Q3Alf0XLvqwAAAABJRU5ErkJggg==', 'base64');
@@ -21,13 +21,14 @@ async function editorFixture(browser, run, { remember = false, body = null, touc
   ${related ? `const hideAskFloat = () => {};
   ${passages.slice(passages.indexOf('const KEEP_SELECTION'), passages.indexOf("document.addEventListener('keydown'"))}` : ''}
   ${remember ? `const $ = selector => document.querySelector(selector), enc = encodeURIComponent;
-    const seq = 1, citedLines = null, state = {view:'note',session:{doc:window.doc}};
+    const seq = 1, citedLines = null, app = document, session = {doc:window.doc}, state = {view:'note',session,main:session};
+    ${paneHelpers()}
     const asideOpen = () => false;
     async function api(url, options = {}) {
       if (options.method === 'PUT') localStorage.setItem('fixture-reading', JSON.stringify(options.body.anchor));
       return {anchor:audit.anchor()};
     }
-    ${passages.slice(passages.indexOf('const reading ='))}
+    ${passages.slice(passages.indexOf('const readingFresh ='))}
     restoreReading('fixture-note', seq);` : ''}`;
   const server = http.createServer((req, res) => {
     if (req.url === '/away') { res.setHeader('Content-Type', 'text/html'); return res.end('<p>Another page</p>'); }
@@ -427,6 +428,83 @@ test('inserting a picture after a source-selection drag preserves the note and u
     await page.evaluate(() => doc.insert('![picture](attachment.png)'));
     expect(await page.evaluate(() => doc.source())).toBe(source + '\n\n![picture](attachment.png)');
   }, { body });
+});
+
+test('a picture inserted into a checkbox or bullet stays in the item, and Enter, after typing too, continues the list', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    const picture = '![p](/api/image?inline=1)';
+    const items = () => page.evaluate(() => doc.source().split('\n').filter(line => line.startsWith('- ')).length);
+    for (const item of ['- [ ] ', '- ', '- foo']) {
+      for (const typed of ['', 'cat', ' cat']) {
+        await page.goto(url + '/?body=' + encodeURIComponent(item));
+        await page.locator('#doc .blk').first().click();
+        await page.keyboard.press('End');
+        await page.evaluate(src => doc.insert(src), picture);
+        expect(await page.evaluate(() => doc.source())).toBe(item + picture);
+        if (typed) {
+          await page.keyboard.type(typed);
+          expect(await page.evaluate(() => doc.source())).toBe(item + picture + typed);
+        }
+        await page.keyboard.press('Enter');
+        expect(await items()).toBe(2);
+        await page.keyboard.type('x');
+        await page.keyboard.press('Enter');
+        expect(await items()).toBe(3);
+        await expect(page.locator('#doc img.note-img')).toHaveCount(1);
+      }
+    }
+  });
+});
+
+test('a fold chevron sits level with its heading text, first heading or not', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    await page.goto(url + '/?body=' + encodeURIComponent('## Key ideas\n\nText\n\n## Knapsack\n\nMore'));
+    await expect(page.locator('#doc .fold-btn')).toHaveCount(2);
+    const off = await page.evaluate(() => [...document.querySelectorAll('#doc .fold-btn')].map(b => {
+      const h = b.parentElement;
+      const range = document.createRange();
+      range.selectNodeContents([...h.childNodes].find(n => n.nodeType === 3));
+      const text = range.getBoundingClientRect();
+      const chevron = b.getBoundingClientRect();
+      return Math.abs(chevron.top + chevron.height / 2 - (text.top + text.height / 2));
+    }));
+    expect(off).toHaveLength(2);
+    for (const gap of off) expect(gap).toBeLessThan(2);
+  });
+});
+
+test('a drag from the text before a picture into the open text after it cuts exactly what it covers', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    const picture = '![p](/api/image?inline=1)';
+    await page.goto(url + '/?body=' + encodeURIComponent(`Before ${picture} after`));
+    await expect.poll(() => page.locator('#doc img.note-img').evaluate(img => img.naturalWidth)).toBeGreaterThan(0);
+    const spot = (word, at) => page.locator('#doc .blk').first().evaluate((el, [word, at]) => {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const i = node.data.indexOf(word);
+        if (i < 0) continue;
+        const range = document.createRange();
+        range.setStart(node, i + at);
+        range.setEnd(node, i + at + 1);
+        const box = range.getBoundingClientRect();
+        return { x: box.left + 1, y: box.top + box.height / 2 };
+      }
+    }, [word, at]);
+    const end = await spot('after', 4);
+    await page.mouse.click(end.x, end.y);
+    await expect(page.locator('#doc textarea')).toHaveValue(' after');
+    const from = await spot('Before', 2);
+    const box = await page.locator('#doc textarea').boundingBox();
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 6 });
+    await page.mouse.up();
+    await page.keyboard.press('ControlOrMeta+x');
+    expect(await page.evaluate(() => doc.source())).toBe('Be');
+  }, { body: 'x' });
 });
 
 test('returning a drag to a list marker selects only the edited item text', async ({ browser }) => {
@@ -1885,11 +1963,16 @@ test('copying pictures: a selection with a picture puts the markdown in data-leo
     const page = await context.newPage();
     const errors = await pictureNote(page, url);
     await page.evaluate(() => {
-      document.addEventListener('copy', e => { window.written = { text: e.clipboardData.getData('text/plain'), html: e.clipboardData.getData('text/html') }; });
+      Object.defineProperty(navigator.clipboard, 'write', { configurable: true, value: async ([item]) => {
+        const read = async type => (await item.getType(type)).text();
+        window.written = { types: item.types, text: await read('text/plain'), html: await read('text/html') };
+      } });
     });
     await page.keyboard.press('ControlOrMeta+a');
     await page.keyboard.press('ControlOrMeta+c');
+    await expect.poll(() => page.evaluate(() => window.written)).toBeTruthy();
     const written = await page.evaluate(() => window.written);
+    expect([...written.types].sort()).toEqual(['image/png', 'text/html', 'text/plain']);
     expect(written.text).not.toContain('![');
     expect(written.text).toContain('Before the picture');
     expect(written.html.startsWith('<div data-leo="')).toBe(true);

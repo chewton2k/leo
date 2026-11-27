@@ -76,7 +76,7 @@ function scrolled(count) {
   const root = { innerHeight: 900, get scrollY() { return scrollTop; } };
   const body = `${between('function outlineMark()', 'function outlineEscape')}\n${between('function outlineTop()', 'function outlineScroll()')}\nreturn { outlineActive };`;
   const make = new Function('outline', 'outlineNav', 'container', 'rendered', 'root', 'document', 'performance', 'outlineRows', 'outlinePage', 'outlinePeek', 'outlineTicks', 'OUTLINE_PAGE',
-    `const outlinePlaced = { top: null, center: null };\nlet outlineStart = 0, outlineAt = -1, outlineButton = null, outlineTick = null, outlineFrame = 0, outlineLanding = null, outlineFollowed = null, outlineIndex = null;\nconst outlineShows = (index) => index >= outlineStart && index < outlineStart + OUTLINE_PAGE;\n${body}`);
+    `const outlinePlaced = { top: null, center: null };\nlet outlineStart = 0, outlineAt = -1, outlineButton = null, outlineTick = null, outlineFrame = 0, outlineLanding = null, outlineFollowed = null, outlineIndex = null;\nconst outlineShows = (index) => index >= outlineStart && index < outlineStart + OUTLINE_PAGE;\nconst scroller = root, scrolled = () => root.scrollY;\n${body}`);
   const document = { getElementById: () => ({ getBoundingClientRect: () => ({ bottom: 64 }) }), documentElement: { scrollHeight: count * 40 + 900 } };
   const { outlineActive } = make(outline, outlineNav, container, rendered, root, document, { now: () => 0 }, rows, () => {}, () => {}, { children: [] }, 24);
   return { counts, frame(top) { scrollTop = top; for (const key of Object.keys(counts)) counts[key] = 0; outlineActive(); return { ...counts }; } };

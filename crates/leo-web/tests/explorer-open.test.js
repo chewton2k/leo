@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { paneHelpers } = require('./page-source');
 
 test('compact note selection honors the latest click in either response order', async () => {
   for (const reverse of [false, true]) {
@@ -11,7 +12,7 @@ test('compact note selection honors the latest click in either response order', 
     const context = {
       seq: 1, state: { session: null }, openingNote: null,
       api: url => new Promise(resolve => pending.set(url.split('/').pop(), resolve)),
-      enc: encodeURIComponent, sideWide: () => false, noteHash: id => `#/n/${id}`,
+      enc: encodeURIComponent, sideWide: () => false, split: () => false, noteHash: id => `#/n/${id}`,
       go: async hash => { opened.push(hash.split('/').pop()); return true; },
       showNote: async id => {
         opened.push(id);
@@ -41,7 +42,7 @@ test('reopening the open note from the Folders sheet waits for its save instead 
   const context = {
     seq: 1, state: { session: { note: { id: 'open' } } },
     api: async url => { fetched.push(url); return { id: 'open' }; },
-    enc: encodeURIComponent, sideWide: () => false, noteHash: id => `#/n/${id}`,
+    enc: encodeURIComponent, sideWide: () => false, split: () => false, noteHash: id => `#/n/${id}`,
     go: async (hash, options) => { went.push([hash, options]); }, fail: e => { throw e; },
     side: { target: 'Folder' }, drawSide() { drawn++; },
   };
@@ -119,7 +120,7 @@ function explorer(open, answer = (name) => [{ id: `${name}-1`, title: name, crea
     },
   };
   vm.createContext(context);
-  vm.runInContext(`let seq = 1, drawn = 0; let state = { view: 'note', dir: '', session: { note: { id: 'n' } } };\n${pieces}\n;globalThis.h = { side, drawSide, folderTree, loadSideFolders, refreshSideTree, bump: () => ++seq, draws: () => drawn, resetDraws: () => { drawn = 0; } };`, context);
+  vm.runInContext(`let seq = 1, drawn = 0; const open = { note: { id: 'n' } }; let state = { view: 'note', dir: '', session: open, main: open }; const app = {}; let marginPage = null;\n${paneHelpers()}\n${pieces}\n;globalThis.h = { side, drawSide, folderTree, loadSideFolders, refreshSideTree, bump: () => ++seq, draws: () => drawn, resetDraws: () => { drawn = 0; } };`, context);
   context.h.side.open = new Set(open);
   Object.assign(context.h, { reads, asked, disk, clock });
   context.h.flush = () => { while (frames.length) frames.shift()(); };

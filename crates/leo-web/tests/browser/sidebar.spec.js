@@ -2,7 +2,7 @@ const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
-const { pageCss } = require('../page-source');
+const { pageCss, paneHelpers } = require('../page-source');
 
 async function sidebarFixture(browser, run) {
   const web = path.resolve(__dirname, '../../src/web');
@@ -21,7 +21,7 @@ async function sidebarFixture(browser, run) {
     const folderLabel=dir=>dir.split('/').pop()||'Top level', folderHash=dir=>dir?'#/f/'+encodeURIComponent(dir):'#/', noteHash=id=>'#/n/'+encodeURIComponent(id);
     const closeSheet=()=>{}, go=hash=>{location.hash=hash;}, fail=error=>window.errors.push(error.message);
     const stillMotion=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const moves=[], tasksAtHome=()=>false, enc=encodeURIComponent, toast=()=>{}, showLatest=async()=>{}, saving={unsaved:()=>false};
+    const moves=[], tasksAtHome=()=>false, enc=encodeURIComponent, toast=()=>{}, showLatest=async()=>{}, saving={unsaved:()=>false,get:()=>undefined};
     const notes={
       '':[{id:'root-note',title:'Welcome',directory:''}],
       Course:[{id:'course-note',title:'Course overview',directory:'Course'},{id:'escaped-note',title:'<script> stays text',directory:'Course'}],
@@ -54,6 +54,9 @@ async function sidebarFixture(browser, run) {
     ${core.slice(core.indexOf('const moving'), core.indexOf('function rel('))}
     ${core.slice(core.indexOf('const SHORTCUT_KEYS'), core.indexOf('async function dictateHint'))}
     const overlapOut=()=>{}, marginPage={reading:false};
+    const app=document.querySelector('main');
+    ${paneHelpers()}
+    panes[0].margin=marginPage;
     ${read('app/motion.js')}
     ${read('app/popup-menu.js')}
     ${read('app/select-menu.js')}
@@ -71,7 +74,7 @@ async function sidebarFixture(browser, run) {
       else if(action==='home') go('#/');
     });
     window.errors=[];
-    window.audit={moves,asked,steady:rev=>{steady=rev;},draw:drawSide,side,refresh:loadSideFolders,note:(id,dir)=>{seq++;state={view:'note',dir,session:{note:{id}}};drawSide();},dragging,drop:el=>dirOf(dropTargetOf(el)),stop:endDrag,rename:title=>{notes.Course[0].title=title;},route:(dir)=>{seq++;state={view:'workspace',dir:''};side.revealed.clear();side.open.clear();drawSide();revealFolder(dir);},mac:on=>{document.documentElement.dataset.app=on?'mac':'';},broken:dir=>{broken=dir;},hold:()=>{pending=new Promise(resolve=>window.release=()=>{pending=null;resolve();});}};
+    window.audit={moves,asked,steady:rev=>{steady=rev;},draw:drawSide,side,refresh:loadSideFolders,note:(id,dir)=>{seq++;const s={note:{id}};state={view:'note',dir,session:s,main:s};drawSide();},dragging,drop:el=>dirOf(dropTargetOf(el)),stop:endDrag,rename:title=>{notes.Course[0].title=title;},route:(dir)=>{seq++;state={view:'workspace',dir:''};side.revealed.clear();side.open.clear();drawSide();revealFolder(dir);},mac:on=>{document.documentElement.dataset.app=on?'mac':'';},broken:dir=>{broken=dir;},hold:()=>{pending=new Promise(resolve=>window.release=()=>{pending=null;resolve();});}};
     loadSideFolders().catch(fail);`;
   const server = http.createServer((req,res) => {
     if(req.url==='/fixture.js') {res.setHeader('Content-Type','text/javascript; charset=utf-8');return res.end(fixture);}

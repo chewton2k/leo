@@ -1101,7 +1101,7 @@
     root.document.addEventListener('paste', (event) => {
       if (!s.container || !s.container.isConnected || !live(s.view) || !(s.container.contains(event.target) || event.target === root.document.body)) return;
       const file = pastedScreenshot(event.clipboardData);
-      if (!file) return;
+      if (!file || root.leoEditing?.ownTextCopy(event.clipboardData)) return;
       event.preventDefault();
       if (pasting) return toast('A screenshot is still being added. Try again in a moment.');
       pasting = true;

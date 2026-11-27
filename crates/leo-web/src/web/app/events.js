@@ -111,10 +111,10 @@ function reopenLastPlace() {
 
 window.addEventListener('hashchange', async (e) => {
   const request = ++navigationRequest;
-  const leaving = state.session;
+  const leaving = panes[0].s;
   const mine = seq;
   const hash = location.hash;
-  const current = () => request === navigationRequest && mine === seq && state.session === leaving;
+  const current = () => request === navigationRequest && mine === seq && panes[0].s === leaving;
   if (leaving) {
     leaving.doc.stop();
     try { await flush(leaving); }
@@ -124,9 +124,13 @@ window.addEventListener('hashchange', async (e) => {
       return;
     }
     if (!current() || location.hash !== hash) return;
-    leaving.doc.destroy();
-    state.session = null;
   }
+  if (split() && !(await besideLeave(hash))) {
+    if (current() && location.hash === hash) history.replaceState(history.state, '', places.from);
+    return;
+  }
+  if (!current() || location.hash !== hash) return;
+  if (leaving) leaveMain();
   if (kanban.panel) {
     if (!await kanbanSettlePanel()) {
       if (location.hash === hash) history.replaceState(history.state, '', `#/boards/${enc(kanban.board.id)}`);
@@ -134,13 +138,13 @@ window.addEventListener('hashchange', async (e) => {
     }
     if (request !== navigationRequest || location.hash !== hash) return;
   }
-  marginLeave();
+  withPane(panes[0], marginLeave);
   route(true);
 });
 
 const busy = () => {
   const active = document.activeElement;
-  return unsaved() || Boolean(active && active !== document.body && app.contains(active));
+  return unsaved() || Boolean(active && active !== document.body && here().el.contains(active));
 };
 
 document.addEventListener('visibilitychange', () => {
@@ -151,19 +155,23 @@ document.addEventListener('visibilitychange', () => {
   }
   if (!['workspace', 'note', 'search', 'trash'].includes(state.view)) return;
   if (state.view === 'note') {
-    if (busy() || !state.session?.note.id) return;
-    const s = state.session;
-    const shown = JSON.stringify(s.note);
-    api(`/api/notes/${enc(s.note.id)}`)
-      .then((note) => {
-        if (state.session !== s || busy()) return;
-        if (JSON.stringify(note) !== shown) return render();
-        loadSideFolders();
-        marginLoad(s, () => state.session === s).catch(fail);
-      }, () => {
-        if (state.session === s) return render();
-      })
-      .catch(fail);
+    if (busy()) return;
+    for (const p of panes) {
+      const s = p.s;
+      if (!s?.note.id) continue;
+      const shown = JSON.stringify(s.note);
+      const again = () => (p === panes[0] ? render() : showNote(s.note.id, { pane: p }));
+      api(`/api/notes/${enc(s.note.id)}`)
+        .then((note) => {
+          if (p.s !== s || busy()) return;
+          if (JSON.stringify(note) !== shown) return again();
+          if (p === panes[0]) loadSideFolders();
+          withPane(p, () => marginLoad(s, () => p.s === s)).catch(fail);
+        }, () => {
+          if (p.s === s) return again();
+        })
+        .catch(fail);
+    }
     return;
   }
   render().catch(fail);
@@ -301,10 +309,6 @@ async function render() {
   const generation = ++renderGeneration;
   hideAskFloat();
   clearTimeout(cal.timer);
-  // Plain groups: tests/wording.rs flags a colon right before "settings" (an old command).
-  document.body.classList.toggle('on-settings', /^#\/(settings|trash)(\/|$)/.test(location.hash));
-  document.body.classList.toggle('on-calendar', /^#\/calendar/.test(location.hash));
-  document.body.classList.toggle('on-boards', /^#\/boards(?:\/|$)/.test(location.hash));
   if (/^#\/interviews(?:\/|$)/.test(location.hash)) {
     history.replaceState(history.state, '', '#/');
     try { localStorage.setItem(LAST_PLACE_KEY, '#/'); } catch (e) {}
@@ -324,7 +328,7 @@ async function render() {
   drawActivity();
   try {
     if (kind === 'f') await showWorkspace(arg);
-    else if (kind === 'n') await showNote(arg.replace(/\/edit$/, ''), { fresh: prepared });
+    else if (kind === 'n') await showNote(arg.replace(/\/edit$/, ''), besideTake(arg.replace(/\/edit$/, '')) || { fresh: prepared });
     else if (kind === 'new') await newNote(arg);
     else if (kind === 'search') await showSearch(arg);
     else if (kind === 'trash') await showTrash();
@@ -337,7 +341,7 @@ async function render() {
     rememberPlace();
     loadSideFolders();
     $('#route-say').textContent = document.title;
-    if (prepared && state.session?.note.id === prepared.id) state.session.doc.editStart();
+    if (prepared && panes[0].s?.note.id === prepared.id) panes[0].s.doc.editStart();
   } catch (e) {
     if (generation !== renderGeneration || (hash !== decodeURI(location.hash || '#/') && !(kind === 'f' && location.hash === '#/'))) return;
     if (e.status === 404 && hash.startsWith('#/n/')) {
@@ -345,6 +349,7 @@ async function render() {
       try { localStorage.setItem(LAST_PLACE_KEY, '#/'); } catch (err) {}
       go('#/', { replace: true });
     } else if (e instanceof Offline) {
+      chrome({ view: kind });
       app.innerHTML = empty(DRAWN.offline, "Can't reach leo", 'Quit leo and open it again.');
     } else {
       for (const room of app.querySelectorAll('.blk.margin-room')) room.classList.remove('margin-room');
@@ -374,7 +379,7 @@ warnUnsaved();
 document.addEventListener('paste', (e) => {
   if (e.defaultPrevented) return;
   const files = [...((e.clipboardData && e.clipboardData.files) || [])];
-  if (!files.length) return;
+  if (!files.length || leoEditing.ownTextCopy(e.clipboardData)) return;
   if ($('#upload-list')) {
     e.preventDefault();
     picked.push(...pastedFiles(files, picked.length));

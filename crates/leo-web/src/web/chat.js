@@ -3484,7 +3484,7 @@
 
     input.addEventListener('paste', (e) => {
       const found = [...((e.clipboardData && e.clipboardData.files) || [])];
-      if (!found.length) return;
+      if (!found.length || root.leoEditing?.ownTextCopy(e.clipboardData)) return;
       e.preventDefault();
       addFiles(pastedNames(found));
     });

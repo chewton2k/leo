@@ -8,7 +8,7 @@ const dragging = { note: null, folder: null, filesTimer: 0, spring: null, armed:
 const carries = (e, type) => Boolean(e.dataTransfer && [...e.dataTransfer.types].includes(type));
 const parentOf = (path) => path.split('/').slice(0, -1).join('/');
 const dropTargetOf = (el) => (el && el.closest ? el.closest('[data-action="open-folder"][data-dir], [data-action="home"], [data-drop-dir]') : null);
-const dirOf = (target) => (Object.hasOwn(target.dataset, 'dropDir') ? target.dataset.dropDir : target.dataset.action === 'home' ? '' : target.dataset.dir);
+const dirOf = (target) => (Object.hasOwn(target.dataset, 'dropDir') ? target.dataset.dropDir || side.root : target.dataset.action === 'home' ? '' : target.dataset.dir);
 const noteCardOf = (el) => (el && el.closest ? el.closest('.card[data-id][data-action="open-note"]') : null);
 const armedRowOf = (el) => {
   const row = el && el.closest ? el.closest('.side-tree .side-note[data-id]') : null;
@@ -24,7 +24,7 @@ function accepts(e, target) {
   if (carries(e, NOTE_DRAG)) return !dragging.note || dragging.note.dir !== into;
   if (carries(e, FOLDER_DRAG)) {
     const from = dragging.folder;
-    return from !== null && into !== from && !into.startsWith(`${from}/`) && parentOf(from) !== into;
+    return from !== null && !inFolder(into, from) && parentOf(from) !== into;
   }
   return carries(e, 'Files');
 }
@@ -32,7 +32,7 @@ function accepts(e, target) {
 function marksOf(target) {
   const tree = target.closest('.side-tree');
   const dir = dirOf(target);
-  if (target.closest('.side-explorer, #folders-sheet') && !dir) return { row: target.closest('.side-explorer, #folders-sheet')?.querySelector('.side-group') || target, kids: null };
+  if (target.closest('.side-explorer, #folders-sheet') && (!dir || dir === side.root)) return { row: target.closest('.side-explorer, #folders-sheet')?.querySelector('.side-group') || target, kids: null };
   if (!tree || !dir) return { row: target, kids: null };
   const row = [...tree.querySelectorAll('.side-folder[data-drop-dir]')].find((el) => el.dataset.dropDir === dir) || target;
   return { row, kids: sideKids(dir) };
@@ -74,7 +74,7 @@ function springFolder(e) {
   }
   const dir = key;
   const from = dragging.folder;
-  if (dir === null || folderShown(dir) || (from !== null && (dir === from || dir.startsWith(`${from}/`)))) return;
+  if (dir === null || folderShown(dir) || (from !== null && inFolder(dir, from))) return;
   dragging.spring = { key, kind, timer: setTimeout(() => { if (!folderShown(dir)) twistFolder(dir, null, false); }, SPRING_MS) };
 }
 
@@ -84,6 +84,21 @@ function scrollTreeNear(e) {
   const box = tree.getBoundingClientRect();
   if (e.clientY < box.top + EDGE_PX) tree.scrollTop -= 10;
   else if (e.clientY > box.bottom - EDGE_PX) tree.scrollTop += 10;
+}
+
+function noteZone(e) {
+  const p = dragging.note && carries(e, NOTE_DRAG) && state.view === 'note' && !$('.scrim') && panes.find((q) => q.s && q.el.contains(e.target));
+  if (!p) return null;
+  const left = app.getBoundingClientRect().left;
+  const right = (split() ? besidePane.el : app).getBoundingClientRect().right;
+  return { p, zone: e.clientX > right - (right - left) / 3 ? 'beside' : 'here' };
+}
+
+function noteOver(zone) {
+  clearTimeout(dragging.zoneTimer);
+  if (zone) document.body.dataset.noteDrop = zone;
+  else delete document.body.dataset.noteDrop;
+  if (zone) dragging.zoneTimer = setTimeout(() => delete document.body.dataset.noteDrop, 160);
 }
 
 function filesOver(on) {
@@ -102,6 +117,7 @@ function endDrag() {
   document.body.classList.remove('dragging');
   markDrop(null);
   filesOver(false);
+  noteOver(null);
 }
 
 document.addEventListener('dragstart', (e) => {
@@ -151,6 +167,13 @@ document.addEventListener('dragover', (e) => {
     e.dataTransfer.dropEffect = carries(e, 'Files') ? 'copy' : 'move';
     return;
   }
+  const over = noteZone(e);
+  noteOver(over?.zone);
+  if (over) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    return;
+  }
   if (carries(e, 'Files') && FILE_VIEWS.includes(state.view) && !$('.scrim')) {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
@@ -162,6 +185,7 @@ document.addEventListener('drop', (e) => {
   const onto = combinesWith(e);
   const target = dropTargetOf(e.target);
   const ok = target && accepts(e, target);
+  const over = !ok && noteZone(e);
   const note = carries(e, NOTE_DRAG) ? dragging.note : null;
   const folder = carries(e, FOLDER_DRAG) ? dragging.folder : null;
   endDrag();
@@ -169,6 +193,11 @@ document.addEventListener('drop', (e) => {
   if (note && onto) {
     e.preventDefault();
     combineSheet(note, { id: onto.dataset.id, title: onto.dataset.title || 'Untitled' });
+    return;
+  }
+  if (note && over) {
+    e.preventDefault();
+    besideOpen(note.id, over.zone === 'beside' ? besidePane : over.p).catch(fail);
     return;
   }
   if (note || folder) {
@@ -326,8 +355,9 @@ async function saveCombined(made, from, into, id) {
 }
 
 async function afterCombine(id) {
-  if (state.view === 'note' && state.session && state.session.note.id === id && !saving.unsaved()) {
-    await showNote(id);
+  const reload = reloadOpen(id);
+  if (reload) {
+    await reload;
     loadSideFolders();
   } else await showLatest();
 }
@@ -337,7 +367,7 @@ async function moveNote(id, dir) {
 }
 
 async function dropNote(note, into) {
-  if (state.session?.note.id === note.id) await ready();
+  if (paneWith(note.id)) await ready(paneWith(note.id).s);
   await moveNote(note.id, into);
   await afterMove(null, null, note.id);
   toast(`Moved “${note.title}” to ${folderLabel(into)}`, {
@@ -347,7 +377,7 @@ async function dropNote(note, into) {
 }
 
 async function dropFolder(from, into) {
-  if (state.view === 'note' && (state.dir === from || state.dir.startsWith(`${from}/`))) await ready();
+  for (const p of panesIn(from)) await ready(p.s);
   let moved;
   try {
     moved = await api('/api/dirs/move', { method: 'POST', body: { from, into } });
@@ -366,17 +396,22 @@ async function dropFolder(from, into) {
 }
 
 async function afterMove(from, to, noteId = null) {
-  const dir = state.dir || '';
+  const moved = from ? panesIn(from) : [];
   if (from) {
     moveOpenFolders(from, to);
-    if (side.target === from || side.target?.startsWith(`${from}/`)) side.target = to + side.target.slice(from.length);
+    if (inFolder(side.target || '', from)) side.target = to + side.target.slice(from.length);
   }
-  if (from && state.view === 'note' && (dir === from || dir.startsWith(`${from}/`))) state.dir = to + dir.slice(from.length);
-  const affected = noteId === state.session?.note.id || from && (dir === from || dir.startsWith(`${from}/`));
-  if (affected && state.view === 'note' && state.session?.note.id && !saving.get(state.session.key)) {
-    await showNote(state.session.note.id);
-    await loadSideFolders();
-  } else await showLatest();
+  if (moved.includes(panes[0])) state.dir = to + (state.dir || '').slice(from.length);
+  let reloaded = false;
+  for (const p of panes) {
+    const reload = p.s?.note.id && (noteId === p.s.note.id || moved.includes(p)) ? reloadOpen(p.s.note.id) : null;
+    if (reload) {
+      reloaded = true;
+      await reload;
+    }
+  }
+  if (reloaded) await loadSideFolders();
+  else await showLatest();
 }
 
 const PAGE_STEP = 20;
@@ -399,7 +434,7 @@ function pageWidthDone(article, width) {
   $('.page-width-label', article).hidden = true;
   window.leoTheme.setPageWidth(width);
   article.style.maxWidth = '';
-  marginRedraw();
+  marginRedrawAll();
 }
 
 document.addEventListener('pointerdown', (e) => {
@@ -426,7 +461,7 @@ document.addEventListener('pointerdown', (e) => {
 document.addEventListener('dblclick', (e) => {
   if (!e.target.closest?.('.page-mark')) return;
   window.leoTheme.setPageWidth(null);
-  marginRedraw();
+  marginRedrawAll();
 });
 
 document.addEventListener('keydown', (e) => {
@@ -438,7 +473,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' || e.key === 'Home') {
     e.preventDefault();
     window.leoTheme.setPageWidth(null);
-    return marginRedraw();
+    return marginRedrawAll();
   }
   if (!grow) return;
   e.preventDefault();

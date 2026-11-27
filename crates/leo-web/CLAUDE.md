@@ -199,7 +199,7 @@ Decided: one app, window only (2026-10-31).
   on a dark page. A picture alone (clicked, or the only thing selected) is copied with `navigator.clipboard.write` as
   `image/png` and that html (a JPEG there when the PNG passes 15 MB; halved in size until the PNG is under 60 MB, since
   WebKit refuses over about 100 MB), called inside the copy event and never with `clipboardData.setData`, which WebKit
-  refuses together. A picture not loaded yet is loaded first the same way, alone or with text. Cut always uses the plain path.
+  refuses together. A picture not loaded yet is loaded first the same way, alone or with text. Text with exactly one drawn picture from a copy (2026-11-26, the owner's call: pasting into T3 Code lost the picture) goes the same way with `text/plain`, `text/html` and `image/png` (the PNG built lazily inside the `ClipboardItem`); two or more pictures get no PNG. Every leo paste site that takes files (doc.js `onPaste`, chat.js's input, events.js, recording.js) skips them when `leoEditing.ownTextCopy(clipboardData)` says the clipboard is leo's own copy of text with pictures (`leoCopied` with `alone === false`), so pasting one back never uploads the PNG; a picture copied alone keeps its files, which `onLeoPaste` turns back into markdown (or a new picture from another folder). If the clipboard refuses the PNG, the text and html are written again without it. Cut always uses the plain path.
   A selection that names an outside picture (`https:`, `//`) keeps its markdown as the text and gets no wrapper.
   `onLeoPaste` (doc.js, capture) puts the markdown back, with no upload, only when `leoEditing.ownCopy` says
   it is leo's: its text without pictures equals `text/plain` (pictures only when there is none) and no picture is
@@ -403,10 +403,17 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   never the file. A click or a double-click on a picture frames it and never opens its
   Markdown (2026-11-21, the user's call; Shift-click or a double-click beside it does). A
   picture is one caret position (`ed.rawOffset`, `shownBefore` in doc.js), and so is a formula, drawn or not (`markdown.mathSpans`, `.math`); in a list or
-  checkbox item a click on the picture frames it like any other, and a click beside it, left
-  or right of its box on its row, puts the caret before or after it (2026-11-21, the user's
-  call). Backspace or Delete on a framed picture removes it and leaves the caret in its place
-  (`ed.removePicture`); a Backspace outside any text field is `preventDefault`ed in a window
+  checkbox item a click on the picture frames it like any other. Pictures stay drawn while their
+  line is open (2026-11-26, the user's call): the line editor holds only the text run the caret is
+  in (the line is `editing.prefix` + the textarea + `editing.suffix`; `keptPictures` are drawn
+  pictures sitting directly in the line's text, `ed.pictureSpans`), and where the caret would sit
+  beside a picture with no text on that side the picture is framed instead, so nothing jumps.
+  Arrows step over a picture, Up and Down past a picture's row frame it, Enter on a framed picture
+  adds a line after it (a list continues), a printable key goes into the line after it, a picture inserted into a list item stays in the item, Backspace or Delete beside it removes it, and an undo
+  across one opens the text after it. Shift-click, a double-click beside a lone picture, a broken
+  picture, one inside a link or bold and a heading line open the Markdown, and an edit that would
+  change what a kept picture is (a code or maths span over it) reopens the line as Markdown.
+  Backspace or Delete on a framed picture removes it and leaves the caret in its place, or frames the picture beside it (`ed.removePicture`); a Backspace outside any text field is `preventDefault`ed in a window
   listener (events.js) so WebKit never goes back a page (2026-11-22, the user's call).
 - Note page only (2026-11-15; `leoDoc.mount(..., { noteTools: true })` in showNote,
   passed to `md.render` as `noteTools`; board cards, chat, margin and previews render
@@ -531,6 +538,9 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   user's call) and note rows carry no icon, their labels keeping the folders' column. Rows
   are 32 px with an 8 px icon gap and a 16 px indent per level, and the current row keeps
   its weight: the pill alone marks it.
+  A folder's menu has Focus on this folder (2026-11-26, the user's call): `side.root`, saved as
+  `leo-focus`, starts the explorer at that folder, with a row naming it (× shows all notes, its context menu is the folder's) only while focused;
+  New note and the top-level drop stay inside it. Details in `docs/behaviour.md`.
 - Cmd/Ctrl+F on a note page opens find in note (2026-11-21, the user's call; nothing
   new on other pages): `noteFind` in `core.js` puts a `.note-find` bar in the note and
   searches `#doc` (Enter and Shift+Enter step, Esc closes and gives focus back, reopening
@@ -619,6 +629,29 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   layout work for its rows until the disclosure opens. The preview is
   ≤24 lines / 800 UTF-16 units, escaped, always beside the rail; preview updates
   never redraw the editor.
+
+- Split view (2026-11-26, the user's call: "literally just a note opened on the side"): a second
+  full note pane, `#beside` (`app/beside.js`, `panes[1]`), with its own margin (`marginFresh`),
+  width bars (only from 900 px of pane, `data-wide`), outline and scroll (`leoDoc.mount`'s
+  `scroller`); `active` keeps body-focused keys, Select all and pastes in the focused pane. The pane
+  clicked or focused last (`usePane`, capture `pointerdown`/`focusin`) is `state.session`,
+  `marginPage`, Felix's note and the window title; an open chat keeps its messages. The divider is
+  `leoPaneResize` (`leo-beside-width`, 380 px each side, double-click halves, arrows) and the width
+  control while split; `SPLIT_ROOM` (760) applies only while split: opening the split or Felix folds
+  the explorer to its rail while the room is short (unfolding it then opens the narrow-window drawer,
+  `side-drawer`, over both panes), and a window with less room closes beside ("Not enough room for two
+  notes"). Each pane saves and restores its own reading place (`readingScrolled`, `restoreReading`, `p.reading`). Open beside
+  is in the explorer note menu (with Close split view while split) and a right-third drop zone
+  ("Open here" / "Open beside", the files overlay's style, never for files, Felix first); exit by the
+  `.pane-close` × on each pane, the ⋯ menu's Close this pane or any page that is not a note (beside is
+  saved first; a failed save keeps it with Close anyway when the draft is kept). Closing the left
+  pane promotes the right with its unsaved typing (`besideTake`, `replaceState`, the same session, so
+  no conflict copy), as does opening `#/n/<right id>`. The hash names the left pane; Back and
+  Forward change only it; a note open in one pane is refused in the other; beside is not restored
+  after a restart. Trash closes a pane without a save (`paneGone`); Felix's reloads check unsaved
+  typing per pane (`saving.get(key)`). Look (Style D2): one background, a 1 px `--line` hairline in
+  the 8 px handle, a 10 px shade on the active pane (`--split-shade`, its own light and dark value), the other pane's chips in `--faint`; print
+  shows only the focused pane.
 
 Decided: Obsidian-style live preview, nothing jumps when a line opens
 (2026-11-02); `/` quick menu writes plain Markdown (2026-11-09); tags are not
@@ -1295,7 +1328,7 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   back over the exit share before the pill returns, none under `stillMotion()`; the card is
   focusable); nothing is saved and a click never pins it (mouse presses on it do
   not take focus). A page swap that finds it hidden with tasks loaded redraws it (the `#app` childList
-  observer), so leaving Home or the Calendar shows it at once rather than at the next poll. Home draws the date, one sentence
+  observer), so leaving Home or the Calendar shows it at once rather than at the next poll, with the page and without its own fade (`.still`). It hides by `state.view`, never the address, so it stays off the old page while a note loads; `chrome()` alone sets `on-calendar`, `on-boards` and `on-settings` (Settings, Trash, Keeping), so a page keeps its layout until the next one paints. Home draws the date, one sentence
   (`schedule.dateline`, local data only, never "overdue"), the week ribbon
   (`#home-week`, 2026-11-15, 36 px reserved from first paint: the seven days from
   `S.weekStart(calLocale())`, today in `calRing(key, true)`, the end frame that
@@ -1305,7 +1338,7 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   after the last read, never written into `tasksWin.events`);
   a day sets only `cal.selected` and opens the Calendar in its last view) and,
   under the quick bar, Earlier and Today rows (`#home-today`, the same rows;
-  today's done rows stay until midnight; six at most, then "N more in Calendar";
+  today's done rows stay until midnight; five rows at most across Earlier (at least two), events and tasks, then "N more in Calendar" counting every row left out, events too;
   Today's done count is a pencil tally `S.tally`, "N of M done" kept as the title
   and hidden text) and Recently written (`#home-recent`: the three notes edited
   last, from the `x-total` of `/api/notes?show=pinned&limit=1` then
@@ -1601,7 +1634,7 @@ The note API preserves the preexisting version hash for ordinary notes after rem
 
 Config and data file paths use the same `leo_core::paths::own` names as uninstall.
 - Round 2 redesign (2026-11-25, the owner's approvals): home's Today rows add today's timed
-  events with a Record link (`homeEvents`, `#/record?event=<id>&kind=microphone|call`, call when
+  events with a Record link (`homeEvents`, `recordHref`: `#/record?event=<id>&kind=microphone|call`, call when
   the place or description (`context`) holds a link; the event id is the feed's uid; ended and all-day events are left out) and Recently
   written previews are plain text (`md.plain`). Quick Leo opens, before any typing, on the three
   notes edited last (`recentNotes`, home's own list), then New note, Start recording, New task and Ask Felix (`quickStart`), then

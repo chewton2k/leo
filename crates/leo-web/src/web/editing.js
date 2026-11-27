@@ -1,7 +1,7 @@
 (function (root) {
   'use strict';
 
-  const { MARKER, MATH_ENV, MATH_THEN, listKind, listable, caption, mathSpans } = root.leoMarkdown || require('./markdown.js');
+  const { MARKER, MATH_ENV, MATH_THEN, listKind, listable, caption, mathSpans, unescapeHtml } = root.leoMarkdown || require('./markdown.js');
   const FENCE = /^\s*(```|~~~)/;
   const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
   const QUOTE = /^\s*>/;
@@ -511,6 +511,15 @@
     return source;
   }
 
+  function pictureSpans(text) {
+    const spans = [];
+    changePicture(text, null, (name, option, alt, target, title, at, whole) => {
+      spans.push({ at, length: whole.length });
+      return whole;
+    });
+    return spans;
+  }
+
   function withoutPictures(text, said = caption) {
     const lines = String(text).split('\n');
     const out = [];
@@ -541,6 +550,14 @@
     return said ? withoutPictures(markdown).trim() === said : onlyPictures(markdown);
   }
 
+  function leoCopied(html, text) {
+    const [, kept, from] = /\sdata-leo="([^"]*)" data-leo-from="([^"]*)"/.exec(html) || [];
+    const source = kept && unescapeHtml(kept);
+    return source && ownCopy(source, text) ? { source, from: unescapeHtml(from), alone: onlyPictures(source) } : null;
+  }
+
+  const ownTextCopy = (data) => leoCopied(data.getData('text/html'), data.getData('text/plain'))?.alone === false;
+
   const SLASH = [
     { text: 'Heading', mark: '# ' }, { text: 'Subheading', mark: '## ' }, { text: 'Small heading', mark: '### ' },
     { text: 'Bullet', mark: '- ' }, { text: 'Numbered list', mark: '1. ' }, { text: 'Checkbox', mark: '- [ ] ' },
@@ -565,7 +582,7 @@
     return { lines: [lead + mark + text], line: 0, caret: lead.length + mark.length + caret };
   }
 
-  const api = { SLASH, slash, restyle, stylePair, cellEnd, nextCell, addRow, listPrefix, listPrefixAt, itemHead, listed, listLevels, renumber, closeList, stepBack, headingTree, headings, setPictureWidth, removePicture, pictureSource, withoutPictures, onlyPictures, stored, ownCopy, splitBlocks, continueLine, toggleBox, indent, outdent, rawOffset, isBox, snapshotOf, lineAtOffset, MOST_PASSAGE };
+  const api = { SLASH, slash, restyle, stylePair, cellEnd, nextCell, addRow, listPrefix, listPrefixAt, itemHead, listed, listLevels, renumber, closeList, stepBack, headingTree, headings, setPictureWidth, removePicture, pictureSource, pictureSpans, withoutPictures, onlyPictures, stored, ownCopy, leoCopied, ownTextCopy, splitBlocks, continueLine, toggleBox, indent, outdent, rawOffset, isBox, snapshotOf, lineAtOffset, MOST_PASSAGE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoEditing = api;
 })(typeof window !== 'undefined' ? window : globalThis);

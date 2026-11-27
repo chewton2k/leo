@@ -2,7 +2,7 @@ const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
-const { pageCss } = require('../page-source');
+const { pageCss, paneHelpers } = require('../page-source');
 
 const at = (d, h, m = 0) => new Date(2026, 10, d, h, m).toISOString();
 
@@ -43,10 +43,11 @@ async function calendarFixture(browser, run, { width = 1360, height = 900, view 
     ${icons}
     class Locked extends Error {}
     let seq=0,state={view:null};
+    ${paneHelpers()}
     const chrome=()=>{}, stillMotion=()=>true, rel=()=>'just now', noteHash=id=>'#/n/'+id;
     var tasksWin={revision:0,tasks:null};const TASKS_PAGE=500;
     const drawTasksWindow=()=>{}, loadTasksWindow=async()=>{}, finishTaskInWindow=()=>{};
-    window.toasts=[];
+    window.toasts=[];window.went=[];const go=hash=>window.went.push(hash);
     function toast(message,{action,run,bad}={}){window.toasts.push({message,bad:Boolean(bad)});document.querySelector('.toast')?.remove();const el=document.createElement('div');el.className='toast';el.innerHTML='<span>'+esc(message)+'</span>'+(action?'<button>'+esc(action)+'</button>':'');if(action)el.querySelector('button').onclick=()=>{el.remove();run();};document.body.appendChild(el);}
     const fail=error=>window.errors.push(error.message);
     ${sheetParts}
@@ -394,6 +395,101 @@ test('clicking or dragging over empty time writes a task in place, and Escape le
     await page.locator('.cal-compose-input').press('Escape');
     await expect(page.locator('.cal-compose')).toHaveCount(0);
     expect(await page.evaluate(() => window.calls.filter(c => c.method === 'POST').length)).toBe(2);
+  });
+});
+
+test('right-clicking empty time, a day, a task or an event opens its menu, and Escape lets it go', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const menu = page.locator('.popup-menu');
+    const rows = () => menu.locator('[role^="menuitem"]').allTextContents();
+    const posted = () => page.evaluate(() => window.calls.filter(c => c.method === 'POST').map(c => c.body));
+    const at = await point(page, '2026-11-06', 14 * 60 + 5);
+    await page.mouse.click(at.x, at.y, { button: 'right' });
+    await expect(menu).toBeVisible();
+    expect(await rows()).toEqual(['New task at 2:00 PM', 'Go to today', 'Day', 'Week', 'Month']);
+    await expect(menu.getByRole('menuitemradio', { name: 'Week' })).toHaveAttribute('aria-checked', 'true');
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await page.mouse.move(at.x, at.y);
+    await page.mouse.down();
+    await page.evaluate(({ x, y }) => document.elementFromPoint(x, y).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y, ctrlKey: true })), at);
+    await expect(menu, 'a Control-click opens the menu').toBeVisible();
+    await page.mouse.up();
+    await expect(menu).toBeVisible();
+    await expect(page.locator('.cal-compose-input'), 'and starts no new task').toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await page.mouse.click(at.x, at.y, { button: 'right' });
+    await menu.getByRole('menuitem', { name: 'New task at 2:00 PM' }).click();
+    const input = page.locator('.cal-compose-input');
+    await input.fill('From the menu');
+    await input.press('Enter');
+    await settled(page);
+    expect(await posted()).toEqual([{ title: 'From the menu', date: '2026-11-06', time: '14:00', end: '15:00', kind: 'other' }]);
+
+    const lab = page.locator('.cal-item[data-id="task-lab"]');
+    await lab.click({ button: 'right' });
+    expect(await rows()).toEqual(['Open', 'Mark done', 'Delete task']);
+    await menu.getByRole('menuitem', { name: 'Mark done' }).click();
+    await settled(page);
+    expect(await patches(page, 'task-lab')).toEqual([{ done: true }]);
+    await lab.click({ button: 'right' });
+    expect(await rows()).toEqual(['Open', 'Mark not done', 'Delete task']);
+    await menu.getByRole('menuitem', { name: 'Open' }).click();
+    await expect(page.locator('#cal-side.peek #cal-peek-title')).toHaveValue('Lab report');
+    await page.keyboard.press('Escape');
+
+    await page.locator('.cal-tray-row', { hasText: 'Pay rent' }).click({ button: 'right' });
+    expect(await rows()).toEqual(['Open', 'Mark done', 'Delete task']);
+    await menu.getByRole('menuitem', { name: 'Delete task' }).click();
+    await settled(page);
+    expect(await page.evaluate(() => window.db.tasks.some(t => t.id === 'task-rent'))).toBe(false);
+    await expect(page.locator('.toast')).toContainText('Deleted “Pay rent”');
+
+    await page.locator('.cal-item[data-id="e-maya"]').click({ button: 'right' });
+    expect(await rows()).toEqual(['Details', 'Record this event']);
+    await menu.getByRole('menuitem', { name: 'Record this event' }).click();
+    expect(await page.evaluate(() => window.went)).toEqual(['#/record?event=e-maya&kind=microphone']);
+    await page.locator('.cal-item[data-id="e-week"]').first().click({ button: 'right' });
+    expect(await rows(), 'nor can an all-day event').toEqual(['Details']);
+    await page.keyboard.press('Escape');
+    await page.locator('.cal-item[data-id="e-lecture"]').click({ button: 'right' });
+    expect(await rows(), 'an event that has ended cannot be recorded').toEqual(['Details']);
+    await menu.getByRole('menuitem', { name: 'Details' }).click();
+    await expect(page.locator('#cal-side.peek .cal-peek-title')).toHaveText('CS 241 lecture');
+
+    await page.locator('.cal-item[data-id="task-study"] .cal-open').focus();
+    await page.keyboard.press('Shift+F10');
+    expect(await rows()).toEqual(['Open', 'Mark done', 'Delete task']);
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+
+    await page.locator('.cal-dayhead').first().click({ button: 'right' });
+    await expect(menu, 'a day heading keeps the browser menu').toHaveCount(0);
+    const row = await page.locator('.cal-item[data-id="task-study"] .cal-open').boundingBox();
+    await page.mouse.move(row.x + 50, row.y + 8);
+    await page.mouse.down();
+    await page.mouse.move(row.x + 50, row.y + 60, { steps: 4 });
+    expect(await page.evaluate(() => document.querySelector('.cal-col').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })))).toBe(false);
+    await expect(menu, 'no menu opens while a task is being dragged').toHaveCount(0);
+    await page.mouse.up();
+    await settled(page);
+
+    await page.locator('.cal-views [data-view="month"]').click();
+    const cell = page.locator('.cal-cell[data-day="2026-11-10"]');
+    await cell.click({ position: { x: 20, y: 60 }, button: 'right' });
+    expect(await rows()).toEqual(['New task on Tue, Nov 10', 'Go to today', 'Day', 'Week', 'Month']);
+    await menu.getByRole('menuitem', { name: 'New task on Tue, Nov 10' }).click();
+    await input.fill('Someday soon');
+    await input.press('Enter');
+    await settled(page);
+    expect((await posted()).at(-1)).toEqual({ title: 'Someday soon', date: '2026-11-10', time: null, end: null, kind: 'other' });
+    await page.locator('.cal-cell[data-day="2026-11-24"]').click({ position: { x: 20, y: 60 }, button: 'right' });
+    await menu.getByRole('menuitemradio', { name: 'Day' }).click();
+    await expect(page.locator('.cal-dayhead')).toHaveCount(1);
+    await page.locator('.cal-col').click({ position: { x: 40, y: 40 }, button: 'right' });
+    await menu.getByRole('menuitem', { name: 'Go to today' }).click();
+    await expect(page.locator('.cal-dayhead.today')).toContainText('3');
   });
 });
 

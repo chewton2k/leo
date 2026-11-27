@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { pageHtml } = require('./page-source');
+const { pageHtml, paneHelpers } = require('./page-source');
 const kit = require('../src/web/margin.js');
 require('../src/web/chat.js');
 const docContext = { document: { addEventListener() {} }, leoMarkdown: {}, leoEditing: {} };
@@ -29,17 +29,19 @@ function harness() {
   let next = 0;
   const context = {
     window: { leoMargin: kit }, addEventListener() {}, document: { hidden: false, addEventListener() {}, documentElement: { addEventListener() {} } },
-    chat: { isBusy: () => false }, saving: { unsaved: () => false },
+    chat: { isBusy: () => false }, saving: { unsaved: () => false, get: () => undefined },
     flush: async () => {}, api: () => new Promise((resolve, reject) => { settle = { resolve, reject }; }),
     enc: encodeURIComponent, Locked: class extends Error {}, AbortController,
     setTimeout: (fn, delay) => { const id = ++next; fn.delay = delay; timers.set(id, fn); return id; },
     clearTimeout: (id) => timers.delete(id), cancelAnimationFrame() {}, drawSide() {}, sideRedrawSoon() {}, queueMicrotask,
     $: () => null, svg: (paths) => paths, ICON: { book: '' }, stillMotion: () => false, fail: (e) => { throw e; }, ON_MAC: true, MOTION_MS: 180, POP_FROM: .95,
     noAi: globalThis.leoChat.noAi, esc: (text) => String(text), choiceCards: (options) => JSON.stringify(options), segmented: () => '', settingsSwitch: () => '',
+    state: { view: 'note' }, app: {},
   };
   vm.createContext(context);
   const core = fs.readFileSync(path.join(__dirname, '../src/web/app/core.js'), 'utf8');
   vm.runInContext(core.slice(core.indexOf('const SHORTCUT_KEYS'), core.indexOf('async function dictateHint')), context);
+  vm.runInContext(paneHelpers(), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/margin-notes.js'), 'utf8'), context);
   const state = vm.runInContext('marginPage', context);
   const session = () => ({ note: { id: 'a', version: 'abc' }, doc: { source: () => 'A changed paragraph long enough to read.' } });
@@ -240,6 +242,81 @@ test('mode updates retain confirmed state after failure and ignore departed note
     assert.equal(h.state.changing, departed);
     if (!departed) assert.equal(h.state.status, 'Could not save this mode. Try again.');
   }
+});
+
+function twoPanes(h) {
+  const other = { el: {}, s: h.session(), margin: h.context.marginFresh({}) };
+  Object.assign(other.margin, { s: other.s, mode: 'ask', baseline: [] });
+  vm.runInContext('panes', h.context).push(other);
+  h.context.state.session = h.state.s;
+  h.context.state.main = h.state.s;
+  const focus = (p) => { h.context.state.session = p.s; vm.runInContext('(m) => { marginPage = m; }', h.context)(p.margin); };
+  return { other, focus };
+}
+
+test('a mode change finishes in the pane it started in after focus moves to the other pane', async () => {
+  for (const failed of [false, true]) {
+    const h = harness();
+    const { other, focus } = twoPanes(h);
+    h.state.mode = 'ask';
+    h.context.marginControl = () => {};
+    h.context.marginModeMenu = () => {};
+    const pending = h.context.marginChangeMode('along');
+    assert.equal(h.state.changing, true);
+    focus(other);
+    if (failed) h.settle().reject(new Error('save failed'));
+    else h.settle().resolve({ mode: 'along' });
+    await pending;
+    assert.equal(h.state.changing, false);
+    assert.equal(h.state.mode, failed ? 'ask' : 'along');
+    assert.equal(other.margin.changing, false);
+    assert.equal(other.margin.mode, 'ask');
+    assert.equal(other.margin.status, '');
+    assert.equal(vm.runInContext('marginPage', h.context), other.margin);
+  }
+});
+
+test('Add to note clears its own pane and its Undo sends that pane’s unplaced notes', async () => {
+  const h = harness();
+  const { other, focus } = twoPanes(h);
+  const button = { disabled: false, textContent: '' };
+  h.context.$ = (selector) => (selector === '.margin-add' ? button : { hidden: true, textContent: '' });
+  h.state.els.set('t1', {});
+  h.state.gone = ['here-gone'];
+  other.margin.gone = ['there-gone'];
+  const toasts = [];
+  const posts = [];
+  h.context.toast = (text, options) => toasts.push(options);
+  h.context.showNote = async () => {};
+  h.state.s.doc.glow = () => {};
+  h.context.requestId = () => 'r1';
+  h.context.marginWeave = async () => { focus(other); return { from: 1, to: 2, before: 'old', version: 'v' }; };
+  h.context.api = async (url, options = {}) => { posts.push({ url, body: options.body }); return {}; };
+  await h.context.marginAdd({ id: 't1' });
+  assert.equal(h.state.adding.has('t1'), false);
+  assert.equal(button.disabled, false);
+  await toasts[0].run();
+  const reopened = posts.find((call) => call.body && call.body.status === 'open');
+  assert.deepEqual([...reopened.body.gone], ['here-gone']);
+});
+
+test('a new note’s first save loads the margin of the pane that holds it, whichever pane is focused', async () => {
+  const h = harness();
+  const { other } = twoPanes(h);
+  other.s.note.id = null;
+  other.margin.wanted = 'along';
+  const asked = [];
+  h.context.api = async (url, options = {}) => { asked.push([url, options.body]); return url.endsWith('/margin') && !options.method ? { mode: 'ask', threads: [], resolved: [] } : { mode: 'along' }; };
+  h.context.marginLoadPrefs = async () => ({});
+  h.context.marginControl = () => {};
+  h.context.marginInstructions = () => {};
+  h.context.marginDraw = () => {};
+  h.context.marginReanchor = async () => {};
+  await h.context.marginCreated(other.s, { id: 'made' });
+  assert.ok(asked.some(([url, body]) => url === '/api/notes/made/margin' && body && body.mode === 'along'));
+  assert.equal(other.margin.loaded, true);
+  assert.equal(other.margin.mode, 'along');
+  assert.notEqual(h.state.loaded, true);
 });
 
 test('refused reads keep pending changes and show a safe pause reason', async () => {
@@ -762,7 +839,7 @@ function passages(room = true) {
     $: () => ({ getBoundingClientRect: () => ({ left: 0, right: 600 }) }), toast() {}, cleanTitle: (t) => t,
     marginAsk: (...args) => (room ? asked.push(args) > 0 : false),
     marginAskFirst: (...args) => opened.push(args) > 0 && room,
-    chat: { attachSelection: (x) => attached.push(x) },
+    chat: { attachSelection: (x) => attached.push(x) }, panes: [{}],
   };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/passages.js'), 'utf8'), context);
@@ -1029,7 +1106,7 @@ function foldHarness(...threads) {
   h.context.MutationObserver = h.context.window.MutationObserver = class { constructor(fn) { watch.fn = fn; } observe(el, options) { watch.watched = options; } disconnect() { watch.ended = true; } };
   h.context.marginLayout = () => 'both';
   h.context.document.createElement = () => ({ setAttribute() {}, addEventListener() {}, firstChild: {}, parentElement: columns });
-  h.context.marginMount({ note: {}, doc: { source: () => '' } }, 0);
+  h.context.marginMount({ note: {}, doc: { source: () => '' } }, () => true);
   const block = {
     animate: () => { const r = run(); runs.push(r); return r; },
     style: { setProperty() {} }, classList: { add() {} }, getBoundingClientRect: () => ({ bottom: 0 }),

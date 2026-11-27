@@ -227,6 +227,7 @@ body.on-note main { padding-bottom: max(calc(var(--bottom) + 110px), var(--dock-
 .dock .tasks-window { order: 1; }
 .tasks-window { background: var(--raised); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; animation: fade var(--t-follow) var(--ease-arrive); display: flex; flex-direction: column; max-height: min(380px, 55vh, var(--tasks-room, 380px)); }
 .tasks-window[hidden] { display: none; }
+.tasks-window.still { animation: none; }
 @media (max-width: 599px) { .tasks-window { display: none; } }
 .tasks-head { display: flex; align-items: center; }
 .tasks-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 12px 8px 12px 16px; font-size: var(--fs-sm); font-weight: 650; color: var(--text); }

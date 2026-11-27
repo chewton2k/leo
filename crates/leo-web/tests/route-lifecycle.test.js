@@ -3,12 +3,13 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { paneHelpers } = require('./page-source');
 function fixture() {
   const source = fs.readFileSync(path.join(__dirname, '../src/web/app/events.js'), 'utf8');
   const calls = [];
   class Offline extends Error {}
   const noop = () => {};
-  const context = { openingNote: null, renderGeneration: 0, hideAskFloat: noop,  clearTimeout: noop, cal: {}, document: {body: {classList: {toggle: noop}}}, location: {hash: '#/n/deleted'}, stopPageArrival: noop, library: {}, closeSearch: noop, leaveMap: noop, leaveBoards: noop, chat: {setContext: noop}, recorder: {leave: noop}, activity: {}, drawActivity: noop, app: {innerHTML: 'new draft', querySelectorAll: () => []}, DRAWN: {offline: 'drawn-offline'}, Offline, empty: (icon) => icon === 'drawn-offline' ? 'offline' : 'no drawing', toast: () => calls.push('toast'), go: hash => calls.push(hash), fail: () => calls.push('failure'), loadSideFolders: () => calls.push('sidebar'), newNote: async () => {}, showFolder: async () => {} };
+  const context = { openingNote: null, renderGeneration: 0, hideAskFloat: noop,  clearTimeout: noop, cal: {}, document: {body: {classList: {toggle: noop}}}, location: {hash: '#/n/deleted'}, stopPageArrival: noop, library: {}, closeSearch: noop, leaveMap: noop, leaveBoards: noop, besideTake: () => null, chat: {setContext: noop}, recorder: {leave: noop}, activity: {}, drawActivity: noop, chrome: ({ view }) => calls.push(`chrome ${view}`), app: {innerHTML: 'new draft', querySelectorAll: () => []}, DRAWN: {offline: 'drawn-offline'}, Offline, empty: (icon) => icon === 'drawn-offline' ? 'offline' : 'no drawing', toast: () => calls.push('toast'), go: hash => calls.push(hash), fail: () => calls.push('failure'), loadSideFolders: () => calls.push('sidebar'), newNote: async () => {}, showFolder: async () => {} };
   vm.createContext(context);
   vm.runInContext(source.slice(source.indexOf('async function render()'), source.indexOf("window.addEventListener('online'")), context);
   return {context, calls, Offline};
@@ -27,6 +28,24 @@ test('late route errors cannot redirect or overwrite a newer draft', async () =>
     assert.deepEqual(calls, [], kind);
     assert.equal(context.app.innerHTML, 'new draft', kind);
   }
+});
+test('a page keeps its body classes until the next page draws', async () => {
+  const {context} = fixture();
+  const toggled = [];
+  context.document.body.classList.toggle = (name, on) => toggled.push(name);
+  context.location.hash = '#/calendar';
+  context.showCalendar = async () => {};
+  context.showNote = () => new Promise(() => {});
+  await context.render();
+  context.location.hash = '#/n/slow';
+  context.render();
+  context.location.hash = '#/boards';
+  context.showBoards = async () => {};
+  context.render();
+  context.location.hash = '#/settings';
+  context.showSettings = async () => {};
+  await context.render();
+  assert.deepEqual(toggled.filter(name => /^on-(calendar|boards|settings)$/.test(name)), []);
 });
 test('an older visit to the same route cannot handle its late error or success', async () => {
   for (const failed of [false, true]) {
@@ -47,7 +66,7 @@ test('the active route still handles missing notes and connection errors', async
     const {context, calls, Offline} = fixture();
     context.showNote = async () => { throw kind === 'missing' ? Object.assign(new Error('missing'), {status:404}) : kind === 'offline' ? new Offline() : new Error('failed'); };
     await context.render();
-    assert.deepEqual(calls, kind === 'missing' ? ['toast', '#/'] : kind === 'other' ? ['failure'] : []);
+    assert.deepEqual(calls, kind === 'missing' ? ['toast', '#/'] : kind === 'other' ? ['failure'] : ['chrome n']);
     assert.equal(context.app.innerHTML, kind === 'offline' ? 'offline' : 'new draft');
   }
 });
@@ -75,10 +94,11 @@ function returning(answer) {
   const note = { id: 'n1', title: 'T', body: 'text', tags: [], directory: '', pinned: false, version: 3 };
   const seen = { renders: 0, sideLoads: 0, margins: [], failures: 0 };
   let listener;
-  const state = { view: 'note', session: { note } };
+  const session = { note };
+  const state = { view: 'note', session, main: session };
   const context = {
     document: { visibilityState: 'visible', addEventListener: (type, fn) => { listener = fn; } },
-    state, enc: String, busy: () => false, rememberPlace() {}, saveWebsiteWork() {},
+    state, app: {}, marginPage: null, enc: String, busy: () => false, rememberPlace() {}, saveWebsiteWork() {},
     fail: () => { seen.failures++; },
     render: async () => { seen.renders++; },
     loadSideFolders: () => { seen.sideLoads++; },
@@ -86,6 +106,7 @@ function returning(answer) {
     api: async () => answer(note),
   };
   vm.createContext(context);
+  vm.runInContext(paneHelpers(), context);
   vm.runInContext(source.slice(start, end), context);
   const settle = async () => { for (let i = 0; i < 3; i++) await new Promise((resolve) => setImmediate(resolve)); };
   return { listener: () => listener(), seen, state, settle };
@@ -107,7 +128,7 @@ test('returning to an unchanged note fetches the margin notes written while the 
   await e.settle();
   const { current } = e.seen.margins[0];
   assert.equal(current(), true);
-  e.state.session = { note: e.state.session.note };
+  e.state.main = e.state.session = { note: e.state.session.note };
   assert.equal(current(), false);
 });
 

@@ -60,10 +60,15 @@ function calendarAddressError(link, provider) {
   return provider === 'google' && share ? 'That is the share link. Paste the secret address that ends in .ics.' : '';
 }
 
-function showCalendarError(message) {
+function calendarSettingsLink(link) {
+  const cid = link.match(/^https:\/\/calendar\.google\.com\/.*[?&]cid=([\w=-]+)(?:[&#]|$)/i);
+  return cid ? `https://calendar.google.com/calendar/u/0/r/settings/calendar/${cid[1]}` : '';
+}
+
+function showCalendarError(message, href = '') {
   const box = $('#calendar-link'), note = $('#calendar-error');
   if (box) box.setAttribute('aria-invalid', String(Boolean(message)));
-  if (note) note.textContent = message;
+  if (note) note.innerHTML = `${esc(message)}${message && href ? ` <a href="${esc(href)}" target="_blank" rel="noopener noreferrer">Open this calendar's settings</a>` : ''}`;
 }
 
 document.addEventListener('change', (e) => {
@@ -75,7 +80,9 @@ document.addEventListener('change', (e) => {
   showCalendarError('');
 });
 document.addEventListener('input', (e) => {
-  if (e.target.id === 'calendar-link') showCalendarError('');
+  if (e.target.id !== 'calendar-link') return;
+  showCalendarError('');
+  if (e.inputType === 'insertFromPaste' && !$('[data-action="calendar-add"]')?.disabled) addCalendar().catch(fail);
 });
 document.addEventListener('change', async (e) => {
   const field = e.target;
@@ -122,7 +129,7 @@ async function addCalendar() {
   const box = $('#calendar-link');
   if (!box || !box.value.trim()) throw Object.assign(new Error('Paste your calendar’s secret address first.'), { shown: true });
   const bad = calendarAddressError(box.value.trim(), state.calendarProvider || 'google');
-  showCalendarError(bad);
+  showCalendarError(bad, calendarSettingsLink(box.value.trim()));
   if (bad) return;
   const button = $('[data-action="calendar-add"]');
   if (button) {

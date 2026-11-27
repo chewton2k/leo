@@ -57,7 +57,8 @@ async function showBoards(arg) {
   state = { view: 'boards', dir: '' };
   chrome();
   document.title = 'Boards · leo';
-  if (!kanban.loaded || !app.querySelector('.kanban-page')) app.innerHTML = `<div class="kanban-page">${skeleton(3, 'board')}</div>`;
+  swap('boards', () => { if (!kanban.loaded || !app.querySelector('.kanban-page')) app.innerHTML = `<div class="kanban-page">${skeleton(3, 'board')}</div>`; });
+  drawTasksWindow();
   const { boards } = await api('/api/boards');
   if (mine !== seq) return;
   kanban.boards = boards || [];

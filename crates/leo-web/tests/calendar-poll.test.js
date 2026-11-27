@@ -118,7 +118,7 @@ test('a poll keeps the pages already shown', async () => {
 
 test('the Tasks card offers Show more when there are more tasks than it holds', () => {
   const drawn = [];
-  const box = { hidden: true, setAttribute() {}, set innerHTML(html) { drawn.push(html); } };
+  const box = { hidden: true, classList: { toggle() {} }, setAttribute() {}, set innerHTML(html) { drawn.push(html); } };
   const context = {
     tasksWin: { tasks: [{ id: 'a' }, { id: 'b' }], total: 3 }, cal: { data: null }, state: { view: 'folder' }, location: { hash: '#/n/x' },
     tasksAtHome: () => false, drawHomeToday() {}, tasksGroups: (tasks) => [['Today', tasks]], tasksFocus: () => null,
@@ -126,7 +126,7 @@ test('the Tasks card offers Show more when there are more tasks than it holds', 
     tasksBox: box, esc: String, TASK_GROUP_NAMES: {},
   };
   vm.createContext(context);
-  vm.runInContext(`${between('function drawTasksWindow()', 'function fitTasksWindow()')}\n;globalThis.draw = drawTasksWindow;`, context);
+  vm.runInContext(`${between('function drawTasksWindow(', 'function fitTasksWindow()')}\n;globalThis.draw = drawTasksWindow;`, context);
   context.draw();
   assert.equal(box.hidden, false);
   assert.match(drawn[0], /data-action="tasks-more"/);

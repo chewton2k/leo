@@ -4,6 +4,7 @@ const { test } = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { paneHelpers } = require('./page-source');
 require('../src/web/recording.js');
 
 const app = path.join(__dirname, '../src/web/app');
@@ -174,10 +175,12 @@ function screen(eng) {
     setTimeout: (fn) => ui.timers.push({ fn, live: true }),
     clearTimeout: (id) => { if (ui.timers[id - 1]) ui.timers[id - 1].live = false; },
     fillTextFile: async (box) => { ui.filled = box; },
+    state: { view: 'note' }, app: {},
   };
   const uploads = read('uploads.js');
   const fileAside = uploads.slice(uploads.indexOf('async function openFileAside('), uploads.indexOf('async function fillTextFile('));
   vm.createContext(context);
+  vm.runInContext(paneHelpers(), context);
   vm.runInContext(`${read('sources.js')}\n${fileAside}\nthis.page = () => sourcePage;`, context);
   ui.context = context;
   ui.type = async (text) => {

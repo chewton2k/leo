@@ -506,7 +506,7 @@ function renameFolder(from) {
     save: async (name) => {
       if (!validFolderName(name)) return false;
       try {
-        if (state.view === 'note' && (state.dir === from || state.dir.startsWith(`${from}/`))) await ready();
+        for (const p of panesIn(from)) await ready(p.s);
         const moved = await api('/api/dirs/rename', { method: 'POST', body: { from, name } });
         await afterMove(from, moved.path);
         toast(`Renamed folder to “${name}”`, {
@@ -526,15 +526,11 @@ function renameFolder(from) {
 async function trashFolder(from) {
   if (!from) return;
   const mine = seq;
-  const inside = () => state.view === 'note' && (state.dir === from || state.dir.startsWith(`${from}/`));
-  if (inside()) await ready();
+  for (const p of panesIn(from)) await ready(p.s);
   const done = await api('/api/trash/move', { method: 'POST', body: { notes: [], dirs: [from] } });
-  if (mine === seq && inside()) {
-    state.session.doc.destroy();
-    state.session = null;
-    go('#/', { replace: true });
-  }
-  if (side.target === from || side.target?.startsWith(`${from}/`)) side.target = parentOf(from);
+  if (mine === seq) for (const p of panesIn(from).reverse()) paneGone(p);
+  if (inFolder(side.target || '', from)) side.target = parentOf(from);
+  if (inFolder(side.root, from)) sideFocus('');
   loadSideFolders();
   refocusExplorer({ kind: 'folder', dir: parentOf(from) });
   toast(`Moved “${folderLabel(from)}” to the trash`, { action: 'Undo', run: () => undoTrashMove(done, from) });
@@ -595,11 +591,7 @@ async function trashNote(note = null, at = null) {
   try {
     await api(`/api/notes/${enc(note.id)}`, { method: 'DELETE' });
   } finally { trashing = null; }
-  if (state.session?.note.id === note.id) {
-    state.session.doc.destroy();
-    state.session = null;
-    go('#/', { replace: true });
-  }
+  if (paneWith(note.id)) paneGone(paneWith(note.id));
   loadSideFolders();
   if (at) refocusExplorer({ kind: 'folder', dir: at.dir });
   toast(`Moved “${note.title || 'Untitled'}” to the trash`, { action: 'Undo', run: () => restore(note.id, false) });
@@ -698,6 +690,7 @@ function noteMenu(owner) {
       { text: 'Move to folder', icon: ICON.move, run: () => moveSheet(owner) },
       ...throughRow(),
       { text: 'Share', icon: ICON.share, next: shareRows() },
+      ...(split() ? [{ text: 'Close this pane', icon: ICON.close, run: () => paneClose(here()) }] : []),
       { line: true },
       { text: 'Move to trash', icon: ICON.trash, danger: true, run: () => trashNote() },
       ...(words ? [{ line: true }, { note: `${words.toLocaleString()} ${words === 1 ? 'word' : 'words'}` }] : []),
@@ -771,7 +764,7 @@ function printNotes(s) {
   notes.hidden = true;
   notes.dataset.print = '';
   notes.append(list);
-  $('#doc').after(notes);
+  $('#doc', marginPage.root).after(notes);
   const title = (s.note.title || '').trim().replace(/["\\]/g, '\\$&').replace(/[\n\r\f]/g, ' ');
   if (title) {
     const footer = document.createElement('style');
@@ -790,6 +783,7 @@ async function openTitle(title) {
     hit = hits.find((n) => n.title.trim().toLowerCase() === want);
     if (hits.length < SEARCH_STEP) break;
   }
+  if (hit && split()) return besideOpen(hit.id, here());
   go(hit ? noteHash(hit.id) : `#/search/${enc(title)}`);
 }
 
