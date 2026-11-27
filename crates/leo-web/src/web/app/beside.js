@@ -138,12 +138,13 @@ function besideRoomy() {
   return besideRoom() >= SPLIT_ROOM;
 }
 
+let besideCramped = null;
 function besideFits() {
   const roomy = !split() || besideRoomy();
   besideResize.fit();
-  if (roomy) return;
+  if (roomy || besideCramped) return;
   const id = besidePane.s.note.id;
-  besideShut().then((closed) => { if (closed) toast('Not enough room for two notes', id ? { action: 'Open', run: () => go(noteHash(id)) } : {}); }).catch(fail);
+  besideCramped = besideShut().then((closed) => { if (closed) toast('Not enough room for two notes', id ? { action: 'Open', run: () => go(noteHash(id)) } : {}); }).catch(fail).finally(() => { besideCramped = null; });
 }
 
 addEventListener('resize', besideFits);
