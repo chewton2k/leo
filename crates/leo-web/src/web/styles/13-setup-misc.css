@@ -268,7 +268,7 @@ body.files-over main::after, body[data-note-drop] main::before, body[data-note-d
   display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: 18px;
   background: color-mix(in srgb, var(--accent-soft) 70%, transparent); color: var(--accent); font-weight: 650; font-size: var(--fs-lg);
 }
-body[data-note-drop] main::before, body[data-note-drop] main::after { top: var(--bar-height); bottom: calc(var(--bottom) + 8px); border: 1px dashed var(--line); border-radius: var(--r-panel); background: color-mix(in srgb, var(--page) 70%, transparent); color: var(--faint); font-weight: 500; font-size: var(--fs-base); }
+body[data-note-drop] main::before, body[data-note-drop] main::after { box-sizing: border-box; top: var(--bar-height); bottom: calc(var(--bottom) + 8px); border: 1px dashed var(--line); border-radius: var(--r-panel); background: color-mix(in srgb, var(--page) 70%, transparent); color: var(--faint); font-weight: 500; font-size: var(--fs-base); }
 body[data-note-drop] main::before { content: "Open here"; left: calc(var(--side) + 8px); right: auto; width: calc(var(--drop-x) - var(--side) - 12px); }
 body[data-note-drop] main::after { content: "Open beside"; left: calc(var(--drop-x) + 4px); right: calc(var(--right) + 8px); }
 body[data-note-drop="here"] main::before, body[data-note-drop="beside"] main::after { border: 1px solid var(--accent); background: color-mix(in srgb, var(--raised) 94%, transparent); color: var(--text); }
