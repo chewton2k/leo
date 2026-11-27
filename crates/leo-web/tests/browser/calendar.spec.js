@@ -593,6 +593,25 @@ test('Day, Week and Month switch by the control or the keyboard, and the choice 
   });
 });
 
+test('the tray and the peek share one column, so opening and closing never moves the calendar', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const width = () => page.locator('#cal-side').evaluate(el => el.getBoundingClientRect().width);
+    const grid = () => page.locator('#cal-main').evaluate(el => el.getBoundingClientRect().width);
+    await expect(page.locator('#cal-side .cal-mini')).toBeVisible();
+    const [side, main] = [await width(), await grid()];
+    expect(side).toBe(320);
+    await page.locator('.cal-item[data-id="task-lab"] .cal-open').click();
+    await expect(page.locator('#cal-side.peek #cal-peek-title')).toBeVisible();
+    expect(await width()).toBe(side);
+    expect(await grid()).toBe(main);
+    expect(await page.locator('#cal-side').evaluate(el => getComputedStyle(el).position)).not.toBe('fixed');
+    await page.locator('[data-action="cal-peek-close"]').click();
+    await expect(page.locator('#cal-side .cal-mini')).toBeVisible();
+    expect(await width()).toBe(side);
+    expect(await grid()).toBe(main);
+  });
+});
+
 test('on a narrow window the calendar keeps the explorer and the peek covers only the calendar', async ({ browser }) => {
   await calendarFixture(browser, async page => {
     await expect(page.locator('.cal-side')).toBeVisible();

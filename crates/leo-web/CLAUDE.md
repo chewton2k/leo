@@ -147,6 +147,8 @@ Decided: one app, window only (2026-10-31).
   the sidebar button opens the explorer as a drawer over the page (`side-drawer`;
   Esc, a click outside or opening a note closes it; focus goes to Filter and back).
   The More sheet (`#menu`) is for phones only (under 600 px).
+- The window itself never moves: `html` has `overscroll-behavior: none`, so the note's end or top
+  never rubber-bands the rail, explorer and panes (2026-11-27, the user's call).
 - Layout variables on `body`: `--side`, `--right`, `--mid`. Fixed things
   (toolbar, select bar, toasts, FABs, `#dock`) use them so nothing covers
   anything. Page toolbars share one geometry: 760 px at most below 1000 px; from 1000 px
@@ -641,8 +643,10 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   the explorer to its rail while the room is short (unfolding it then opens the narrow-window drawer,
   `side-drawer`, over both panes), and a window with less room closes beside ("Not enough room for two
   notes"). Each pane saves and restores its own reading place (`readingScrolled`, `restoreReading`, `p.reading`). Open beside
-  is in the explorer note menu (with Close split view while split) and a right-half drop zone
-  ("Open here" / "Open beside", the files overlay's style, never for files, Felix first); exit by the
+  is in the explorer note menu (with Close split view while split) and a drop zone split where the
+  panes meet, or where beside will open (`--drop-x`, set by drag.js `noteOver`) ("Open here" / "Open
+  beside", each box on its pane below the bar; the one under the pointer raised with an ink outline,
+  the other dimmed behind a dashed hairline; 2026-11-27, the user's call; never for files, Felix first); exit by the
   `.pane-close` × on each pane, the ⋯ menu's Close this pane or any page that is not a note (beside is
   saved first; a failed save keeps it with Close anyway when the draft is kept). Closing the left
   pane promotes the right with its unsaved typing (`besideTake`, `replaceState`, the same session, so
@@ -1647,5 +1651,9 @@ Config and data file paths use the same `leo_core::paths::own` names as uninstal
   follow-ups (`.note-follow`, `NOTE_FOLLOW_ASKS`, each `chat.askNew`). The Calendar shows "Nothing
   this week/day" with New task when no visible day holds anything (`calQuiet`), tray tasks read at
   normal weight with the note they came from (`.cal-from`), and Google Calendar is a row with
-  Connect. The calendar peek and the card panel slide in (`panelArrive`) and out
-  (`panelLeave`, the panel itself, inert while it leaves), none under `stillMotion()`.
+  Connect. The calendar's tray and peek share one 320 px column with the tray's surface (2026-11-27,
+  the user's call: the calendar never moves), so opening and closing swaps the column's content and
+  fades the new content in (`calSideArrive`, opacity over `OPEN_MS`); where the peek is an overlay
+  (`@container cal` ≤ 760 px, `position: fixed`, `--raised`) it slides in (`panelArrive`) and out
+  (`panelLeave`), as the card panel does (the panel itself, inert while it leaves); none under
+  `stillMotion()`.

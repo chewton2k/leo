@@ -1088,7 +1088,7 @@ function calOpenPeek(kind, id, on = null) {
   if (kind === 'event') calPeekEvent(side, id);
   else calPeekTask(side, id, on);
   drawCalendar();
-  if (fresh) panelArrive(side);
+  if (fresh) calSideArrive(side);
 }
 
 function calClosePeek() {
@@ -1096,13 +1096,23 @@ function calClosePeek() {
   const flush = cal.peek.flush;
   cal.peek = null;
   if (flush) flush();
-  panelLeave($('#cal-side'), () => {
+  const side = $('#cal-side');
+  const tray = () => {
     if (cal.peek) return;
     drawCalendar();
     if (!cal.redraw) return;
     const today = S.dayKey(new Date());
     calShowTray(calPlanFor(calDays(), today), today);
-  });
+  };
+  if (side && getComputedStyle(side).position === 'fixed') return panelLeave(side, tray);
+  tray();
+  calSideArrive(side);
+}
+
+function calSideArrive(side) {
+  if (!side || stillMotion()) return;
+  if (getComputedStyle(side).position === 'fixed') return panelArrive(side);
+  for (const kid of side.children) kid.animate?.({ opacity: [0, 1] }, { duration: OPEN_MS, easing: EASE_OUT });
 }
 
 function calPlanFor(days, today) {
