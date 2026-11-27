@@ -467,3 +467,28 @@ test('a right pane whose save fails stays open and offers Close anyway', async (
   await expect(page.locator('#beside')).toBeHidden();
   await expect(page.locator('#app #title')).toHaveText(a.title);
 });
+
+test('the divider shade is a theme token with its own dark value', async ({ page }) => {
+  const [a, b] = await notes(page, 'Left.', 'Right.');
+  await split(page, a, b);
+  await page.locator('#app #note-facts').click();
+  const shade = () => page.evaluate(() => {
+    const probe = document.createElement('i');
+    probe.style.backgroundColor = 'var(--split-shade)';
+    document.body.append(probe);
+    const colour = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return { token: getComputedStyle(document.documentElement).getPropertyValue('--split-shade').trim(), colour, drawn: getComputedStyle(document.querySelector('.beside-resize'), '::before').backgroundImage };
+  });
+  await page.emulateMedia({ colorScheme: 'light' });
+  const light = await shade();
+  await page.emulateMedia({ colorScheme: 'dark' });
+  const dark = await shade();
+  expect(light.token).not.toBe('');
+  expect(dark.token).not.toBe('');
+  expect(dark.colour).not.toBe(light.colour);
+  expect(light.drawn).toContain(light.colour);
+  expect(dark.drawn).toContain(dark.colour);
+  await page.emulateMedia({ colorScheme: 'light' });
+});
+

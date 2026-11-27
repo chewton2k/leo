@@ -649,7 +649,7 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   Forward change only it; a note open in one pane is refused in the other; beside is not restored
   after a restart. Trash closes a pane without a save (`paneGone`); Felix's reloads check unsaved
   typing per pane (`saving.get(key)`). Look (Style D2): one background, a 1 px `--line` hairline in
-  the 8 px handle, a 10 px 6% shade on the active pane, the other pane's chips in `--faint`; print
+  the 8 px handle, a 10 px shade on the active pane (`--split-shade`, its own light and dark value), the other pane's chips in `--faint`; print
   shows only the focused pane.
 
 Decided: Obsidian-style live preview, nothing jumps when a line opens

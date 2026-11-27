@@ -300,8 +300,8 @@ body.split main { margin-right: var(--beside-w); }
 body.split #beside { position: fixed; top: 0; bottom: 0; right: var(--right); width: var(--beside-w); overflow-y: auto; overscroll-behavior: contain; padding: 0 16px calc(var(--bottom) + 110px); }
 #beside > .note-layout { margin-top: calc(var(--bar-height) + 8px); }
 .beside-resize { position: fixed; z-index: 36; top: 0; bottom: 0; right: calc(var(--right) + var(--beside-w) - 4px); width: 8px; }
-.beside-resize::before { content: ''; position: absolute; top: 0; bottom: 0; left: 4px; width: 11px; pointer-events: none; background: linear-gradient(to right, var(--line) 1px, rgba(60, 50, 35, .06) 1px, transparent); }
-body:not(.beside-on) .beside-resize::before { left: auto; right: 3px; background: linear-gradient(to left, var(--line) 1px, rgba(60, 50, 35, .06) 1px, transparent); }
+.beside-resize::before { content: ''; position: absolute; top: 0; bottom: 0; left: 4px; width: 11px; pointer-events: none; background: linear-gradient(to right, var(--line) 1px, var(--split-shade) 1px, transparent); }
+body:not(.beside-on) .beside-resize::before { left: auto; right: 3px; background: linear-gradient(to left, var(--line) 1px, var(--split-shade) 1px, transparent); }
 .pane-close { display: none; width: 32px; height: 32px; color: var(--muted); }
 .pane-close svg { width: 16px; height: 16px; }
 body.split .pane-close { display: grid; }
