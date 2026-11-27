@@ -474,6 +474,38 @@ test('a fold chevron sits level with its heading text, first heading or not', as
   });
 });
 
+test('a drag from the text before a picture into the open text after it cuts exactly what it covers', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    const picture = '![p](/api/image?inline=1)';
+    await page.goto(url + '/?body=' + encodeURIComponent(`Before ${picture} after`));
+    await expect.poll(() => page.locator('#doc img.note-img').evaluate(img => img.naturalWidth)).toBeGreaterThan(0);
+    const spot = (word, at) => page.locator('#doc .blk').first().evaluate((el, [word, at]) => {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const i = node.data.indexOf(word);
+        if (i < 0) continue;
+        const range = document.createRange();
+        range.setStart(node, i + at);
+        range.setEnd(node, i + at + 1);
+        const box = range.getBoundingClientRect();
+        return { x: box.left + 1, y: box.top + box.height / 2 };
+      }
+    }, [word, at]);
+    const end = await spot('after', 4);
+    await page.mouse.click(end.x, end.y);
+    await expect(page.locator('#doc textarea')).toHaveValue(' after');
+    const from = await spot('Before', 2);
+    const box = await page.locator('#doc textarea').boundingBox();
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 6 });
+    await page.mouse.up();
+    await page.keyboard.press('ControlOrMeta+x');
+    expect(await page.evaluate(() => doc.source())).toBe('Be');
+  }, { body: 'x' });
+});
+
 test('returning a drag to a list marker selects only the edited item text', async ({ browser }) => {
   await editorFixture(browser, async (context, url) => {
     const page = await context.newPage();
