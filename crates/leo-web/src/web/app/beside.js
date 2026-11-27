@@ -1,5 +1,6 @@
-const besidePane = { el: $('#beside'), s: null, seq: 0, margin: marginFresh($('#beside')) };
+const besidePane = { el: $('#beside'), s: null, seq: 0, margin: marginFresh($('#beside')), reading: readingFresh() };
 panes.push(besidePane);
+besidePane.el.addEventListener('scroll', () => readingScrolled(besidePane), { passive: true });
 const NOTE_PAGE = /^#\/(n|new)(\/|$)/;
 
 function besideRoom() {

@@ -12,8 +12,8 @@ async function fetchSources(note, query, source, cursor) {
   return api(`/api/notes/${enc(note)}/recording?q=${enc(query)}${sourceAt(source, cursor)}`);
 }
 
-function asideOpen() {
-  return Boolean(inPane('.note-layout.aside-open'));
+function asideOpen(p = here()) {
+  return Boolean(inPane('.note-layout.aside-open', p));
 }
 
 let asideReturn = null;

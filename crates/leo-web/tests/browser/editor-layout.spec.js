@@ -28,7 +28,7 @@ async function editorFixture(browser, run, { remember = false, body = null, touc
       if (options.method === 'PUT') localStorage.setItem('fixture-reading', JSON.stringify(options.body.anchor));
       return {anchor:audit.anchor()};
     }
-    ${passages.slice(passages.indexOf('const reading ='))}
+    ${passages.slice(passages.indexOf('const readingFresh ='))}
     restoreReading('fixture-note', seq);` : ''}`;
   const server = http.createServer((req, res) => {
     if (req.url === '/away') { res.setHeader('Content-Type', 'text/html'); return res.end('<p>Another page</p>'); }

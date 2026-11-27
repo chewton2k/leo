@@ -639,7 +639,7 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   `leoPaneResize` (`leo-beside-width`, 380 px each side, double-click halves, arrows) and the width
   control while split; `SPLIT_ROOM` (760) applies only while split: opening the split or Felix folds
   the explorer to its rail while the room is short, and a window with less room closes beside ("Not
-  enough room for two notes"). The right pane restores its reading place but never saves it. Open beside
+  enough room for two notes"). Each pane saves and restores its own reading place (`readingScrolled`, `restoreReading`, `p.reading`). Open beside
   is in the explorer note menu (with Close split view while split) and a right-third drop zone
   ("Open here" / "Open beside", the files overlay's style, never for files, Felix first); exit by the
   `.pane-close` × on each pane, the ⋯ menu's Close this pane or any page that is not a note (beside is

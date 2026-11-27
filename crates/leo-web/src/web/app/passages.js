@@ -246,7 +246,10 @@ async function drawRelated(id, current, p = here(), limit = 4) {
   if (more) more.addEventListener('click', () => drawRelated(id, current, p, 20));
 }
 
-const reading = { id: null, timer: 0, user: false, quietUntil: 0 };
+const readingFresh = () => ({ id: null, timer: 0, user: false, quietUntil: 0 });
+const reading = readingFresh();
+panes[0].reading = reading;
+const paneScroll = (p) => (p === panes[0] ? { box: window, top: window.scrollY } : { box: p.el, top: p.el.scrollTop });
 const READ_SAVE_MS = 2000;
 
 function readingTop() {
@@ -258,37 +261,38 @@ function blockText(block) {
   return (block.textContent || '').replace(/\u200b/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
 }
 
-function readingAnchor() {
+function readingAnchor(p) {
   const top = readingTop();
-  const first = [...panes[0].el.querySelectorAll('#doc .blk')].find((b) => blockText(b) && b.getBoundingClientRect().bottom > top);
+  const first = [...p.el.querySelectorAll('#doc .blk')].find((b) => blockText(b) && b.getBoundingClientRect().bottom > top);
   if (!first) return null;
   return { line: Number(first.dataset.start) || 0, text: blockText(first), dy: Math.round(top - first.getBoundingClientRect().top) };
 }
 
-window.addEventListener('scroll', () => {
-  if (state.view !== 'note' || !reading.id || !reading.user || Date.now() < reading.quietUntil || asideOpen()) return;
-  clearTimeout(reading.timer);
-  const id = reading.id;
-  reading.timer = setTimeout(() => {
-    if (state.view !== 'note' || reading.id !== id || asideOpen()) return;
-    const anchor = window.scrollY < 40 ? { line: 0, text: '', dy: 0 } : readingAnchor();
+function readingScrolled(p) {
+  const at = p.reading;
+  if (state.view !== 'note' || !at.id || !at.user || Date.now() < at.quietUntil || asideOpen(p)) return;
+  clearTimeout(at.timer);
+  const id = at.id;
+  at.timer = setTimeout(() => {
+    if (state.view !== 'note' || at.id !== id || asideOpen(p)) return;
+    const anchor = paneScroll(p).top < 40 ? { line: 0, text: '', dy: 0 } : readingAnchor(p);
     if (anchor) api(`/api/notes/${enc(id)}/reading`, { method: 'PUT', body: { anchor } }).catch(() => {});
   }, READ_SAVE_MS);
-}, { passive: true });
+}
+
+window.addEventListener('scroll', () => readingScrolled(panes[0]), { passive: true });
 
 for (const kind of ['wheel', 'touchmove', 'keydown', 'pointerdown']) {
   window.addEventListener(kind, () => {
-    reading.user = true;
+    for (const p of panes) p.reading.user = true;
   }, { passive: true, capture: true });
 }
 
 async function restoreReading(id, mine, p = panes[0]) {
-  const main = p === panes[0];
-  if (main) {
-    clearTimeout(reading.timer);
-    reading.id = id;
-    reading.user = false;
-  }
+  const at = p.reading;
+  clearTimeout(at.timer);
+  at.id = id;
+  at.user = false;
   if (!id || (citedLines && citedLines.id === id)) return;
   let got;
   try {
@@ -297,13 +301,12 @@ async function restoreReading(id, mine, p = panes[0]) {
     return;
   }
   const anchor = got && got.anchor;
-  const scroller = main ? window : p.el;
-  const top = main ? window.scrollY : p.el.scrollTop;
-  if (mine !== (main ? seq : p.seq) || (main && (reading.id !== id || reading.user)) || !anchor || (!anchor.line && !anchor.text)) return;
+  const { box, top } = paneScroll(p);
+  if (mine !== (p === panes[0] ? seq : p.seq) || at.id !== id || at.user || !anchor || (!anchor.line && !anchor.text)) return;
   if (top > 4 || p.s?.doc?.isEditing()) return;
   const blocks = [...p.el.querySelectorAll('#doc .blk')];
   const block = (anchor.text && blocks.find((b) => blockText(b) === anchor.text)) || blocks.find((b) => Number(b.dataset.start) >= Number(anchor.line));
   if (!block) return;
-  if (main) reading.quietUntil = Date.now() + 1500;
-  scroller.scrollTo(0, Math.max(0, top + block.getBoundingClientRect().top - readingTop() + (Number(anchor.dy) || 0)));
+  at.quietUntil = Date.now() + 1500;
+  box.scrollTo(0, Math.max(0, top + block.getBoundingClientRect().top - readingTop() + (Number(anchor.dy) || 0)));
 }

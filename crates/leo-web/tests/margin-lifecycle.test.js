@@ -839,7 +839,7 @@ function passages(room = true) {
     $: () => ({ getBoundingClientRect: () => ({ left: 0, right: 600 }) }), toast() {}, cleanTitle: (t) => t,
     marginAsk: (...args) => (room ? asked.push(args) > 0 : false),
     marginAskFirst: (...args) => opened.push(args) > 0 && room,
-    chat: { attachSelection: (x) => attached.push(x) },
+    chat: { attachSelection: (x) => attached.push(x) }, panes: [{}],
   };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/passages.js'), 'utf8'), context);

@@ -492,3 +492,20 @@ test('the divider shade is a theme token with its own dark value', async ({ page
   await page.emulateMedia({ colorScheme: 'light' });
 });
 
+test('the right pane saves its reading place, so closing and reopening it beside comes back there', async ({ page }) => {
+  const body = Array.from({ length: 80 }, (_, i) => `Paragraph number ${i} keeps the note long enough to scroll.`).join('\n\n');
+  const [a, b] = await notes(page, 'Left.', body);
+  await split(page, a, b);
+  const saved = page.waitForRequest((request) => request.method() === 'PUT' && request.url().endsWith(`/api/notes/${b.id}/reading`));
+  await page.locator('#beside').hover();
+  await page.mouse.wheel(0, 1500);
+  await expect.poll(() => page.locator('#beside').evaluate((el) => el.scrollTop)).toBeGreaterThan(1000);
+  const anchor = (await saved).postDataJSON().anchor;
+  expect(anchor.line).toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  await page.locator('#beside .pane-close').click();
+  await expect(page.locator('#beside')).toBeHidden();
+  await besideMenu(page, b);
+  await expect.poll(() => page.locator('#beside').evaluate((el) => el.scrollTop)).toBeGreaterThan(800);
+});
+
