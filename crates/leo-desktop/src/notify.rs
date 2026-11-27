@@ -143,7 +143,7 @@ fn post(
     let sent = block_on(
         Notification::new()
             .title(title)
-            .message(body)
+            .message(&body)
             .timeout(left)
             .send(),
     );
