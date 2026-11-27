@@ -1,4 +1,4 @@
-const KATEX = '/vendor/katex-0.16.11/';
+const KATEX = '/vendor/katex-0.16.47/';
 const MATH_KEPT = 300;
 const MATH_WAITING = '.math:not([data-drawn])';
 const math = { loading: null, drawn: new Map(), timer: 0, waiting: new Set() };

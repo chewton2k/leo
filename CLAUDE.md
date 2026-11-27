@@ -201,7 +201,7 @@ settings and credentials are excluded from note exports.
   their own programs. Speech is local only: a shared catalog model and language
   under `models_dir()/speech`, selected in `<config>/speech-model.json`.
   `leo-services::speech` verifies downloads, isolates native transcribe-cpp
-  0.4.2 in a supervised child, prioritizes dictation and pins the model during
+  0.5.1 in a supervised child, prioritizes dictation and pins the model during
   recording. Cloud speech choices fall back to local speech; any keys
   already stored stay in leo's credentials file.
 - Dictation preferences/text rules live in `leo-services::dictation`; desktop

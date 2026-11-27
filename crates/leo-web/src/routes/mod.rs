@@ -229,7 +229,7 @@ pub(crate) fn router(state: AppState) -> Router {
         .route("/app.js", script(assets::APP_JS))
         .route("/markdown.js", script(assets::MARKDOWN_JS))
         .route(assets::MERMAID_PATH, get(assets::mermaid_js))
-        .route("/vendor/katex-0.16.11/{*path}", get(assets::katex_file))
+        .route("/vendor/katex-0.16.47/{*path}", get(assets::katex_file))
         .route("/vendor/fonts-5.3.0/{*path}", get(assets::font_file))
         .route("/editing.js", script(assets::EDITING_JS))
         .route("/doc.js", script(assets::DOC_JS))

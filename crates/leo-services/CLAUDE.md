@@ -291,7 +291,7 @@ or runs inference; the one exception is Silero VAD (CPU-only, in the app process
 written to `models_dir()/vad` from embedded bytes and compared before use, one
 `Model` per detector). Framed JSON/PCM, queues, stderr and deadlines are bounded;
 crashes/hangs are reaped and retried once (CPU after GPU). The Rust binding and
-native sys crate are both pinned to exactly 0.4.2 (pre-1.0 patch versions are
+native sys crate are both pinned to exactly 0.5.1 (pre-1.0 patch versions are
 not ABI-compatible). Filesystem/native work stays outside application mutexes.
 
 ### Ollama (`ollama.rs`)

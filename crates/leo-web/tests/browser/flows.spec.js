@@ -623,7 +623,7 @@ test.describe('editing like Obsidian', () => {
 test.describe('math', () => {
   test('LaTeX in a note and in Felix is drawn as math, with its fonts', async ({ page }) => {
     const fonts = [];
-    page.on('response', (r) => { if (r.url().includes('/vendor/katex-0.16.11/fonts/')) fonts.push(r.status()); });
+    page.on('response', (r) => { if (r.url().includes('/vendor/katex-0.16.47/fonts/')) fonts.push(r.status()); });
     const body = 'Energy is $E = mc^2$, not $5.\n\n$$\n\\int_0^1 x^2\\,dx = \\frac{1}{3}\n$$';
     const note = await (await page.request.post('/api/notes', { data: { title: `Math ${test.info().project.name}`, body } })).json();
     await page.goto(`/#/n/${note.id}`);
