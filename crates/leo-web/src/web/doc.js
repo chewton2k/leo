@@ -343,7 +343,9 @@
         el.dataset.start = String(block.start);
         el.dataset.i = String(i);
         if (level > 0) el.style.marginLeft = `${level * 1.5}em`;
-        el.innerHTML = renderBlock(block, before, levels, starts);
+        const html = renderBlock(block, before, levels, starts);
+        el.innerHTML = html;
+        if (html.includes('note-img')) wrapBesidePictures(el);
         if (old && old.el.parentNode === container) old.el.replaceWith(el);
         else container.insertBefore(el, tail);
         return { key, el };
@@ -882,6 +884,17 @@
 
     const drawn = (img) => img.naturalWidth || !img.complete;
 
+    function wrapBesidePictures(el) {
+      const hosts = new Set([...el.querySelectorAll('img.note-img')].map((img) => (img.closest('.note-fig') || img).parentNode));
+      for (const host of hosts) {
+        let run = null;
+        for (const node of [...host.childNodes]) {
+          if (node.nodeType === 1 && node.matches('img.note-img, .note-fig')) run = null;
+          else (run ||= node.parentNode.insertBefore(document.createElement('span'), node)).append(node);
+        }
+      }
+    }
+
     function keptPictures(el, raw) {
       const host = el.querySelector('.task > span') || el.querySelector('li, p');
       const shown = [...el.querySelectorAll('img.note-img')];
@@ -929,7 +942,7 @@
       const shown = single && !prefix && !run ? textLeft(el) : null;
       const height = el.getBoundingClientRect().height;
       const content = single ? el.querySelector('.task > span') || el.querySelector('li, h2, h3, h4, h5, h6, p') : null;
-      const initialHeight = run ? run.getBoundingClientRect().height || null : content ? content.getBoundingClientRect().height || height : height;
+      const initialHeight = run ? null : content ? content.getBoundingClientRect().height || height : height;
       const area = document.createElement('textarea');
       area.className = 'line-edit';
       if (margin !== null) area.style.margin = margin;

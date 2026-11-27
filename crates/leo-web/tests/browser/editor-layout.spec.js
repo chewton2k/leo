@@ -2086,3 +2086,68 @@ test('copying pictures: after destroy a paste does nothing', async ({ browser })
     expect(errors).toEqual([]);
   }, { body: PICTURE_NOTE });
 });
+
+test('a narrow note keeps its outline as a small button on the chip row that opens the headings over the note', async ({ page }) => {
+  await signIn(page);
+  const note = await (await page.request.post('/api/notes', { data: { title: `Narrow outline ${Date.now().toString(36)}`, body: '## One\n\nText.\n\n## Two\n\nMore.' } })).json();
+  await page.setViewportSize({ width: 700, height: 800 });
+  await page.goto(`/#/n/${note.id}`);
+  await expect(page.locator('.note-layout')).not.toHaveAttribute('data-wide', '');
+  const summary = page.locator('.note-outline summary');
+  await expect(summary).toBeVisible();
+  await expect(page.locator('.note-outline summary > svg')).toBeHidden();
+  const button = await summary.boundingBox();
+  expect([button.width, button.height]).toEqual([32, 32]);
+  const article = await page.locator('article.note').boundingBox();
+  const columns = await page.locator('.note-columns').boundingBox();
+  const meta = await page.locator('.note-meta').boundingBox();
+  expect(Math.abs(article.y - columns.y), 'no row above the note').toBeLessThanOrEqual(1);
+  expect(Math.abs(button.x - article.x), 'the button lines up with the note').toBeLessThanOrEqual(1);
+  expect(Math.abs(button.y + button.height / 2 - (meta.y + meta.height / 2)), 'the button sits on the chip row').toBeLessThanOrEqual(1);
+  const persona = await page.locator('#margin-persona').boundingBox();
+  expect(persona.x).toBeGreaterThanOrEqual(button.x + button.width);
+  expect(await page.evaluate(([x, y]) => Boolean(document.elementFromPoint(x, y)?.closest('#margin-persona')), [persona.x + persona.width / 2, persona.y + persona.height / 2]), 'the chips stay clickable').toBe(true);
+  await summary.click();
+  const nav = page.locator('.note-outline nav');
+  await expect(nav).toBeVisible();
+  const panel = await nav.boundingBox();
+  expect(await nav.evaluate((el) => getComputedStyle(el).position)).toBe('absolute');
+  expect(Math.abs(panel.x - button.x)).toBeLessThanOrEqual(1);
+  expect(panel.y).toBeGreaterThanOrEqual(button.y + button.height - 1);
+  expect((await page.locator('article.note').boundingBox()).y, 'opening it moves nothing').toBe(article.y);
+  await nav.getByRole('button', { name: 'Two', exact: true }).click();
+  await expect(page.locator('#doc .blk:focus')).toContainText('Two');
+  await expect(nav).toBeHidden();
+  await page.request.delete(`/api/notes/${note.id}`);
+});
+
+test('text beside a drawn picture sits in its own element, so WebKit paints the selection on it', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    const picture = '![p](/api/image?inline=1)';
+    await page.goto(url + '/?body=' + encodeURIComponent(`- [ ] ${picture} task words after\n\n${picture} paragraph words after`));
+    await expect.poll(() => page.locator('#doc img.note-img').evaluateAll(imgs => imgs.length === 2 && imgs.every(img => img.naturalWidth > 0))).toBe(true);
+    const bare = await page.locator('#doc').evaluate(doc => [...doc.querySelectorAll('img.note-img')].flatMap(img => [...(img.closest('.note-fig') || img).parentNode.childNodes].filter(n => n.nodeType === 3 && n.data.trim()).map(n => n.data)));
+    expect(bare).toEqual([]);
+    await expect(page.locator('#doc .task > span > span:not(.note-fig)')).toContainText('task words after');
+    await page.getByText('paragraph words after').click();
+    await expect(page.locator('#doc textarea')).toHaveValue(' paragraph words after');
+    await expect(page.locator('#doc img.note-img')).toHaveCount(2);
+  }, { body: 'x' });
+});
+
+test('an open line beside a picture is tall enough for all of its wrapped text', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    await page.setViewportSize({ width: 520, height: 900 });
+    const words = 'less invasive to the note but the user should be able to exit the note that is split without having to scroll all the way up';
+    await page.goto(url + '/?body=' + encodeURIComponent(`- [ ] ![p](/api/image?inline=1) ${words}`));
+    await expect.poll(() => page.locator('#doc img.note-img').evaluate(img => img.naturalWidth)).toBeGreaterThan(0);
+    await page.getByText('scroll all the way up').click({ position: { x: 4, y: 4 } });
+    const area = page.locator('#doc textarea');
+    await expect(area).toHaveValue(' ' + words);
+    const fit = await area.evaluate(el => ({ lines: Math.round(el.scrollHeight / parseFloat(getComputedStyle(el).lineHeight)), scroll: el.scrollHeight, client: el.clientHeight }));
+    expect(fit.lines).toBeGreaterThan(1);
+    expect(fit.scroll).toBeLessThanOrEqual(fit.client + 1);
+  }, { body: 'x' });
+});
