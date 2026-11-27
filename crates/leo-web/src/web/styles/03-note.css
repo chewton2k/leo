@@ -297,7 +297,8 @@ textarea.set-input:focus { outline: 2px solid var(--focus); outline-offset: 1px;
   .margin-ink path, .margin-mark, .margin-anchor, .margin-mode > svg:last-child, .margin-note, .margin-waiting, .margin-revisit, .margin-quiet { transition: none; }
 }
 body.split main { margin-right: var(--beside-w); }
-body.split #beside { position: fixed; top: 0; bottom: 0; right: var(--right); width: var(--beside-w); overflow-y: auto; overscroll-behavior: contain; padding: calc(var(--bar-height) + 8px) 16px calc(var(--bottom) + 110px); background: var(--page); }
+body.split #beside { position: fixed; top: 0; bottom: 0; right: var(--right); width: var(--beside-w); overflow-y: auto; overscroll-behavior: contain; padding: 0 16px calc(var(--bottom) + 110px); }
+#beside > .note-layout { margin-top: calc(var(--bar-height) + 8px); }
 .beside-resize { position: fixed; z-index: 36; top: 0; bottom: 0; right: calc(var(--right) + var(--beside-w) - 4px); width: 8px; }
 .beside-resize::before { content: ''; position: absolute; top: 0; bottom: 0; left: 4px; width: 11px; pointer-events: none; background: linear-gradient(to right, var(--line) 1px, rgba(60, 50, 35, .06) 1px, transparent); }
 body:not(.beside-on) .beside-resize::before { left: auto; right: 3px; background: linear-gradient(to left, var(--line) 1px, rgba(60, 50, 35, .06) 1px, transparent); }
