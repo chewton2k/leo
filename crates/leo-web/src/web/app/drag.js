@@ -86,6 +86,21 @@ function scrollTreeNear(e) {
   else if (e.clientY > box.bottom - EDGE_PX) tree.scrollTop += 10;
 }
 
+function noteZone(e) {
+  const p = dragging.note && carries(e, NOTE_DRAG) && state.view === 'note' && !$('.scrim') && panes.find((q) => q.s && q.el.contains(e.target));
+  if (!p) return null;
+  const left = app.getBoundingClientRect().left;
+  const right = (split() ? besidePane.el : app).getBoundingClientRect().right;
+  return { p, zone: e.clientX > right - (right - left) / 3 ? 'beside' : 'here' };
+}
+
+function noteOver(zone) {
+  clearTimeout(dragging.zoneTimer);
+  if (zone) document.body.dataset.noteDrop = zone;
+  else delete document.body.dataset.noteDrop;
+  if (zone) dragging.zoneTimer = setTimeout(() => delete document.body.dataset.noteDrop, 160);
+}
+
 function filesOver(on) {
   clearTimeout(dragging.filesTimer);
   document.body.classList.toggle('files-over', on);
@@ -102,6 +117,7 @@ function endDrag() {
   document.body.classList.remove('dragging');
   markDrop(null);
   filesOver(false);
+  noteOver(null);
 }
 
 document.addEventListener('dragstart', (e) => {
@@ -151,6 +167,13 @@ document.addEventListener('dragover', (e) => {
     e.dataTransfer.dropEffect = carries(e, 'Files') ? 'copy' : 'move';
     return;
   }
+  const over = noteZone(e);
+  noteOver(over?.zone);
+  if (over) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    return;
+  }
   if (carries(e, 'Files') && FILE_VIEWS.includes(state.view) && !$('.scrim')) {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
@@ -162,6 +185,7 @@ document.addEventListener('drop', (e) => {
   const onto = combinesWith(e);
   const target = dropTargetOf(e.target);
   const ok = target && accepts(e, target);
+  const over = !ok && noteZone(e);
   const note = carries(e, NOTE_DRAG) ? dragging.note : null;
   const folder = carries(e, FOLDER_DRAG) ? dragging.folder : null;
   endDrag();
@@ -169,6 +193,11 @@ document.addEventListener('drop', (e) => {
   if (note && onto) {
     e.preventDefault();
     combineSheet(note, { id: onto.dataset.id, title: onto.dataset.title || 'Untitled' });
+    return;
+  }
+  if (note && over) {
+    e.preventDefault();
+    besideOpen(note.id, over.zone === 'beside' ? besidePane : over.p).catch(fail);
     return;
   }
   if (note || folder) {
@@ -327,7 +356,7 @@ async function saveCombined(made, from, into, id) {
 
 async function afterCombine(id) {
   const open = paneWith(id);
-  if (open && !saving.unsaved()) {
+  if (open && !saving.get(open.s.key)) {
     await showNote(id, { pane: open });
     loadSideFolders();
   } else await showLatest();
@@ -401,7 +430,7 @@ function pageWidthDone(article, width) {
   $('.page-width-label', article).hidden = true;
   window.leoTheme.setPageWidth(width);
   article.style.maxWidth = '';
-  marginRedraw();
+  marginRedrawAll();
 }
 
 document.addEventListener('pointerdown', (e) => {
@@ -428,7 +457,7 @@ document.addEventListener('pointerdown', (e) => {
 document.addEventListener('dblclick', (e) => {
   if (!e.target.closest?.('.page-mark')) return;
   window.leoTheme.setPageWidth(null);
-  marginRedraw();
+  marginRedrawAll();
 });
 
 document.addEventListener('keydown', (e) => {
@@ -440,7 +469,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' || e.key === 'Home') {
     e.preventDefault();
     window.leoTheme.setPageWidth(null);
-    return marginRedraw();
+    return marginRedrawAll();
   }
   if (!grow) return;
   e.preventDefault();

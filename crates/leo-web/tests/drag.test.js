@@ -8,7 +8,7 @@ function fixture({document = {}, ...extra} = {}) {
   const listeners = {};
   const context = {side: {root: ''}, folderLabel: value => value, felix:{NOTE_DRAG:'application/x-leo-note'},clearTimeout(){},document:{
     addEventListener(type, fn) { listeners[type] = fn; }, querySelectorAll:() => [],
-    body:{classList:{remove(){},add(){},toggle(){}}}, ...document
+    body:{dataset:{},classList:{remove(){},add(){},toggle(){}}}, ...document
   }, ...extra};
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/drag.js'), 'utf8'), context);
@@ -37,7 +37,7 @@ test('holding a note drag on another note row arms combine, and leaving the row 
     classList:{add:(...names) => names.forEach(n => classes.add(n)), remove:(...names) => names.forEach(n => classes.delete(n)), toggle:(name, on) => on ? classes.add(name) : classes.delete(name)},
     closest:(selector) => selector === '.side-tree' ? tree : (selector.includes('side-note') || selector.includes('[data-drop-dir]') && !selector.includes('side-folder')) ? row : null};
   const tree = {getBoundingClientRect:() => ({top:-100, bottom:100})};
-  const listeners = fixture({setTimeout: (fn) => { timers.push(fn); return timers.length; }, document:{querySelectorAll:(selector) => selector.includes('combine') && classes.size ? [row] : []}});
+  const listeners = fixture({state:{view:'workspace'}, setTimeout: (fn) => { timers.push(fn); return timers.length; }, document:{querySelectorAll:(selector) => selector.includes('combine') && classes.size ? [row] : []}});
   const source = {dataset:{id:'a', title:'BFS', from:''}, addEventListener(){}};
   listeners.dragstart({target:{closest:(selector) => selector.startsWith('.card') ? source : null}, dataTransfer:{setData(){}}});
   const over = (target) => {
@@ -57,6 +57,25 @@ test('holding a note drag on another note row arms combine, and leaving the row 
   assert.equal(classes.size, 0);
   assert.equal(over(row), false, 'coming back starts the hold again');
   assert.equal(timers.length, 2);
+});
+
+test('moving a folder reloads the pane whose own note was inside it, and leaves the other pane alone', async () => {
+  const shown = [];
+  const main = {note:{id:'main', directory:'Other'}, key:'m'};
+  const side = {el:{}, s:{note:{id:'side', directory:'Course/Week'}, key:'s'}};
+  const context = {side:{root:'', target:null}, state:{view:'note', dir:'Other', main}, app:{}, marginPage:null, felix:{NOTE_DRAG:'application/x-leo-note'}, clearTimeout(){},
+    document:{addEventListener(){}, querySelectorAll:() => [], body:{dataset:{}, classList:{remove(){},add(){},toggle(){}}}},
+    saving:{get:() => undefined}, moveOpenFolders(){}, showNote:async (id, {pane}) => shown.push([id, pane === side]), loadSideFolders:async () => {}, showLatest:async () => shown.push('latest')};
+  vm.createContext(context);
+  vm.runInContext(require('./page-source').paneHelpers(), context);
+  vm.runInContext('panes', context).push(side);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/drag.js'), 'utf8'), context);
+  await context.afterMove('Course', 'Archive/Course');
+  assert.deepEqual(shown, [['side', true]]);
+  shown.length = 0;
+  context.saving.get = (key) => key === 's';
+  await context.afterMove('Course', 'Archive/Course');
+  assert.deepEqual(shown, ['latest']);
 });
 
 function clock() {
