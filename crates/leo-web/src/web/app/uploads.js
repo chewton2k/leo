@@ -396,9 +396,10 @@ async function viewOriginal(id, name, page = null) {
   const kind = viewKind(name);
   if (!kind) return;
   const url = `/api/notes/${enc(id)}/originals/${enc(name)}`;
-  if (paneWith(id)) {
+  const p = paneWith(id);
+  if (p) {
     sourcePage = null;
-    return openFileAside(url, kind, name, page);
+    return withPane(p, () => openFileAside(url, kind, name, page));
   }
   const tab = kind === 'text' ? '' : `<a class="btn sm plain" href="${url}?view=1" target="_blank" rel="noopener">Open in a new tab</a>`;
   const links = `<a class="btn sm plain" href="${url}" download="${esc(name)}">Download</a>${tab}`;

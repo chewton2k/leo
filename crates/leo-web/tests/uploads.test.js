@@ -162,3 +162,17 @@ test('a section added to a note is named by its job and its text is never sent b
   await c.addSection({ id: 'n1', title: 'Heaps' }, '');
   assert.equal(calls.length, 0);
 });
+
+test('an original of the note in the second pane opens beside that note, not in the focused pane', async () => {
+  const main = { note: { id: 'main' } };
+  const context = { state: { view: 'note', session: main, main }, app: { id: 'app' }, marginPage: { id: 'main-margin' }, enc: encodeURIComponent, esc: (t) => String(t), sourcePage: 'kept', viewKind: () => 'pdf', backLink: '' };
+  vm.createContext(context);
+  vm.runInContext(paneHelpers(), context);
+  vm.runInContext("panes[0].margin = marginPage; panes.push({ el: { id: 'beside' }, s: { note: { id: 'side' } }, margin: { id: 'side-margin' } }); let fileAside = null;", context);
+  const opened = [];
+  context.openAside = (kind) => { opened.push([kind, vm.runInContext('here().el.id', context), vm.runInContext('marginPage.id', context)]); return {}; };
+  vm.runInContext(`${slice('async function viewOriginal(', 'async function fillTextFile(')}\nthis.viewOriginal = viewOriginal;`, context);
+  await context.viewOriginal('side', 'slides.pdf');
+  assert.deepEqual(opened, [['file', 'beside', 'side-margin']]);
+  assert.equal(vm.runInContext('here().el.id', context), 'app');
+});

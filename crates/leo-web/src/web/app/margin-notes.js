@@ -48,7 +48,10 @@ const MARGIN_AREA_MAX = 140;
 const CARD_TOP = 14;
 const CARD_GAP = 10;
 const CARD_TAIL = 4;
-let marginPage = { root: app, faded: new Map(), drafted: new Map(), resolved: [], revisits: new Map(), gone: [], adding: new Set(), reopening: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, watch: null, frame: 0, roomy: new Map(), tethers: new Map(), markers: new Map(), newest: null, folds: new Map(), unfolds: new Set(), unfold: null, moved: [], anchoring: new Set(), anchorTimer: 0, finds: new Map(), drawn: null, drawnAt: 0, settle: 0 };
+function marginFresh(root) {
+  return { root, faded: new Map(), drafted: new Map(), resolved: [], revisits: new Map(), gone: [], adding: new Set(), reopening: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, watch: null, frame: 0, roomy: new Map(), tethers: new Map(), markers: new Map(), newest: null, folds: new Map(), unfolds: new Set(), unfold: null, moved: [], anchoring: new Set(), anchorTimer: 0, finds: new Map(), drawn: null, drawnAt: 0, settle: 0 };
+}
+let marginPage = marginFresh(app);
 panes[0].margin = marginPage;
 let marginPrefs = null;
 
@@ -73,7 +76,8 @@ function marginSetting() {
 
 function marginCovered() {
   const panel = chat.isOpen() && $('.chat');
-  return panel ? Math.max(0, panel.offsetWidth - parseFloat(getComputedStyle(document.body).paddingRight)) : 0;
+  const right = panes.findLast((p) => p.s);
+  return panel && (!right || right.margin === marginPage) ? Math.max(0, panel.offsetWidth - parseFloat(getComputedStyle(document.body).paddingRight)) : 0;
 }
 
 function marginMostColumn(width) {
@@ -151,10 +155,10 @@ async function marginMount(s, current) {
     marginPage.observer.observe($('#doc', marginPage.root));
   }
   if (window.MutationObserver) {
-    marginPage.watch = new MutationObserver(() => marginRedraw());
+    marginPage.watch = new MutationObserver(marginLater(() => marginRedraw()));
     marginPage.watch.observe($('#doc', marginPage.root), { childList: true });
   }
-  $('#doc', marginPage.root).addEventListener('focusin', marginRedraw);
+  $('#doc', marginPage.root).addEventListener('focusin', marginLater(() => marginRedraw()));
   if (s.note.id) return marginLoad(s, current);
   const p = here();
   const prefs = await marginLoadPrefs();
@@ -205,7 +209,7 @@ async function marginReanchor(s) {
   if (s !== marginPage.s || !s.note.id) return;
   const p = here();
   await flush(s);
-  if (s !== marginPage.s || saving.unsaved()) return;
+  if (s !== marginPage.s || saving.get(s.key)) return;
   const source = s.doc.source();
   const version = s.note.version;
   for (const { t, at } of [...marginPage.moved]) {
@@ -225,22 +229,25 @@ async function marginReanchor(s) {
 }
 
 async function marginCreated(s, note) {
-  if (marginPage.s !== s) return;
-  const wanted = marginPage.wanted;
-  const persona = marginPage.wantedPersona;
-  marginPage.wanted = null;
-  marginPage.wantedPersona = null;
-  await marginLoad(s, undefined, note.id);
-  if (persona && marginPage.s === s) await marginChangePersona(persona, false);
-  if (!wanted || marginPage.s !== s || marginPage.mode === wanted) return;
+  const p = paneOf(s) || here();
+  const page = p.margin;
+  if (page.s !== s) return;
+  const back = (fn) => withPane(p, fn);
+  const wanted = page.wanted;
+  const persona = page.wantedPersona;
+  page.wanted = null;
+  page.wantedPersona = null;
+  await back(() => marginLoad(s, undefined, note.id));
+  if (persona && page.s === s) await back(() => marginChangePersona(persona, false));
+  if (!wanted || page.s !== s || page.mode === wanted) return;
   try {
     await api(`/api/notes/${enc(note.id)}/margin`, { method: 'POST', body: { mode: wanted } });
-    if (marginPage.s !== s) return;
-    marginPage.mode = wanted;
-    marginControl();
+    if (page.s !== s) return;
+    page.mode = wanted;
+    back(marginControl);
   } catch (e) {
     if (e instanceof Locked) throw e;
-    if (marginPage.s === s) marginSetStatus('Could not save this mode. Try again.');
+    if (page.s === s) back(() => marginSetStatus('Could not save this mode. Try again.'));
   }
 }
 
@@ -470,6 +477,7 @@ async function marginChangePersona(id, picked = true) {
   const s = marginPage.s;
   if (picked) marginPersonaMenu(false, true);
   if (!s) return;
+  const back = marginLater((fn) => fn());
   const before = marginPage.saved ?? marginPage.persona;
   const token = {};
   marginPage.personaToken = token;
@@ -481,14 +489,16 @@ async function marginChangePersona(id, picked = true) {
   }
   try {
     await api(`/api/notes/${enc(s.note.id)}/margin`, { method: 'POST', body: { persona: id } });
-    if (marginPage.s === s && marginPage.personaToken === token) marginPage.saved = id;
+    back(() => { if (marginPage.s === s && marginPage.personaToken === token) marginPage.saved = id; });
   } catch (e) {
-    if (marginPage.s !== s) return;
-    if (e instanceof Locked) throw e;
-    if (marginPage.personaToken !== token) return;
-    marginPage.persona = before;
-    marginPersonaControl();
-    marginSetStatus('Could not save this persona. Try again.');
+    back(() => {
+      if (marginPage.s !== s) return;
+      if (e instanceof Locked) throw e;
+      if (marginPage.personaToken !== token) return;
+      marginPage.persona = before;
+      marginPersonaControl();
+      marginSetStatus('Could not save this persona. Try again.');
+    });
   }
 }
 
@@ -505,47 +515,53 @@ async function marginChangeMode(mode) {
     return;
   }
   const before = { mode: marginPage.mode, baseline: marginPage.baseline };
+  const back = marginLater((fn) => fn());
   marginPage.mode = mode;
   marginPage.baseline = marginKit.blocksOf(s.doc.source());
   marginPage.changing = true;
   marginControl();
   try {
     const done = await api(`/api/notes/${enc(s.note.id)}/margin`, { method: 'POST', body: { mode } });
-    if (marginPage.s !== s) return;
-    marginPage.mode = done.mode;
-    marginPage.baseline = marginKit.blocksOf(s.doc.source());
-    clearTimeout(marginPage.timer);
-    clearTimeout(marginPage.faceTimer);
-    marginSetStatus('');
-    marginRedraw();
+    back(() => {
+      if (marginPage.s !== s) return;
+      marginPage.mode = done.mode;
+      marginPage.baseline = marginKit.blocksOf(s.doc.source());
+      clearTimeout(marginPage.timer);
+      clearTimeout(marginPage.faceTimer);
+      marginSetStatus('');
+      marginRedraw();
+    });
   } catch (e) {
-    if (marginPage.s !== s) return;
-    Object.assign(marginPage, before);
-    if (e instanceof Locked) throw e;
-    marginSetStatus('Could not save this mode. Try again.');
+    back(() => {
+      if (marginPage.s !== s) return;
+      Object.assign(marginPage, before);
+      if (e instanceof Locked) throw e;
+      marginSetStatus('Could not save this mode. Try again.');
+    });
   } finally {
-    if (marginPage.s === s) {
+    back(() => {
+      if (marginPage.s !== s) return;
       marginPage.changing = false;
       marginControl();
       if (document.activeElement === document.body) $('#margin-mode', marginPage.root)?.focus({ preventScroll: true });
-    }
+    });
   }
 }
 
 function marginRedraw() {
-  for (const p of panes) {
-    withPane(p, () => {
-      if (!marginPage.layer) return;
-      cancelAnimationFrame(marginPage.frame);
-      marginPage.frame = requestAnimationFrame(marginLater(marginDraw));
-    });
-  }
+  if (!marginPage.layer) return;
+  cancelAnimationFrame(marginPage.frame);
+  marginPage.frame = requestAnimationFrame(marginLater(marginDraw));
+}
+
+function marginRedrawAll() {
+  for (const p of panes) withPane(p, marginRedraw);
 }
 
 let marginFonts = 0;
 function marginFontsIn() {
   marginFonts++;
-  marginRedraw();
+  marginRedrawAll();
 }
 
 if (document.fonts) {
@@ -1359,7 +1375,7 @@ function marginFocus(e) {
 }
 
 document.addEventListener('pointermove', marginHover, { passive: true });
-addEventListener('resize', marginRedraw);
+addEventListener('resize', marginRedrawAll);
 document.documentElement.addEventListener('pointerleave', () => {
   if (!marginPage.hover) return;
   marginPage.hover = null;
@@ -1756,9 +1772,10 @@ async function marginWeave(s, t, request) {
 }
 
 async function marginAdd(t) {
-  if (marginPage.adding.has(t.id)) return;
-  marginPage.adding.add(t.id);
-  const s = marginPage.s;
+  const page = marginPage;
+  if (page.adding.has(t.id)) return;
+  page.adding.add(t.id);
+  const s = page.s;
   const el = marginPage.els.get(t.id);
   const button = $('.margin-add', el);
   button.disabled = true;
@@ -1783,7 +1800,7 @@ async function marginAdd(t) {
     if (el.isConnected) marginSaying(el, e.status === 409 && !e.data?.why ? 'The note changed. Try once more.' : e.message);
     return;
   } finally {
-    marginPage.adding.delete(t.id);
+    page.adding.delete(t.id);
     button.disabled = false;
     button.textContent = 'Add to note';
   }
@@ -1795,7 +1812,7 @@ async function marginAdd(t) {
     run: async () => {
       try {
         await api(`/api/notes/${enc(id)}`, { method: 'PATCH', body: { body: done.before, base: done.version } });
-        await api(threadPath, { method: 'POST', body: { status: 'open', gone: marginPage.gone } }).catch(() => {});
+        await api(threadPath, { method: 'POST', body: { status: 'open', gone: page.gone } }).catch(() => {});
         if (open()) await showNote(id, { pane: open() });
         toast('Took it out of the note');
       } catch (e) {
@@ -2104,7 +2121,7 @@ async function marginRead(s) {
   queueMicrotask(sideRedrawSoon);
   try {
     await flush(s);
-    if (s !== marginPage.s || marginPage.mode !== 'along' || saving.unsaved()) return;
+    if (s !== marginPage.s || marginPage.mode !== 'along' || saving.get(s.key)) return;
     const source = s.doc.source();
     const blocks = marginKit.changedBlocks(marginPage.baseline, source);
     if (!blocks.length) return;
