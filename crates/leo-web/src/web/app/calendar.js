@@ -1362,7 +1362,8 @@ async function setTaskDone(id, done, on = null) {
     tickTaskBoxes(id, done, on);
   }
   if (done) toast(`Marked “${task?.title || 'Untitled'}” done`, { action: 'Undo', run: () => setTaskDone(id, false, on) });
-  if (state.view === 'note' && task && task.note && state.session && state.session.note.id === task.note.id && !saving.unsaved()) showNote(task.note.id);
+  const open = task && task.note && paneWith(task.note.id);
+  if (open && !saving.unsaved()) showNote(task.note.id, { pane: open });
 }
 
 function pickerBody(box, value, { meeting = false, onChange = () => {} } = {}) {

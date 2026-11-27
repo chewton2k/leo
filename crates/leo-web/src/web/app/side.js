@@ -102,7 +102,7 @@ function drawSide() {
   const dir = sideHere();
   // Unfold to what is open: again whenever the folder or the open note changes,
   // so a note opened after its folder was closed still shows where it is.
-  const showing = state.view === 'note' ? `${dir}\n${state.session?.note?.id || ''}` : 'workspace';
+  const showing = state.view === 'note' ? `${dir}\n${panes.map((p) => p.s?.note?.id || '').join('\n')}` : 'workspace';
   if (showing !== side.showing) {
     side.showing = showing;
     side.revealed.clear();
@@ -193,7 +193,7 @@ function folderShown(path) {
 // explorer's view once, when it first appears for that note; later redraws keep
 // whatever scroll the user chose. Only the explorer scrolls, never the page.
 function revealNoteRow(tree) {
-  const id = state.view === 'note' ? state.session?.note?.id : null;
+  const id = panes[0].s?.note?.id;
   if (!id) side.shownNote = null;
   // A hidden explorer has nothing to scroll; try again when it shows.
   if (!tree || !id || side.shownNote === id || !tree.clientHeight) return;
@@ -344,7 +344,7 @@ async function loadSideFolders() {
     side.revAt = Date.now();
     side.folders = folders;
     if (unopened) side.unopened = new Map(Object.entries(unopened));
-    side.unopened.delete(state.session?.note?.id);
+    for (const p of panes) side.unopened.delete(p.s?.note?.id);
     if (side.target && !folders.some((folder) => folder.name === side.target)) side.target = null;
     if (side.root && !folders.some((folder) => folder.name === side.root)) {
       sideFocus('');
@@ -458,10 +458,10 @@ function sideNoteRows(path, depth) {
   const entry = side.notes.get(path);
   const action = (label, offset = 0) => `<button class="side-note-page" data-action="side-notes" data-dir="${esc(path)}" data-offset="${offset}">${label}</button>`;
   if (!entry) return `<div class="side-note-status" data-drop-dir="${esc(path)}" style="--depth:${depth}">${action('Show notes')}</div>`;
-  const selected = state.view === 'note' ? state.session?.note?.id : null;
+  const selected = new Set(panes.map((p) => p.s?.note?.id).filter(Boolean));
   const held = Boolean(side.target);
   for (const note of entry.items) side.sig.push(`n:${note.id}`);
-  const rows = entry.items.map((note) => `<div class="side-note-wrap" data-refresh-key="n:${esc(note.id)}"><button class="side-row side-note${selected === note.id ? (held ? ' open' : ' on') : ''}" data-action="open-note" tabindex="-1" data-id="${esc(note.id)}" data-from="${esc(path)}" data-drop-dir="${esc(path)}" data-title="${esc(note.title)}" draggable="true" style="--depth:${depth}" title="${esc(note.title)}"${selected === note.id ? ' aria-current="page"' : ''}>${selected === note.id && !held ? '<span class="side-pill" aria-hidden="true"></span>' : ''}<span class="side-label">${esc(note.title || 'Untitled')}</span>${sideNoteMark(note, selected === note.id)}${sideNoteWhen(note)}</button><button class="side-add side-sub" tabindex="-1" data-action="explorer-menu" data-kind="note" data-id="${esc(note.id)}" data-dir="${esc(path)}" aria-label="Options for ${esc(note.title || 'Untitled')}" title="Note options" aria-haspopup="menu">${ICON.more}</button></div>`).join('');
+  const rows = entry.items.map((note) => `<div class="side-note-wrap" data-refresh-key="n:${esc(note.id)}"><button class="side-row side-note${selected.has(note.id) ? (held ? ' open' : ' on') : ''}" data-action="open-note" tabindex="-1" data-id="${esc(note.id)}" data-from="${esc(path)}" data-drop-dir="${esc(path)}" data-title="${esc(note.title)}" draggable="true" style="--depth:${depth}" title="${esc(note.title)}"${selected.has(note.id) ? ' aria-current="page"' : ''}>${selected.has(note.id) && !held ? '<span class="side-pill" aria-hidden="true"></span>' : ''}<span class="side-label">${esc(note.title || 'Untitled')}</span>${sideNoteMark(note, selected.has(note.id))}${sideNoteWhen(note)}</button><button class="side-add side-sub" tabindex="-1" data-action="explorer-menu" data-kind="note" data-id="${esc(note.id)}" data-dir="${esc(path)}" aria-label="Options for ${esc(note.title || 'Untitled')}" title="Note options" aria-haspopup="menu">${ICON.more}</button></div>`).join('');
   const status = entry.loading && !entry.refreshing ? '<span>Opening notes…</span>' : entry.error ? `Notes could not be opened. ${action('Try again', entry.offset)}` : !entry.items.length && side.tasks ? '<span>No open tasks here</span>' : !entry.items.length && !side.folders.some((folder) => folder.name.startsWith(path ? `${path}/` : '')) ? (path === '' ? `<span>No notes yet.</span> <button class="side-note-page" data-action="new" data-dir="">Write your first note</button>` : '<span>Empty folder</span>') : '';
   const pages = !entry.error ? `${entry.offset ? action('Previous notes', Math.max(0, entry.offset - SIDE_NOTES_PAGE)) : ''}${entry.offset + entry.items.length < entry.total ? action('Next notes', entry.offset + SIDE_NOTES_PAGE) : ''}` : '';
   return rows + (status || pages ? `<div class="side-note-status" data-drop-dir="${esc(path)}" style="--depth:${depth}">${status}${pages}</div>` : '');
@@ -551,7 +551,7 @@ function sideNoteMark(note, open) {
   const until = Date.parse(note.updated_at) + SIDE_FRESH_MS;
   const fresh = side.sort !== 'updated' && until > Date.now() && until - Date.now() <= SIDE_FRESH_MS + SIDE_NEW_MS;
   if (fresh) side.freshUntil = Math.min(side.freshUntil, until);
-  if (open && marginPage.reading) return '<i class="side-reading" aria-hidden="true" title="Felix is reading this note"></i>';
+  if (open && paneWith(note.id).margin.reading) return '<i class="side-reading" aria-hidden="true" title="Felix is reading this note"></i>';
   if (!open && side.unopened.has(note.id)) return SIDE_UNOPENED;
   return fresh ? '<i class="side-fresh" aria-hidden="true" title="Edited in the last 30 minutes"></i>' : '';
 }
@@ -716,13 +716,13 @@ async function explorerAction(action, target) {
     if (action === 'trash') return trashFolder(target.dir);
   }
   const mine = seq;
-  if (target.kind === 'note' && state.session?.note.id === target.id) await ready();
+  if (target.kind === 'note' && paneWith(target.id)) await ready(paneWith(target.id).s);
   const note = target.kind === 'note' ? await api(`/api/notes/${enc(target.id)}`) : null;
   if (mine !== seq) return;
   if (action === 'rename') return renameExplorerNote(note);
   if (action === 'trash') return trashNote(note, target);
   if (action === 'move') return explorerMoveMenu(target, note, explorerFocus(target) || document.activeElement);
-  if (action === 'combine') return explorerCombineMenu(note, explorerFocus(target) || $('#title') || document.activeElement);
+  if (action === 'combine') return explorerCombineMenu(note, explorerFocus(target) || inPane('#title') || document.activeElement);
 }
 
 function inlineEdit(where, { id, value, label, hint = '', at, save, end = null }) {
@@ -868,7 +868,8 @@ async function explorerCombineMenu(note, owner) {
 }
 
 async function afterExplorerNote(id) {
-  if (state.view === 'note' && state.session?.note.id === id && !saving.get(state.session.key)) await showNote(id);
+  const open = paneWith(id);
+  if (open && !saving.get(open.s.key)) await showNote(id, { pane: open });
   await loadSideFolders();
 }
 

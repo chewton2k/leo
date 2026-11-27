@@ -326,8 +326,9 @@ async function saveCombined(made, from, into, id) {
 }
 
 async function afterCombine(id) {
-  if (state.view === 'note' && state.session && state.session.note.id === id && !saving.unsaved()) {
-    await showNote(id);
+  const open = paneWith(id);
+  if (open && !saving.unsaved()) {
+    await showNote(id, { pane: open });
     loadSideFolders();
   } else await showLatest();
 }
@@ -337,7 +338,7 @@ async function moveNote(id, dir) {
 }
 
 async function dropNote(note, into) {
-  if (state.session?.note.id === note.id) await ready();
+  if (paneWith(note.id)) await ready(paneWith(note.id).s);
   await moveNote(note.id, into);
   await afterMove(null, null, note.id);
   toast(`Moved “${note.title}” to ${folderLabel(into)}`, {
@@ -371,10 +372,11 @@ async function afterMove(from, to, noteId = null) {
     moveOpenFolders(from, to);
     if (side.target === from || side.target?.startsWith(`${from}/`)) side.target = to + side.target.slice(from.length);
   }
-  if (from && state.view === 'note' && (dir === from || dir.startsWith(`${from}/`))) state.dir = to + dir.slice(from.length);
-  const affected = noteId === state.session?.note.id || from && (dir === from || dir.startsWith(`${from}/`));
-  if (affected && state.view === 'note' && state.session?.note.id && !saving.get(state.session.key)) {
-    await showNote(state.session.note.id);
+  const within = (at) => from && (at === from || at.startsWith(`${from}/`));
+  if (state.view === 'note' && within(dir)) state.dir = to + dir.slice(from.length);
+  const open = panes.filter((p) => p.s?.note.id && !saving.get(p.s.key) && (noteId === p.s.note.id || within(p === panes[0] ? dir : p.s.note.directory || '')));
+  if (open.length) {
+    for (const p of open) await showNote(p.s.note.id, { pane: p });
     await loadSideFolders();
   } else await showLatest();
 }

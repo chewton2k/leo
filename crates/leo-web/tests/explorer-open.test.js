@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { paneHelpers } = require('./page-source');
 
 test('compact note selection honors the latest click in either response order', async () => {
   for (const reverse of [false, true]) {
@@ -119,7 +120,7 @@ function explorer(open, answer = (name) => [{ id: `${name}-1`, title: name, crea
     },
   };
   vm.createContext(context);
-  vm.runInContext(`let seq = 1, drawn = 0; let state = { view: 'note', dir: '', session: { note: { id: 'n' } } };\n${pieces}\n;globalThis.h = { side, drawSide, folderTree, loadSideFolders, refreshSideTree, bump: () => ++seq, draws: () => drawn, resetDraws: () => { drawn = 0; } };`, context);
+  vm.runInContext(`let seq = 1, drawn = 0; const open = { note: { id: 'n' } }; let state = { view: 'note', dir: '', session: open, main: open }; const app = {}; let marginPage = null;\n${paneHelpers()}\n${pieces}\n;globalThis.h = { side, drawSide, folderTree, loadSideFolders, refreshSideTree, bump: () => ++seq, draws: () => drawn, resetDraws: () => { drawn = 0; } };`, context);
   context.h.side.open = new Set(open);
   Object.assign(context.h, { reads, asked, disk, clock });
   context.h.flush = () => { while (frames.length) frames.shift()(); };

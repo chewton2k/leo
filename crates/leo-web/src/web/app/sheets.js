@@ -527,11 +527,10 @@ async function trashFolder(from) {
   if (!from) return;
   const mine = seq;
   const inside = () => state.view === 'note' && (state.dir === from || state.dir.startsWith(`${from}/`));
-  if (inside()) await ready();
+  if (inside()) await ready(panes[0].s);
   const done = await api('/api/trash/move', { method: 'POST', body: { notes: [], dirs: [from] } });
   if (mine === seq && inside()) {
-    state.session.doc.destroy();
-    state.session = null;
+    leaveMain();
     go('#/', { replace: true });
   }
   if (side.target === from || side.target?.startsWith(`${from}/`)) side.target = parentOf(from);
@@ -596,9 +595,8 @@ async function trashNote(note = null, at = null) {
   try {
     await api(`/api/notes/${enc(note.id)}`, { method: 'DELETE' });
   } finally { trashing = null; }
-  if (state.session?.note.id === note.id) {
-    state.session.doc.destroy();
-    state.session = null;
+  if (paneWith(note.id) === panes[0]) {
+    leaveMain();
     go('#/', { replace: true });
   }
   loadSideFolders();
@@ -772,7 +770,7 @@ function printNotes(s) {
   notes.hidden = true;
   notes.dataset.print = '';
   notes.append(list);
-  $('#doc').after(notes);
+  $('#doc', marginPage.root).after(notes);
   const title = (s.note.title || '').trim().replace(/["\\]/g, '\\$&').replace(/[\n\r\f]/g, ' ');
   if (title) {
     const footer = document.createElement('style');
