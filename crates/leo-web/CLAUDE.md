@@ -1654,6 +1654,6 @@ Config and data file paths use the same `leo_core::paths::own` names as uninstal
   Connect. The calendar's tray and peek share one 320 px column with the tray's surface (2026-11-27,
   the user's call: the calendar never moves), so opening and closing swaps the column's content and
   fades the new content in (`calSideArrive`, opacity over `OPEN_MS`); where the peek is an overlay
-  (`@container cal` ≤ 760 px, `position: fixed`, `--raised`) it slides in (`panelArrive`) and out
+  (`@container cal` ≤ 832 px, `position: fixed`, `--raised`) it slides in (`panelArrive`) and out
   (`panelLeave`), as the card panel does (the panel itself, inert while it leaves); none under
   `stillMotion()`.

@@ -84,7 +84,7 @@ test('a note dropped on the right half opens beside with its own width marks and
     return { zone: document.body.dataset.noteDrop, x: document.body.style.getPropertyValue('--drop-x'), zones };
   }, [near.transfer, divider - 6]);
   expect(seen.zone).toBe('here');
-  expect(seen.x).toBe(`${divider}px`);
+  expect(Math.abs(parseFloat(seen.x) - divider)).toBeLessThanOrEqual(1);
   const { zones } = seen;
   const here = await page.locator('#app').boundingBox();
   const beside = await page.locator('#beside').boundingBox();

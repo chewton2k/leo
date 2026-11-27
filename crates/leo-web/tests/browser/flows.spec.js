@@ -7104,6 +7104,7 @@ test.describe('round 2 redesign', () => {
   for (const reduce of [false, true]) {
     test(`the calendar peek ${reduce ? 'and the card panel open and close at once under Reduce motion' : 'fades in place and the card panel slides in and out'}`, async ({ page }) => {
       if (reduce) await page.emulateMedia({ reducedMotion: 'reduce' });
+      await page.setViewportSize({ width: 1440, height: 900 });
       const count = () => {
         if (window.leoSlid) return;
         const animate = Element.prototype.animate;

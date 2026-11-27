@@ -90,7 +90,7 @@ function noteZone(e) {
   const p = dragging.note && carries(e, NOTE_DRAG) && state.view === 'note' && !$('.scrim') && panes.find((q) => q.s && q.el.contains(e.target));
   if (!p) return null;
   const box = app.getBoundingClientRect();
-  const mid = Math.round(split() ? box.right : box.right - (parseFloat(document.body.style.getPropertyValue('--beside-w')) || box.width / 2));
+  const mid = Math.round(split() ? box.right : box.right - besideWidth());
   return { p, mid, zone: e.clientX > mid ? 'beside' : 'here' };
 }
 

@@ -210,7 +210,7 @@ h2.cal-peek-title { margin-left: 0; padding: 4px 0; }
 .cal-peek-about { box-sizing: border-box; width: 100%; min-height: 84px; padding: 8px 10px; border: 1px solid transparent; border-radius: var(--r-md); background: var(--surface-2); font: inherit; font-size: var(--fs-base); line-height: 1.5; color: var(--text); resize: vertical; }
 .cal-peek-about:focus { outline: none; border-color: var(--focus); background: var(--surface); }
 @media (max-width: 1100px) { .cal-head { flex-wrap: wrap; } .cal-status { order: 9; flex-basis: 100%; } }
-@container cal (max-width: 760px) {
+@container cal (max-width: 832px) {
   .cal-page { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
   .cal-side:not(.peek) { grid-row: 1; max-height: 200px; gap: 12px; padding: 10px 14px; }
   .cal-side:not(.peek) .cal-mini { display: none; }
