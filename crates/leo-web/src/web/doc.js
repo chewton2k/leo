@@ -91,12 +91,13 @@
     return menu;
   }
 
-  function mount(container, { source, onChange, placeholder, dir = '', onPictures = null, onSelection = null, outline = null, noteTools = false, foldKey = '' }) {
+  function mount(container, { source, onChange, placeholder, dir = '', onPictures = null, onSelection = null, outline = null, noteTools = false, foldKey = '', active = () => true, scroller = root }) {
     let lines = String(source || '').replace(/\r\n?/g, '\n').split('\n');
     let blocks = [];
     let rendered = [];
     let editing = null;
     let boxMemo = null;
+    const scrolled = () => (scroller === root ? root.scrollY : scroller.scrollTop);
 
     const MOST_UNDO = 200;
     const TYPING_PAUSE = 1000;
@@ -626,7 +627,7 @@
         outlinePlaced.center = center;
         outline.style.setProperty('--outline-center', `${center}px`);
       }
-      const bottom = root.scrollY > 0 && root.scrollY + root.innerHeight >= document.documentElement.scrollHeight - 2;
+      const bottom = scrolled() > 0 && scrolled() + root.innerHeight >= (scroller === root ? document.documentElement : scroller).scrollHeight - 2;
       const limit = bottom ? root.innerHeight : top + 24;
       let low = 0;
       let high = outlineRows.length - 1;
@@ -749,7 +750,7 @@
       const inset = outlineWide ? 0 : outlineDetails.querySelector('summary').getBoundingClientRect().height + 8;
       outlineLanding = { line, until: performance.now() + OUTLINE_LANDING_MS };
       setTimeout(outlineScroll, OUTLINE_LANDING_MS + 50);
-      root.scrollTo({ top: Math.max(0, root.scrollY + block.getBoundingClientRect().top - outlineTop() - inset), behavior: root.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+      scroller.scrollTo({ top: Math.max(0, scrolled() + block.getBoundingClientRect().top - outlineTop() - inset), behavior: root.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
       outlineScroll();
     }
 
@@ -774,7 +775,7 @@
       outlineTicks.addEventListener('keydown', outlineKeydown);
       document.addEventListener('keydown', outlineEscape, true);
       document.addEventListener('pointerdown', outlineOutside, true);
-      root.addEventListener('scroll', outlineScroll, { passive: true });
+      scroller.addEventListener('scroll', outlineScroll, { passive: true });
       root.addEventListener('resize', outlineScroll);
       if (outlineResize) outlineResize.observe(outline.closest('.note-layout'));
       outlineDraw();
@@ -1177,8 +1178,9 @@
       if (e.target.closest?.('.code-copy')) return;
       if (editing && document.activeElement === editing.area) return;
       const focus = document.activeElement;
-      if ((!focus || focus === document.body || container.contains(focus)) && (historyKey(e) || styleKey(e))) return;
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a' && (!focus || focus === document.body || container.contains(focus))) {
+      const mine = ((!focus || focus === document.body) && active()) || container.contains(focus);
+      if (mine && (historyKey(e) || styleKey(e))) return;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a' && mine) {
         e.preventDefault();
         stop();
         selectSpan(0, docLength());
@@ -1239,7 +1241,7 @@
 
     function noteFocused() {
       const focus = document.activeElement;
-      return !focus || focus === document.body || (container.contains(focus) && !(editing && focus === editing.area));
+      return ((!focus || focus === document.body) && active()) || (container.contains(focus) && !(editing && focus === editing.area));
     }
 
     const MOST_COPIED = 60000000;
@@ -2074,7 +2076,7 @@
       if (!framed.img.isConnected || !framed.frame.isConnected) return unframe();
       const remove = (e.key === 'Backspace' || e.key === 'Delete') && noteFocused() && !selectedSpan();
       const focus = document.activeElement;
-      const here = (!focus || focus === document.body || focus === container || Boolean(focus.closest?.('.pic-handle'))) && !selectedSpan();
+      const here = (((!focus || focus === document.body) && active()) || focus === container || Boolean(focus.closest?.('.pic-handle'))) && !selectedSpan();
       const sideways = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
       const move = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(e.key) && !e.isComposing && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && here && !(sideways && e.target.closest?.('.pic-handle'));
       const typed = [...e.key].length === 1 && !e.isComposing && !e.metaKey && !e.ctrlKey && !e.altKey && here;
@@ -2165,7 +2167,7 @@
             input.defaultChecked = checked;
             input.closest('label.task').classList.toggle('done', checked);
             input.focus({ preventScroll: true });
-            root.scrollBy(0, input.getBoundingClientRect().top - top);
+            scroller.scrollBy(0, input.getBoundingClientRect().top - top);
           }
         }
         return;
@@ -2462,7 +2464,7 @@
           outlineUpArrow.remove();
           outlineDownArrow.remove();
         }
-        root.removeEventListener('scroll', outlineScroll);
+        scroller.removeEventListener('scroll', outlineScroll);
         root.removeEventListener('resize', outlineScroll);
         root.removeEventListener('resize', layoutWide);
         layoutWatch?.disconnect();
@@ -2504,7 +2506,7 @@
         const span = picked && !picked.isCollapsed && picked.rangeCount ? selectedSpan() : null;
         if (!span) return null;
         const [from, to] = span;
-        const key = `${from}:${to}:${window.scrollY}:${window.innerWidth}:${container.offsetHeight}`;
+        const key = `${from}:${to}:${scrolled()}:${window.innerWidth}:${container.offsetHeight}`;
         if (boxMemo?.key === key) return boxMemo.box;
         const first = this.spanRects(from, Math.min(to, from + 120))[0];
         const last = this.spanRects(Math.max(from, to - 120), to).at(-1);

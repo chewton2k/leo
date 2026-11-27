@@ -50,6 +50,7 @@ document.body.classList.toggle('side-mini', side.mini || sideNarrow());
 const SIDE_LEAST_WIDTH = 220;
 const SIDE_MOST_WIDTH = 520;
 const SIDE_PAGE_ROOM = 380;
+const SPLIT_ROOM = 2 * SIDE_PAGE_ROOM;
 const sideGrip = document.createElement('div');
 sideGrip.className = 'pane-resize side-resize';
 sideGrip.tabIndex = 0;
@@ -67,7 +68,7 @@ const sideResize = window.leoPaneResize.create({
     const body = document.body;
     const chat = body.classList.contains('chat-open') && document.querySelector('.chat:not([hidden])');
     const right = Math.max(parseFloat(getComputedStyle(body).paddingRight) || 0, chat ? window.innerWidth - chat.getBoundingClientRect().left : 0);
-    return [SIDE_LEAST_WIDTH, Math.max(SIDE_LEAST_WIDTH, Math.min(SIDE_MOST_WIDTH, window.innerWidth - right - SIDE_PAGE_ROOM))];
+    return [SIDE_LEAST_WIDTH, Math.max(SIDE_LEAST_WIDTH, Math.min(SIDE_MOST_WIDTH, window.innerWidth - right - (body.classList.contains('split') ? SPLIT_ROOM : SIDE_PAGE_ROOM)))];
   },
   apply: (width) => {
     if (width === null) document.body.style.removeProperty('--explorer-w');

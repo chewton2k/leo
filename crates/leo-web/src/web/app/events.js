@@ -124,8 +124,13 @@ window.addEventListener('hashchange', async (e) => {
       return;
     }
     if (!current() || location.hash !== hash) return;
-    leaveMain();
   }
+  if (split() && !(await besideLeave(hash))) {
+    if (current() && location.hash === hash) history.replaceState(history.state, '', places.from);
+    return;
+  }
+  if (!current() || location.hash !== hash) return;
+  if (leaving) leaveMain();
   if (kanban.panel) {
     if (!await kanbanSettlePanel()) {
       if (location.hash === hash) history.replaceState(history.state, '', `#/boards/${enc(kanban.board.id)}`);
@@ -323,7 +328,7 @@ async function render() {
   drawActivity();
   try {
     if (kind === 'f') await showWorkspace(arg);
-    else if (kind === 'n') await showNote(arg.replace(/\/edit$/, ''), { fresh: prepared });
+    else if (kind === 'n') await showNote(arg.replace(/\/edit$/, ''), besideTake(arg.replace(/\/edit$/, '')) || { fresh: prepared });
     else if (kind === 'new') await newNote(arg);
     else if (kind === 'search') await showSearch(arg);
     else if (kind === 'trash') await showTrash();

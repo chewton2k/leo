@@ -61,6 +61,7 @@ pub(crate) const APP_JS: &str = concat!(
     include_str!("../web/app/calendar.js"),
     include_str!("../web/app/boards.js"),
     include_str!("../web/app/actions.js"),
+    include_str!("../web/app/beside.js"),
     include_str!("../web/app/events.js"),
     "})();\n",
 );
