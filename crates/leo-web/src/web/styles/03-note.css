@@ -238,8 +238,7 @@ textarea.set-input:focus { outline: 2px solid var(--focus); outline-offset: 1px;
 .blk.margin-room { margin-bottom: var(--margin-room, 0px); }
 .note-meta .margin-mode { font-size: var(--fs-sm); }
 #margin-status { margin-left: auto; }
-.margin-mode-wrap { position: relative; flex: none; display: flex; align-items: center; }
-.note-meta > .margin-mode-wrap { min-height: inherit; }
+.margin-mode-wrap { position: relative; flex: none; }
 .margin-instructions { margin: 0 0 16px; }
 .writeup-pending { margin: 0 0 16px; }
 .writeup-pending .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
