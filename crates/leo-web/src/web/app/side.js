@@ -542,7 +542,7 @@ async function readSideNotes(path, entry) {
     entry.loading = false;
     if (side.notes.get(path) === entry && entry.seq === seq) {
       if (!entry.quiet || entry.error) sideDrawSoon();
-      if (!path && tasksAtHome()) drawHomeToday();
+      if (path === side.root && tasksAtHome()) drawHomeToday();
     }
   }
 }
