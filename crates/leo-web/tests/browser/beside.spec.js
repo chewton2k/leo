@@ -589,3 +589,41 @@ test('closing the right pane right after scrolling keeps its saved reading place
   await besideMenu(page, b);
   await expect.poll(() => page.locator('#beside').evaluate((el) => el.scrollTop)).toBeGreaterThan(800);
 });
+
+test('leaving for another page while the right note is still loading never draws it', async ({ page }) => {
+  const [a, b] = await notes(page, 'Left.', 'Right.');
+  await open(page, a);
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  await page.route(`**/api/notes/${b.id}`, async (route) => {
+    if (route.request().method() === 'GET') await held;
+    await route.fallback();
+  });
+  await besideMenu(page, b);
+  await page.evaluate(() => { location.hash = '#/calendar'; });
+  await expect(page.locator('body')).toHaveClass(/on-calendar/);
+  release();
+  await page.waitForTimeout(500);
+  await expect(page.locator('#beside')).toBeHidden();
+  await expect(page.locator('#beside #title')).toHaveCount(0);
+  await expect(page.locator('body')).not.toHaveClass(/\bsplit\b/);
+});
+
+test('a wiki link or a related note inside the right pane opens in the right pane', async ({ page }) => {
+  const [a, b, c, d] = await notes(page, 'Left.', 'Right.', 'Third.', 'Fourth.');
+  await page.request.patch(`/api/notes/${b.id}`, { data: { body: `Right, see [[${c.title}]].` } });
+  await page.request.patch(`/api/notes/${c.id}`, { data: { body: 'Third, related below.' } });
+  await split(page, a, b);
+  await page.locator('#beside #doc a.wiki-link', { hasText: c.title }).click();
+  await expect(page.locator('#beside #title')).toHaveText(c.title);
+  await expect(page.locator('#app #title')).toHaveText(a.title);
+  expect(new URL(page.url()).hash).toBe(`#/n/${a.id}`);
+  await page.locator('#beside #related').evaluate((box, id) => {
+    box.hidden = false;
+    box.innerHTML = `<div class="related-list"><a class="list-row related-row" href="#/n/${encodeURIComponent(id)}"><span class="related-title">Fourth</span></a></div>`;
+  }, d.id);
+  await page.locator('#beside .related-row').click();
+  await expect(page.locator('#beside #title')).toHaveText(d.title);
+  await expect(page.locator('#app #title')).toHaveText(a.title);
+  expect(new URL(page.url()).hash).toBe(`#/n/${a.id}`);
+});

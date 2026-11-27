@@ -785,6 +785,7 @@ async function openTitle(title) {
     hit = hits.find((n) => n.title.trim().toLowerCase() === want);
     if (hits.length < SEARCH_STEP) break;
   }
+  if (hit && split()) return besideOpen(hit.id, here());
   go(hit ? noteHash(hit.id) : `#/search/${enc(title)}`);
 }
 

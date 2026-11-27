@@ -147,3 +147,12 @@ function besideFits() {
 }
 
 addEventListener('resize', besideFits);
+addEventListener('hashchange', () => {
+  if (!besidePane.s && document.body.classList.contains('split') && !NOTE_PAGE.test(location.hash)) besideClose();
+});
+besidePane.el.addEventListener('click', (e) => {
+  const link = e.target.closest?.('a[href^="#/n/"]');
+  if (!link || e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  e.preventDefault();
+  besideOpen(decodeURIComponent(link.getAttribute('href').slice(4)), besidePane).catch(fail);
+});
