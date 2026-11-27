@@ -2,7 +2,7 @@ const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
-const { pageCss } = require('../page-source');
+const { pageCss, paneHelpers } = require('../page-source');
 const { signIn } = require('./sign-in');
 
 const PICTURE_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAABgAAAAQCAIAAACDRijCAAAClUlEQVR4nBXSERuGMBiF4XEyicfJJB4nk3icTOKHk0k8TibxOJnE42TS7/j63h9wX+c65xVC0Al6gRIMglFgBJNgFjjBIlgFCDbBLoiCQ3AKsuAS3IIqeASvQAhJJ+klSjJIRomRTJJZ4iSLZJUg2SS7JEoOySnJkktyS6rkkbzygxSdolcoxaAYFUYxKWaFUyyKVYFiU+yKqDgUpyIrLsWtqIpH8aoP0nSaXqM0g2bUGM2kmTVOs2hWDZpNs2ui5tCcmqy5NLemah7Nqz/I0Bl6gzIMhtFgDJNhNjjDYlgNGDbDboiGw3AasuEy3IZqeAyv+SBLZ+ktyjJYRouxTJbZ4iyLZbVg2Sy7JVoOy2nJlstyW6rlsbz2gxydo3cox+AYHcYxOWaHcyyO1YFjc+yO6DgcpyM7LsftqI7H8boP8nSe3qM8g2f0GM/kmT3Os3hWD57Ns3ui5/Ccnuy5PLeneh7P6z8IOuj/yzDA+C+ECeZ/DhZY+d8GO0Q44IQMF9xQ4YH3ezUR6AJ9QAWGwBgwgSkwB1xgCawBAltgD8TAETgDOXAF7kANPIE3fFCki/QRFRkiY8REpsgccZElssZ/ki2yR2LkiJyRHLkid6RGnsgbPyjRJfqESgyJMWESU2JOuMSSWBMktsSeiIkjcSZy4krciZp4Em/6oEyX6TMqM2TGjMlMmTnjMktmzf9KtsyeiZkjc2Zy5srcmZp5Mm/+oEJX6AuqMBTGgilMhbngCkthLVDYCnshFo7CWciFq3AXauEpvOWDKl2lr6jKUBkrpjJV5oqrLJW1/rfZKnslVo7KWcmVq3JXauWpvPWDGl2jb6jG0BgbpjE15oZrLI21QWNr7I3YOBpnIzeuxt2ojafxNn6Q3Alf0XLvqwAAAABJRU5ErkJggg==', 'base64');
@@ -21,7 +21,8 @@ async function editorFixture(browser, run, { remember = false, body = null, touc
   ${related ? `const hideAskFloat = () => {};
   ${passages.slice(passages.indexOf('const KEEP_SELECTION'), passages.indexOf("document.addEventListener('keydown'"))}` : ''}
   ${remember ? `const $ = selector => document.querySelector(selector), enc = encodeURIComponent;
-    const seq = 1, citedLines = null, state = {view:'note',session:{doc:window.doc}};
+    const seq = 1, citedLines = null, app = document, session = {doc:window.doc}, state = {view:'note',session,main:session};
+    ${paneHelpers()}
     const asideOpen = () => false;
     async function api(url, options = {}) {
       if (options.method === 'PUT') localStorage.setItem('fixture-reading', JSON.stringify(options.body.anchor));

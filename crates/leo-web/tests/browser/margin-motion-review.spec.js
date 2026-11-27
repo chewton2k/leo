@@ -2,7 +2,7 @@ const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
-const { pageCss, pageHtml } = require('../page-source');
+const { pageCss, pageHtml, paneHelpers } = require('../page-source');
 
 const web = path.resolve(__dirname, '../../src/web');
 const read = (name) => fs.readFileSync(path.join(web, name), 'utf8');
@@ -41,6 +41,7 @@ async function fixture(browser, run, { width = 1280, height = 800, layout = 'rig
     ${shortcuts}
     let seq=0;
     const state={view:'note',session:null};
+    ${paneHelpers()}
     window.errors=[];
     const fail=error=>window.errors.push(error.message||String(error));
     const toast=()=>{};
@@ -77,8 +78,8 @@ async function fixture(browser, run, { width = 1280, height = 800, layout = 'rig
       app.innerHTML='<div class="note-layout"><div class="note-columns"><article class="note"><header class="note-head"><div class="note-meta">${MODE_MARKUP}<span id="margin-status" role="status" class="hint"></span></div><h1 id="title">Test</h1></header><div class="prose doc" id="doc"></div></article></div></div>'.replace(/\\{\\{(\\w+)\\}\\}/g,(m,k)=>ICON[k]);
       const s={note:{id:'n1',version:'v1',title:'Test'},title:$('#title'),edit:{}};
       s.doc=leoDoc.mount($('#doc'),{source:${JSON.stringify(source)},onChange(){},placeholder:''});
-      state.session=s;window.session=s;
-      await marginMount(s,seq);
+      state.main=state.session=s;window.session=s;
+      await marginMount(s,()=>true);
     };
     window.rectsOf=id=>{const t=marginPage.threads.find(x=>x.id===id);const at=leoMargin.find(session.doc.source(),t);return session.doc.spanRects(at.from,at.to).map(r=>({left:r.left,right:r.right,top:r.top,bottom:r.bottom}));};
     window.arrive=thread=>{marginPage.threads.push(thread);marginPage.arriving.add(thread.id);marginRedraw();};

@@ -2,7 +2,7 @@ const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
-const { pageCss } = require('../page-source');
+const { pageCss, paneHelpers } = require('../page-source');
 
 const at = (d, h, m = 0) => new Date(2026, 10, d, h, m).toISOString();
 
@@ -43,6 +43,7 @@ async function calendarFixture(browser, run, { width = 1360, height = 900, view 
     ${icons}
     class Locked extends Error {}
     let seq=0,state={view:null};
+    ${paneHelpers()}
     const chrome=()=>{}, stillMotion=()=>true, rel=()=>'just now', noteHash=id=>'#/n/'+id;
     var tasksWin={revision:0,tasks:null};const TASKS_PAGE=500;
     const drawTasksWindow=()=>{}, loadTasksWindow=async()=>{}, finishTaskInWindow=()=>{};
