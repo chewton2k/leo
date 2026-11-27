@@ -165,6 +165,17 @@ test('tasks and events land on their days; overdue and undated are grouped; a li
   assert.equal(p.byDay.get('2026-10-17'), undefined, 'an all-day end date is exclusive');
 });
 
+test('only timed tasks and events that are not free, declined or all-day are busy', () => {
+  const event = (extra) => ({ type: 'event', event: { all_day: false, ...extra } });
+  assert.equal(S.busy(event({})), true);
+  assert.equal(S.busy(event({ reply: 'tentative' })), true);
+  assert.equal(S.busy(event({ reply: 'declined' })), false);
+  assert.equal(S.busy(event({ free: true })), false);
+  assert.equal(S.busy(event({ all_day: true })), false);
+  assert.equal(S.busy({ type: 'task', task: { time: '09:00:00' } }), true);
+  assert.equal(S.busy({ type: 'task', task: { time: null } }), false);
+});
+
 test('quick dates are today, tomorrow, the coming Friday and next Monday', () => {
   const thursday = new Date(2026, 9, 15);
   assert.deepEqual(S.quickDates(thursday).map((q) => q.key), ['2026-10-15', '2026-10-16', '2026-10-16', '2026-10-19']);

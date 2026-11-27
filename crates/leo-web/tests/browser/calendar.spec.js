@@ -1256,3 +1256,29 @@ test('a press interrupted by the window, a cancel, another pointer or a release 
     expect(await stuck()).toBe(false);
   });
 });
+
+test('a declined event is drawn muted and says so in its peek, and a free one is dashed', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    await page.evaluate(() => {
+      const at = (d, h) => new Date(2026, 10, d, h).toISOString();
+      window.db.events.push(
+        { id: 'e-declined', title: 'Budget review', start: at(6, 15), end: at(6, 16), all_day: false, calendar: 'Work', context: '', reply: 'declined' },
+        { id: 'e-free', title: 'Focus block', start: at(6, 9), end: at(6, 10), all_day: false, calendar: 'Work', context: '', free: true }
+      );
+    });
+    await page.evaluate(() => loadSchedule());
+    const declined = page.locator('.cal-item[data-id="e-declined"]');
+    await expect(declined).toHaveClass(/declined/);
+    await expect(page.locator('.cal-item[data-id="e-free"]')).toHaveClass(/free/);
+    await expect(page.locator('.cal-item[data-id="e-lecture"]')).not.toHaveClass(/declined|free/);
+    expect(await declined.locator('.cal-title').evaluate(el => getComputedStyle(el).textDecorationLine)).toBe('line-through');
+    await declined.click({ button: 'right' });
+    expect(await page.locator('.popup-menu [role^="menuitem"]').allTextContents()).toEqual(['Details']);
+    await page.keyboard.press('Escape');
+    await declined.click();
+    await expect(page.locator('#cal-side.peek')).toContainText('You declined');
+    await expect(page.locator('#cal-side.peek')).not.toContainText('Record this');
+    await page.locator('.cal-item[data-id="e-free"]').click();
+    await expect(page.locator('#cal-side.peek')).toContainText('Shown as free');
+  });
+});

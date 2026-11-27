@@ -292,8 +292,9 @@ function calChip(item, day, { style = '', sub = '', extra = '', tall = false, in
   const task = item.type === 'task' ? item.task : null;
   const kind = task ? 'task' : 'event';
   const done = task && task.done ? ' done' : '';
+  const mark = task ? '' : item.event.reply === 'declined' ? ' declined' : item.event.free ? ' free' : '';
   const peeked = cal.peek && cal.peek.id === (task ? task.id : item.event.id) && (!task || !task.on || cal.peek.on === task.on) ? ' peeked' : '';
-  return `<div class="cal-item ${kind}${done}${peeked}${tall ? ' tall' : ''}${inline ? ' inline' : ''}" ${calAttrs(item, day)} style="--tone: var(${calTone(item)});${style}">
+  return `<div class="cal-item ${kind}${done}${mark}${peeked}${tall ? ' tall' : ''}${inline ? ' inline' : ''}" ${calAttrs(item, day)} style="--tone: var(${calTone(item)});${style}">
     ${task ? calCheck(task) : ''}
     <button type="button" class="cal-open" data-action="cal-open" ${task ? `data-kind="task" data-id="${esc(task.id)}"${task.on ? ` data-on="${esc(task.on)}"` : ''}` : `data-kind="event" data-id="${esc(item.event.id)}"`} title="${esc(calLabel(item))}${sub ? ` · ${esc(sub)}` : ''}"><span class="cal-title">${esc(calLabel(item))}</span>${sub ? `<span class="cal-sub">${esc(sub)}</span>` : ''}</button>${extra}
   </div>`;
@@ -1012,7 +1013,7 @@ function calMenu(target, point = null) {
     const { id, kind, on = null } = item.dataset;
     const event = kind === 'event' && ((cal.data && cal.data.events) || []).find((e) => e.id === id);
     const task = kind === 'task' && calFind(id);
-    if (event) rows = [{ text: 'Details', icon: ICON.note, run: () => calOpenPeek('event', id) }, ...(!event.all_day && new Date(event.end) > Date.now() ? [{ text: 'Record this event', icon: ICON.mic, run: () => go(recordHref(event)) }] : [])];
+    if (event) rows = [{ text: 'Details', icon: ICON.note, run: () => calOpenPeek('event', id) }, ...(!event.all_day && event.reply !== 'declined' && new Date(event.end) > Date.now() ? [{ text: 'Record this event', icon: ICON.mic, run: () => go(recordHref(event)) }] : [])];
     else if (task) {
       const done = taskDoneOn(task, on);
       rows = [{ text: 'Open', icon: ICON.note, run: () => calOpenPeek('task', id, on) }, { text: done ? 'Mark not done' : 'Mark done', icon: ICON.check, run: () => setTaskDone(id, !done, on) }, { line: true }, { text: 'Delete task', icon: ICON.trash, danger: true, run: () => deleteTask(id) }];
@@ -1155,7 +1156,9 @@ function eventDetailsHtml(event) {
   const about = S.eventDetails(event.context);
   const where = event.location || about.place;
   const linked = (text) => (/^https?:\/\/\S+$/i.test(text) ? `<a href="${esc(text)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>` : esc(text));
+  const status = event.reply === 'declined' ? 'You declined' : event.reply === 'tentative' ? 'Tentative' : event.free ? 'Shown as free' : '';
   return `<div class="set-row"><span class="set-label">When</span><span class="set-value">${esc(when)}</span></div>
+    ${status ? `<div class="set-row"><span class="set-label">Status</span><span class="set-value">${status}</span></div>` : ''}
     ${where ? `<div class="set-row"><span class="set-label">Where</span><span class="set-value sched-wrap">${linked(where)}</span></div>` : ''}
     <div class="set-row"><span class="set-label">Calendar</span><span class="set-value">${esc(event.calendar || 'Google')}</span></div>
     ${about.organiser ? `<div class="set-row"><span class="set-label">Organiser</span><span class="set-value sched-wrap">${esc(about.organiser)}</span></div>` : ''}
@@ -1180,7 +1183,7 @@ function calPeekEvent(side, id) {
   side.style.setProperty('--tone', `var(${toneOfEvent(event)})`);
   side.innerHTML = `${calPeekBar(event.calendar || 'Google Calendar')}<h2 class="cal-peek-title">${esc(event.title)}</h2>${eventDetailsHtml(event)}
     <p class="hint">Events from your calendar link are read-only here.</p>
-    ${calEventSoon(event) ? '<div class="buttons"><button type="button" class="btn primary" data-action="record">Record this meeting</button></div>' : ''}`;
+    ${calEventSoon(event) && event.reply !== 'declined' ? '<div class="buttons"><button type="button" class="btn primary" data-action="record">Record this meeting</button></div>' : ''}`;
 }
 
 function calPeekTask(side, id, on) {

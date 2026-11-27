@@ -585,7 +585,7 @@ fn starting(
         .into_iter()
         .map(|(_, _, e)| e)
         .filter(|e| {
-            !e.all_day
+            e.busy()
                 && e.start - Duration::minutes(OFFER_BEFORE_MINUTES) <= now
                 && now < e.start + Duration::minutes(OFFER_AFTER_MINUTES)
         })
@@ -1295,6 +1295,31 @@ pub(crate) mod tests {
             seen(&with("DESCRIPTION:Join http://zoom.example.com/j/1")),
             [true]
         );
+    }
+
+    #[test]
+    fn a_declined_or_free_event_is_not_offered() {
+        let (_dir, notes) = linked(None);
+        let now = at("2026-10-30T16:00:00Z");
+        let seen = |line: &str| {
+            db_for(&notes)
+                .with(|c| c.execute("DELETE FROM calendar_prompted", []))
+                .unwrap();
+            let text = MEETINGS
+                .replace(
+                    "BEGIN:VCALENDAR\n",
+                    "BEGIN:VCALENDAR\nX-WR-CALNAME:me@example.com\n",
+                )
+                .replace(
+                    "SUMMARY:Design sync",
+                    &format!("SUMMARY:Design sync\n{line}"),
+                );
+            keep_bytes(&notes, "work", text.as_bytes()).unwrap();
+            starting(&notes, &Calendar::default(), false, now).len()
+        };
+        assert_eq!(seen("ATTENDEE;PARTSTAT=TENTATIVE:mailto:me@example.com"), 1);
+        assert_eq!(seen("ATTENDEE;PARTSTAT=DECLINED:mailto:me@example.com"), 0);
+        assert_eq!(seen("TRANSP:TRANSPARENT"), 0);
     }
 
     fn asked(notes: &Path, live: bool, now: DateTime<Utc>) -> Vec<(String, DateTime<Utc>)> {

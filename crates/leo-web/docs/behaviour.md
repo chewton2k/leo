@@ -1443,6 +1443,9 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
   (times and ETag / Last-Modified in leo.db); `ics::read_from` expands repeats, EXDATE and
   moved instances, all-day items are dates. GET `/api/schedule?from&to&live`
   (≤43 days); the page refreshes every 2.5 min while visible.
+  An event you declined is drawn muted with a struck title, is never offered for
+  recording and has no Record button; one the feed shows as free has a dashed edge, and
+  its peek says "You declined", "Tentative" or "Shown as free" (2026-11-27, the user's call).
   Pasting a link that passes `calendarAddressError` into Settings → Calendar connects it at once
   (`addCalendar`, one request while Connect is checking). A Google share link (`?cid=`) is refused as
   before, with a link to that calendar's own settings page where its secret address is

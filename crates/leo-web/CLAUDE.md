@@ -1259,6 +1259,13 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   the full parsed values. The repeat-rule guards stay. leo.db `calendar_feeds` keeps the times, ETag and Last-Modified (a missing file means an
   unconditional fetch); an old stored `body` is moved to a file on first read.
   GET `/api/schedule?from&to&live` (≤43 days).
+- Busy and RSVP (2026-11-27, the user's call): `ics` reads `TRANSP:TRANSPARENT`
+  as `Event.free` and, when the feed's `X-WR-CALNAME` is an email address (it must
+  come before the events, as the format requires), that address's `PARTSTAT` as
+  `Event.reply` (`declined`, `tentative`, `accepted`; an unknown owner leaves it empty,
+  never guessed). `Event::busy()` (not all-day, not free, not declined) gates
+  `calendar::starting`; `schedule.busy(item)` is its page twin. Declined events are
+  drawn muted and get no Record button; free ones get a dashed edge.
 - Offer to record: `calendar::offer_to_record`, a 60 s task (only with
   `Powers.app_settings`) over cached expansions after `catch_up` (same `Busy`
   guard): a timed event once when start−2 min ≤ now < start+10 min and nothing
