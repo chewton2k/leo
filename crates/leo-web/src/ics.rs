@@ -37,6 +37,10 @@ impl Event {
     pub fn busy(&self) -> bool {
         !self.all_day && !self.free && self.reply != "declined"
     }
+
+    pub fn series(&self) -> &str {
+        self.id.rsplit_once('@').map_or(&self.id, |(uid, _)| uid)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -825,6 +829,16 @@ END:VCALENDAR\r
         read(text, at("2026-11-01T00:00:00Z"), at("2026-11-02T00:00:00Z"))
             .events
             .remove(0)
+    }
+
+    #[test]
+    fn a_series_is_the_uid_before_the_last_at_sign() {
+        let mut event = first(&feed("", ""));
+        assert_eq!(event.series(), "e");
+        event.id = "abc@example.com@1793000000".into();
+        assert_eq!(event.series(), "abc@example.com");
+        event.id = "plain".into();
+        assert_eq!(event.series(), "plain");
     }
 
     #[test]

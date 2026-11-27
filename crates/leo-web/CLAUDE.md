@@ -1266,6 +1266,13 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   never guessed). `Event::busy()` (not all-day, not free, not declined) gates
   `calendar::starting`; `schedule.busy(item)` is its page twin. Declined events are
   drawn muted and get no Record button; free ones get a dashed edge.
+- Prep from last time (2026-11-27, the user's call): events carry `series` (`Event::series()`,
+  the id before its last `@`) in `/api/calendar` and `/api/schedule`. The Record page sends it
+  as `profile.event`; `record::run` writes it as front matter `event:` on a note a recording
+  creates, never on an append or an existing note. `GET /api/calendar/last?event&not` answers
+  the newest live note with that `event` (`{id, title, updated_at, open, open_total}`, `open` the
+  first 8 unchecked `- [ ]` / `* [ ]` lines) or 204. The Record page's chip and the event peek
+  show it as "Last time" (`lastTime`, `lastTimeHtml` in `app/core.js`); late answers are ignored.
 - Offer to record: `calendar::offer_to_record`, a 60 s task (only with
   `Powers.app_settings`) over cached expansions after `catch_up` (same `Busy`
   guard): a timed event once when start−lead ≤ now < start+10 min and nothing

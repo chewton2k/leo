@@ -124,6 +124,9 @@
 .rec-check .btn { flex: none; margin: 0; text-decoration: none; }
 .rec-card .set-note { margin: 0 0 10px; }
 .rec-event-note { margin: -2px 4px 0; }
+.last-time { margin: 0 4px; }
+.last-time p { margin: 0 0 4px; }
+.last-time a { color: var(--accent); }
 .rec-recover-item { display: flex; align-items: center; gap: 8px; }
 .rec-recover-item .rec-recover-row { flex: 1; min-width: 0; }
 .rec-recover-row { display: flex; align-items: center; gap: 12px; padding: 12px 0 4px; color: var(--text); }

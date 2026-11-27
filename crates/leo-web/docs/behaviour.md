@@ -1465,6 +1465,11 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
   location or description. The 60 s tick first refreshes a stale cached feed
   (`catch_up`, under the same `Busy` guard as the routes), so a leo left
   running offers current meetings.
+- Prep from last time (2026-11-27, the user's call): a recording made for a calendar event
+  gives its note `event:` front matter (the event's series, shared by every repeat of it).
+  Choosing that event on Record, and opening it in the calendar, show "Last time": the
+  newest earlier note of the series as a link, with up to 8 of its unchecked tasks drawn as
+  read-only boxes (the peek says "N open"). Nothing shows when there is no earlier note.
 - Task reminders (2026-11-27): "Remind me about tasks with a time" (`tasks_remind` in
   calendars.json, absent = on; PATCH `/api/calendar {tasks_remind}`, with `lead`) makes the
   same tick call `AppApi::notify(Reminder {title, body, route})` once per not-done timed task

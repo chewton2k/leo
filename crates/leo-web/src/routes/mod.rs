@@ -83,6 +83,7 @@ pub(crate) fn router(state: AppState) -> Router {
                 .patch(crate::calendar::change),
         )
         .route("/api/calendar/refresh", post(crate::calendar::refresh_now))
+        .route("/api/calendar/last", get(crate::calendar::last))
         .route(
             "/api/calendar/{id}",
             axum::routing::delete(crate::calendar::remove),

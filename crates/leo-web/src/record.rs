@@ -659,6 +659,7 @@ fn run(
         }
     }
     let recovering = listening.recover.is_some();
+    let event = listening.profile.event.clone();
     let recordings = Arc::clone(&state.recording);
     let _guard = RunGuard {
         recordings: Arc::clone(&recordings),
@@ -788,6 +789,11 @@ fn run(
                 note = id;
             }
             store.find_note_mut(&note);
+        }
+        if !event.is_empty() {
+            if let Some(created) = store.find_note_mut(&note) {
+                created.extra.insert("event".into(), event.into());
+            }
         }
         set_unopened(&chats, &note, true);
         save(store)?;

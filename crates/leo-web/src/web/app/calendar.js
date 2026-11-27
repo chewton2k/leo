@@ -1216,7 +1216,11 @@ function calPeekEvent(side, id) {
   side.style.setProperty('--tone', `var(${toneOfEvent(event)})`);
   side.innerHTML = `${calPeekBar(event.calendar || 'Google Calendar')}<h2 class="cal-peek-title">${esc(event.title)}</h2>${eventDetailsHtml(event)}
     <p class="hint">Events from your calendar link are read-only here.</p>
-    ${calEventSoon(event) && event.reply !== 'declined' ? '<div class="buttons"><button type="button" class="btn primary" data-action="record">Record this meeting</button></div>' : ''}`;
+    ${calEventSoon(event) && event.reply !== 'declined' ? '<div class="buttons"><button type="button" class="btn primary" data-action="record">Record this meeting</button></div>' : ''}<div id="cal-peek-last"></div>`;
+  lastTime(event.series).then((last) => {
+    const slot = cal.peek && cal.peek.id === id && $('#cal-peek-last', side);
+    if (slot && last) slot.innerHTML = lastTimeHtml(last, true);
+  });
 }
 
 function calPeekTask(side, id, on) {

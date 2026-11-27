@@ -564,16 +564,23 @@ fn calendars_json(notes: &Path, linking: &Linking) -> Vec<serde_json::Value> {
         .collect()
 }
 
+fn shown(event: &Event) -> serde_json::Value {
+    let mut value = serde_json::json!(event);
+    value["series"] = serde_json::json!(event.series());
+    value
+}
+
 fn status(notes: &Path, calendar: &Calendar, busy: bool, now: DateTime<Utc>) -> serde_json::Value {
     let linking: Linking = read(&settings_path(notes));
     let hour = DateTime::from_timestamp(now.timestamp().div_euclid(3600) * 3600, 0).unwrap_or(now);
     let from = hour - Duration::hours(LOOK_BACK_HOURS);
     let to = hour + Duration::days(LOOK_AHEAD_DAYS) + Duration::hours(1);
-    let events: Vec<Event> = calendar
+    let events: Vec<serde_json::Value> = calendar
         .events(notes, from, to)
         .into_iter()
         .map(|(_, _, e)| e)
         .filter(|e| !e.all_day && e.end >= now - Duration::minutes(30))
+        .map(|e| shown(&e))
         .collect();
     serde_json::json!({
         "connected": !linking.calendars.is_empty(),
@@ -796,6 +803,58 @@ pub(crate) async fn get(State(state): State<AppState>) -> Response {
             StatusCode::INTERNAL_SERVER_ERROR,
             "The calendars could not be read.",
         ),
+    }
+}
+
+#[derive(Deserialize)]
+pub(crate) struct Last {
+    event: String,
+    #[serde(default)]
+    not: Option<String>,
+}
+
+const LAST_OPEN_SHOWN: usize = 8;
+
+fn open_items(body: &str) -> Vec<&str> {
+    body.lines()
+        .filter_map(|line| {
+            let rest = line.trim_start();
+            let rest = rest.strip_prefix(['-', '*'])?.trim_start();
+            let text = rest.strip_prefix("[ ]")?;
+            let text = text.strip_prefix(char::is_whitespace)?.trim();
+            (!text.is_empty()).then_some(text)
+        })
+        .collect()
+}
+
+pub(crate) async fn last(State(state): State<AppState>, Query(asked): Query<Last>) -> Response {
+    let found = state
+        .read_store(move |store| {
+            Ok(store
+                .notes
+                .iter()
+                .filter(|n| {
+                    !asked.event.is_empty()
+                        && asked.not.as_deref() != Some(n.id.as_str())
+                        && n.extra.get("event").and_then(|v| v.as_str()) == Some(&asked.event)
+                })
+                .max_by_key(|n| n.updated_at)
+                .map(|n| {
+                    let open = open_items(&n.body);
+                    serde_json::json!({
+                        "id": n.id,
+                        "title": n.title,
+                        "updated_at": n.updated_at,
+                        "open": open.iter().take(LAST_OPEN_SHOWN).collect::<Vec<_>>(),
+                        "open_total": open.len(),
+                    })
+                }))
+        })
+        .await;
+    match found {
+        Ok(Some(value)) => Json(value).into_response(),
+        Ok(None) => StatusCode::NO_CONTENT.into_response(),
+        Err(code) => code.into_response(),
     }
 }
 
@@ -1109,7 +1168,7 @@ pub(crate) async fn schedule(
                         .find(|t| t.id.starts_with(m))
                         .map(|t| t.id.clone())
                 });
-                let mut value = serde_json::json!(event);
+                let mut value = shown(&event);
                 value["id"] = serde_json::json!(format!("{feed}:{}", event.id));
                 value["feed"] = serde_json::json!(feed);
                 value["calendar"] = serde_json::json!(name);
