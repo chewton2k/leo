@@ -111,10 +111,10 @@ function reopenLastPlace() {
 
 window.addEventListener('hashchange', async (e) => {
   const request = ++navigationRequest;
-  const leaving = state.session;
+  const leaving = panes[0].s;
   const mine = seq;
   const hash = location.hash;
-  const current = () => request === navigationRequest && mine === seq && state.session === leaving;
+  const current = () => request === navigationRequest && mine === seq && panes[0].s === leaving;
   if (leaving) {
     leaving.doc.stop();
     try { await flush(leaving); }
@@ -124,8 +124,7 @@ window.addEventListener('hashchange', async (e) => {
       return;
     }
     if (!current() || location.hash !== hash) return;
-    leaving.doc.destroy();
-    state.session = null;
+    leaveMain();
   }
   if (kanban.panel) {
     if (!await kanbanSettlePanel()) {
@@ -134,13 +133,13 @@ window.addEventListener('hashchange', async (e) => {
     }
     if (request !== navigationRequest || location.hash !== hash) return;
   }
-  marginLeave();
+  withPane(panes[0], marginLeave);
   route(true);
 });
 
 const busy = () => {
   const active = document.activeElement;
-  return unsaved() || Boolean(active && active !== document.body && app.contains(active));
+  return unsaved() || Boolean(active && active !== document.body && here().el.contains(active));
 };
 
 document.addEventListener('visibilitychange', () => {
@@ -151,19 +150,23 @@ document.addEventListener('visibilitychange', () => {
   }
   if (!['workspace', 'note', 'search', 'trash'].includes(state.view)) return;
   if (state.view === 'note') {
-    if (busy() || !state.session?.note.id) return;
-    const s = state.session;
-    const shown = JSON.stringify(s.note);
-    api(`/api/notes/${enc(s.note.id)}`)
-      .then((note) => {
-        if (state.session !== s || busy()) return;
-        if (JSON.stringify(note) !== shown) return render();
-        loadSideFolders();
-        marginLoad(s, () => state.session === s).catch(fail);
-      }, () => {
-        if (state.session === s) return render();
-      })
-      .catch(fail);
+    if (busy()) return;
+    for (const p of panes) {
+      const s = p.s;
+      if (!s?.note.id) continue;
+      const shown = JSON.stringify(s.note);
+      const again = () => (p === panes[0] ? render() : showNote(s.note.id, { pane: p }));
+      api(`/api/notes/${enc(s.note.id)}`)
+        .then((note) => {
+          if (p.s !== s || busy()) return;
+          if (JSON.stringify(note) !== shown) return again();
+          if (p === panes[0]) loadSideFolders();
+          withPane(p, () => marginLoad(s, () => p.s === s)).catch(fail);
+        }, () => {
+          if (p.s === s) return again();
+        })
+        .catch(fail);
+    }
     return;
   }
   render().catch(fail);
@@ -333,7 +336,7 @@ async function render() {
     rememberPlace();
     loadSideFolders();
     $('#route-say').textContent = document.title;
-    if (prepared && state.session?.note.id === prepared.id) state.session.doc.editStart();
+    if (prepared && panes[0].s?.note.id === prepared.id) panes[0].s.doc.editStart();
   } catch (e) {
     if (generation !== renderGeneration || (hash !== decodeURI(location.hash || '#/') && !(kind === 'f' && location.hash === '#/'))) return;
     if (e.status === 404 && hash.startsWith('#/n/')) {

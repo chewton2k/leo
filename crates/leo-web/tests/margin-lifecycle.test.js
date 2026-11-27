@@ -1031,7 +1031,7 @@ function foldHarness(...threads) {
   h.context.MutationObserver = h.context.window.MutationObserver = class { constructor(fn) { watch.fn = fn; } observe(el, options) { watch.watched = options; } disconnect() { watch.ended = true; } };
   h.context.marginLayout = () => 'both';
   h.context.document.createElement = () => ({ setAttribute() {}, addEventListener() {}, firstChild: {}, parentElement: columns });
-  h.context.marginMount({ note: {}, doc: { source: () => '' } }, 0);
+  h.context.marginMount({ note: {}, doc: { source: () => '' } }, () => true);
   const block = {
     animate: () => { const r = run(); runs.push(r); return r; },
     style: { setProperty() {} }, classList: { add() {} }, getBoundingClientRect: () => ({ bottom: 0 }),

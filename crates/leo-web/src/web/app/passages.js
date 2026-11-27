@@ -223,8 +223,8 @@ function addSheet({ text }) {
   drawWhere();
 }
 
-async function drawRelated(id, mine, limit = 4) {
-  const box = $('#related');
+async function drawRelated(id, current, p = here(), limit = 4) {
+  const box = inPane('#related', p);
   if (!box || !id) return;
   let found;
   try {
@@ -232,7 +232,7 @@ async function drawRelated(id, mine, limit = 4) {
   } catch (e) {
     return;
   }
-  if (mine !== seq || !box.isConnected) return;
+  if (!current() || !box.isConnected) return;
   const notes = (found && found.notes) || [];
   if (!notes.length) {
     box.hidden = true;
@@ -243,7 +243,7 @@ async function drawRelated(id, mine, limit = 4) {
   const rows = notes.map((n) => `<a class="list-row related-row" href="${noteHash(n.id)}">${ICON.note}<span class="grow"><span class="related-title">${esc(n.title || 'Untitled')}</span>${n.why ? `<span class="sub">${esc(n.why)}</span>` : ''}</span></a>`).join('');
   box.innerHTML = `<h2 class="related-head">Related notes</h2><div class="related-list">${rows}</div>${found.more ? '<button type="button" class="btn plain sm related-more">More</button>' : ''}`;
   const more = box.querySelector('.related-more');
-  if (more) more.addEventListener('click', () => drawRelated(id, mine, 20));
+  if (more) more.addEventListener('click', () => drawRelated(id, current, p, 20));
 }
 
 const reading = { id: null, timer: 0, user: false, quietUntil: 0 };

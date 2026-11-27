@@ -79,12 +79,11 @@ const chat = felix.create({
   drawings: DRAWN,
   onOpen: (id, lines) => {
     citedLines = lines ? { id, ...lines } : null;
-    if (state.view === 'note' && state.session && state.session.note.id === id) showCitedLines();
+    if (paneWith(id)) showCitedLines();
     else go(noteHash(id));
   },
   onCite: (id, lines) => {
-    const open = state.view === 'note' ? state.session : null;
-    if (open && open.doc) open.doc.glow(...(id && lines && open.note.id === id ? [lines.from, lines.to] : []));
+    for (const { s: open } of panes) if (open && open.doc) open.doc.glow(...(id && lines && open.note.id === id ? [lines.from, lines.to] : []));
   },
   onOriginal: (note, name, at) => showPassage(note, name, at).catch(fail),
   prepare: async (file) => {
@@ -94,15 +93,15 @@ const chat = felix.create({
   notify: (message) => toast(message, { bad: true }),
   onLocked: () => showLocked(),
   onUndone: (note, removed) => {
-    const open = state.view === 'note' && state.session && state.session.note.id === note.id;
+    const open = paneWith(note.id);
     if (open && removed) go(folderHash(state.dir || ''), { replace: true });
-    else if (open && !saving.unsaved()) showNote(note.id);
+    else if (open && !saving.unsaved()) showNote(note.id, { pane: open });
     else showLatest().catch(() => {});
     toast(removed ? `Moved “${note.title}” to the trash` : `Undid the change to “${note.title}”`);
   },
   onChanged: (note) => {
-    const open = state.view === 'note' && state.session && state.session.note.id === note.id;
-    if (open && !saving.unsaved()) showNote(note.id);
+    const open = paneWith(note.id);
+    if (open && !saving.unsaved()) showNote(note.id, { pane: open });
     if (tasksAtHome()) loadHomeRecent();
     toast(open && saving.unsaved() ? 'Felix changed this note while you were typing; reopen it to see the change.' : `Changed “${note.title}”`, { action: 'Open', run: () => go(noteHash(note.id)) });
   },
@@ -111,7 +110,8 @@ const chat = felix.create({
     const made = proposal.state === 'applied' && FELIX_MAKES[proposal.kind];
     if (made && proposal.undo?.[made]) inkLand(proposal.undo[made], true);
     if (MARGIN_KINDS.includes(proposal.kind)) {
-      if (state.view === 'note' && state.session && state.session.note.id === proposal.note) marginLoad(state.session).catch(fail);
+      const open = paneWith(proposal.note);
+      if (open) withPane(open, () => marginLoad(open.s)).catch(fail);
       return;
     }
     if (BOARD_KINDS.includes(proposal.kind)) {
@@ -120,9 +120,10 @@ const chat = felix.create({
     }
     if (state.view === 'calendar') loadSchedule(seq);
     loadTasksWindow().catch(() => {});
-    if (state.view === 'note' && state.session && state.session.note.id && !saving.unsaved()) {
+    const open = panes.filter((p) => p.s && p.s.note.id);
+    if (open.length && !saving.unsaved()) {
       loadSideFolders().catch(() => {});
-      showNote(state.session.note.id).catch(() => go(folderHash(state.dir || ''), { replace: true }));
+      for (const p of open) showNote(p.s.note.id, { pane: p }).catch(() => go(folderHash(state.dir || ''), { replace: true }));
     } else showLatest().catch(() => {});
   },
   onAdd: (picked) => {
@@ -630,9 +631,9 @@ function showSaveFailure(s, error, retry, current) {
 
 async function go(hash, { replace = false, search = null, note = null, isCurrent = null, kept = null } = {}) {
   const request = ++navigationRequest;
-  const leaving = state.session;
+  const leaving = panes[0].s;
   const mine = seq;
-  const current = () => request === navigationRequest && mine === seq && state.session === leaving && (!isCurrent || isCurrent());
+  const current = () => request === navigationRequest && mine === seq && panes[0].s === leaving && (!isCurrent || isCurrent());
   if (leaving) {
     leaving.doc.stop();
     if (!(kept === leaving && leaving.persisted)) {
@@ -645,21 +646,18 @@ async function go(hash, { replace = false, search = null, note = null, isCurrent
     if (!current()) return;
   }
   if (!current()) return;
-  if (leaving) {
-    leaving.doc.destroy();
-    state.session = null;
-  }
+  if (leaving) leaveMain();
   openingNote = note;
   clearSearchHighlight();
   const query = search ?? (state.view === 'search' ? state.query : null);
   searchPassage = query && hash.startsWith('#/n/') ? { hash, query } : null;
   if (location.hash === hash) {
-    marginLeave();
+    withPane(panes[0], marginLeave);
     return route();
   }
   if (replace) {
     history.replaceState(history.state, '', hash);
-    marginLeave();
+    withPane(panes[0], marginLeave);
     route();
   } else {
     location.hash = hash;
@@ -719,7 +717,7 @@ async function showWorkspace(dir = null) {
     else revealFolder(dir);
     history.replaceState(history.state, '', '#/');
   }
-  if (state.session?.doc) state.session.doc.destroy();
+  if (panes[0].s?.doc) panes[0].s.doc.destroy();
   state = { view: 'workspace', dir: '' };
   document.body.classList.remove('on-note');
   chrome();
@@ -811,13 +809,14 @@ const cleanTitle = (text) => text.replace(/\s*\n\s*/g, ' ').trim();
 
 const SAVE_INK = { 'Editing…': 'wet', 'Saving…': 'wet', Saved: 'dry' };
 function mark(s, text) {
-  if (state.session !== s) return;
-  const el = $('#save-state');
+  const p = paneOf(s);
+  if (!p) return;
+  const el = inPane('#save-state', p);
   if (!el) return;
   const ink = SAVE_INK[text];
   el.className = ink ? `save-${ink}` : '';
   el.innerHTML = ink ? `<svg class="save-drop" aria-hidden="true"><use href="#leo-mark"/></svg><span class="said">${esc(text)}</span>` : esc(text);
-  const edited = $('#note-edited');
+  const edited = inPane('#note-edited', p);
   if (!edited) return;
   edited.hidden = /^Not saved/.test(text);
   if (text === 'Saved') edited.textContent = `Edited ${rel(new Date().toISOString())}`;
@@ -837,14 +836,12 @@ const saving = window.leoSaving.create({
     }), 0);
   },
   created: (s, note) => {
-    if (state.session === s) history.replaceState(history.state, '', noteHash(note.id));
+    if (panes[0].s === s) history.replaceState(history.state, '', noteHash(note.id));
     marginCreated(s, note).catch(fail);
   },
   conflict: (s, note) => {
-    if (state.session === s) {
-      history.replaceState(history.state, '', noteHash(note.id));
-      s.title.textContent = s.edit.title;
-    }
+    if (panes[0].s === s) history.replaceState(history.state, '', noteHash(note.id));
+    if (paneOf(s)) s.title.textContent = s.edit.title;
     toast('This note changed elsewhere. Your edits were kept in a separate copy.', { action: 'Open copy', run: () => go(noteHash(note.id)) });
   },
   retryable: (error) => error instanceof Offline || error.status >= 500,
@@ -867,8 +864,9 @@ let citedLines = null;
 function showCitedLines() {
   const want = citedLines;
   citedLines = null;
-  if (!want || !state.session || !state.session.doc) return;
-  if (!state.session.doc.highlight(want.from, want.to)) toast('Those lines have changed since Felix read the note.');
+  const s = want && paneWith(want.id)?.s;
+  if (!s || !s.doc) return;
+  if (!s.doc.highlight(want.from, want.to)) toast('Those lines have changed since Felix read the note.');
 }
 
 async function showPassage(note, name, at) {
@@ -891,45 +889,52 @@ function readLine(text) {
 
 const MARGIN_INSTRUCTIONS_READS = 500;
 
-let readTimer = 0;
-let readWanted = 0;
-function readSoon(text) {
-  const line = $('#note-read');
-  const mine = ++readWanted;
-  clearTimeout(readTimer);
-  readTimer = setTimeout(() => marginIdle(() => {
-    if (line && mine === readWanted) line.textContent = readLine(text());
+function readSoon(s, text) {
+  const p = paneOf(s);
+  const line = p && inPane('#note-read', p);
+  const mine = s.readWanted = (s.readWanted || 0) + 1;
+  clearTimeout(s.readTimer);
+  s.readTimer = setTimeout(() => marginIdle(() => {
+    if (line && mine === s.readWanted) line.textContent = readLine(text());
   }), 300);
 }
 
-async function showNote(id, { fresh = null, draft = null } = {}) {
-  const passage = searchPassage?.hash === noteHash(id) ? searchPassage : null;
-  searchPassage = null;
-  clearSearchHighlight();
-  const mine = ++seq;
+async function showNote(id, { fresh = null, draft = null, pane = panes[0] } = {}) {
+  const main = pane === panes[0];
+  const passage = main && searchPassage?.hash === noteHash(id) ? searchPassage : null;
+  if (main) {
+    searchPassage = null;
+    clearSearchHighlight();
+  }
+  const mine = main ? ++seq : (pane.seq = (pane.seq || 0) + 1);
+  const current = () => mine === (main ? seq : pane.seq);
   const note = fresh || (await api(`/api/notes/${enc(id)}`));
   await marginLoadPrefs();
   await saving.ready;
-  if (mine !== seq) return;
+  if (!current()) return;
   if (note.unopened) {
     delete note.unopened;
     noteOpened(note.id);
   }
-  const held = note.id && state.view === 'note' && state.session && state.session.note.id === note.id ? holdAside(note.id) : null;
+  const held = note.id && pane.s && pane.s.note.id === note.id ? holdAside(note.id) : null;
   let s;
-  const opened = swap(`n:${note.id || 'new'}`, () => {
-    scrollToTop();
-    document.body.classList.toggle('on-note', true);
-    if (state.session && state.session.doc) state.session.doc.destroy();
+  const draw = () => {
+    if (main) {
+      scrollToTop();
+      document.body.classList.toggle('on-note', true);
+    }
+    if (pane.s && pane.s.doc) pane.s.doc.destroy();
     s = draft || saving.open(note);
-    if (side.openedNote !== note.id) side.target = null;
-    side.openedNote = note.id;
-    state = { view: 'note', dir: note.directory, session: s };
-    chrome({ dir: note.directory });
-    document.title = `${note.title || 'New note'} · leo`;
-    chat.setContext(note.id ? { id: note.id, title: note.title, directory: note.directory, recorded: note.recorded } : null);
+    if (main) {
+      if (side.openedNote !== note.id) side.target = null;
+      side.openedNote = note.id;
+      state = { view: 'note', dir: note.directory, session: s, main: s };
+      chrome({ dir: note.directory });
+      document.title = `${note.title || 'New note'} · leo`;
+      chat.setContext(note.id ? { id: note.id, title: note.title, directory: note.directory, recorded: note.recorded } : null);
+    } else pane.s = s;
     const when = note.id ? `Edited ${rel(note.updated_at)}` : 'New note';
-    app.innerHTML = `<div class="note-layout"><div class="note-columns"><aside class="note-outline" aria-label="Note outline" hidden><details class="source-more"><summary aria-label="Headings in this note" title="Headings in this note"><span class="outline-icon">${ICON.list}</span>${ICON.chevron}</summary><nav aria-label="Headings"></nav></details></aside><article class="note"><div class="page-marks"><span class="page-mark" data-edge="left" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Note width: drag to change, double-click to reset"></span><span class="page-mark" data-edge="right" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Note width: drag to change, double-click to reset"></span><span class="page-width-label" hidden></span></div>
+    pane.el.innerHTML = `<div class="note-layout"><div class="note-columns"><aside class="note-outline" aria-label="Note outline" hidden><details class="source-more"><summary aria-label="Headings in this note" title="Headings in this note"><span class="outline-icon">${ICON.list}</span>${ICON.chevron}</summary><nav aria-label="Headings"></nav></details></aside><article class="note"><div class="page-marks"><span class="page-mark" data-edge="left" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Note width: drag to change, double-click to reset"></span><span class="page-mark" data-edge="right" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Note width: drag to change, double-click to reset"></span><span class="page-width-label" hidden></span></div>
     <header class="note-head"><div class="note-meta" data-tauri-drag-region><div class="margin-mode-wrap"><button type="button" id="margin-persona" class="margin-mode" aria-haspopup="menu" aria-expanded="false" aria-controls="margin-persona-menu" disabled><span id="margin-persona-icon" class="margin-mode-icon" aria-hidden="true">${ICON.book}</span><span id="margin-persona-label">Felix as Reader</span>${ICON.chevron}</button><div id="margin-persona-menu" class="margin-mode-menu margin-persona-menu" role="menu" aria-label="Who reads this note" hidden></div></div><div class="margin-mode-wrap"><button type="button" id="margin-mode" class="margin-mode" aria-haspopup="menu" aria-expanded="false" aria-controls="margin-mode-menu" disabled><span id="margin-mode-icon" class="margin-mode-icon" aria-hidden="true">${ICON.pen}</span><span id="margin-mode-label">When you ask</span>${ICON.chevron}</button><div id="margin-mode-menu" class="margin-mode-menu" role="menu" aria-label="Note reading mode" hidden><button type="button" role="menuitemradio" aria-checked="false" data-margin-mode="along">Reads along<small>Reads changes after a pause.</small></button><button type="button" role="menuitemradio" aria-checked="true" data-margin-mode="ask">When you ask<small>Reads nothing until you ask.</small></button></div></div><button type="button" id="note-more" class="margin-mode note-more" data-action="note-menu" aria-label="More for this note" aria-haspopup="menu" aria-expanded="false">${ICON.more}</button><span id="margin-status" role="status" class="hint"></span></div>
     <h1 id="title" contenteditable="plaintext-only" spellcheck="true" data-placeholder="Title" enterkeyhint="next">${esc(s.edit.title)}</h1><p class="note-facts" id="note-facts"><span id="save-state"></span><span id="note-edited">${when}</span><span id="note-read">${esc(readLine(s.edit.body))}</span>${note.recorded ? '<span class="note-transcript-link"> · <button type="button" class="facts-link" data-action="note-sources">Transcript</button></span>' : ''}</p><p class="note-facts note-aside-facts" id="note-aside-facts"></p><div class="note-originals"></div><div id="margin-instructions" class="margin-instructions" data-read-field hidden><label class="field">${ICON.pen}<input data-reads="${MARGIN_INSTRUCTIONS_READS}" placeholder="Instructions for this note, e.g. check that each claim has a source" aria-label="Instructions for this note" autocomplete="off"></label><p class="hint" data-read-hint role="status" hidden>Felix reads the first ${MARGIN_INSTRUCTIONS_READS} characters of this.</p></div>${note.writeup_pending ? '<div class="set-card writeup-pending"><h3>These notes are not written up yet</h3><p class="set-note">No writing AI was ready, so leo kept the transcript as it is.</p><div class="buttons"><a class="btn primary sm" href="#/settings/writing">Set up writing AI</a><button type="button" class="btn plain sm" data-action="source-regenerate">Write the notes</button></div></div>' : ''}</header>
     <div class="prose doc" id="doc"></div>
@@ -937,22 +942,23 @@ async function showNote(id, { fresh = null, draft = null } = {}) {
     <div class="note-aside" id="note-aside"></div>
     <section class="related" id="related" hidden aria-label="Related notes"></section>
   </article></div></div>`;
-    s.title = $('#title');
-    drawOriginals(note);
+    s.title = inPane('#title', pane);
+    drawOriginals(note, pane);
     hideAskFloat();
-    s.doc = leoDoc.mount($('#doc'), { source: s.edit.body, outline: $('.note-outline'), onChange: (text) => { changed(s, text); marginEdited(s); readSoon(text); }, placeholder: 'Write, or paste anything', dir: note.directory || '', onPictures: (files) => addPictures(s, files), onSelection: (has) => placeAskFloat(has), noteTools: true, foldKey: note.id || '' });
-    $('#doc').addEventListener('leo-folds', () => { if (state.session === s) marginDraw(); });
-    marginMount(s, mine).catch(fail);
+    s.doc = leoDoc.mount(inPane('#doc', pane), { source: s.edit.body, outline: inPane('.note-outline', pane), onChange: (text) => { changed(s, text); marginEdited(s); readSoon(s, text); }, placeholder: 'Write, or paste anything', dir: note.directory || '', onPictures: (files) => addPictures(s, files), onSelection: (has) => placeAskFloat(has), noteTools: true, foldKey: note.id || '' });
+    inPane('#doc', pane).addEventListener('leo-folds', () => { if (pane.s === s) withPane(pane, marginDraw); });
+    withPane(pane, () => marginMount(s, current)).catch(fail);
     restoreAside(held);
     if (citedLines && citedLines.id === note.id) showCitedLines();
-    else if (passage && highlightSearch(app.querySelector('article.note'), passage.query)) {
+    else if (main && passage && highlightSearch(inPane('article.note', pane), passage.query)) {
       clearTimeout(reading.timer);
       reading.id = note.id;
       reading.user = false;
-    } else restoreReading(note.id, mine);
-  });
-  if (opened) arriveOnPage($('#doc'));
-  drawRelated(note.id, mine);
+    } else if (main) restoreReading(note.id, mine);
+  };
+  const opened = main ? swap(`n:${note.id || 'new'}`, draw) : (draw(), false);
+  if (opened) arriveOnPage(inPane('#doc', pane));
+  drawRelated(note.id, current, pane);
   if (s.dirty) {
     mark(s, 'Recovered draft · saving…');
     flush(s).catch(fail);
@@ -990,8 +996,7 @@ function newNote(dir) {
   return showNote(null, { fresh: { id: null, title: '', body: '', directory: dir || '', pinned: false, version: null } });
 }
 
-async function ready() {
-  const s = state.session;
+async function ready(s = state.session) {
   if (!s) return null;
   s.doc.stop();
   await flush(s);
@@ -1098,7 +1103,7 @@ window.addEventListener('afterprint', () => {
 
 function noteFind() {
   if (asideOpen()) {
-    const query = $('#source-query');
+    const query = inPane('#source-query');
     if (query) {
       query.focus();
       query.select();
@@ -1106,7 +1111,7 @@ function noteFind() {
     return;
   }
   const doc = state.session.doc;
-  const had = $('.note-find input');
+  const had = inPane('.note-find input');
   if (had) {
     had.focus();
     had.select();
@@ -1117,12 +1122,12 @@ function noteFind() {
   const bar = document.createElement('div');
   bar.className = 'note-find';
   bar.innerHTML = `<div role="search"><label class="field">${ICON.search}<input placeholder="Find in note" aria-label="Find in note" autocomplete="off" spellcheck="false" enterkeyhint="search"></label><span class="hint" role="status"></span><button type="button" class="icon-btn" data-step="-1" aria-label="Previous match" title="Previous match">${ICON.chevron}</button><button type="button" class="icon-btn" data-step="1" aria-label="Next match" title="Next match">${ICON.chevron}</button><button type="button" class="icon-btn" aria-label="Close find" title="Close">${ICON.close}</button></div>`;
-  app.querySelector('article.note').prepend(bar);
+  inPane('article.note').prepend(bar);
   const input = bar.querySelector('input');
   let at = 0;
   const show = (step) => {
     doc.stop();
-    const found = highlightSearch($('#doc'), input.value, at + step);
+    const found = highlightSearch(inPane('#doc'), input.value, at + step);
     at = found ? (((at + step) % found) + found) % found : 0;
     bar.querySelector('.hint').textContent = found ? `${at + 1} of ${found}` : input.value ? 'No matches' : '';
   };

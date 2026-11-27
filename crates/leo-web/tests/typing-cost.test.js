@@ -5,6 +5,7 @@ const path = require('node:path');
 const v8 = require('node:v8');
 const vm = require('node:vm');
 const { test } = require('node:test');
+const { paneHelpers } = require('./page-source');
 require('../src/web/saving.js');
 const kit = require('../src/web/margin.js');
 const ed = require('../src/web/editing.js');
@@ -366,8 +367,9 @@ const typingOf = new Function('lines', 'editing', 'container', 'onChange', 'outl
 function notePage(body) {
   const timers = [];
   const shown = { textContent: '' };
-  const page = { md, $: () => shown, window: {}, setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout: () => {}, cleanTitle: (t) => String(t).trim(), saving: null };
+  const page = { md, $: () => shown, window: {}, setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout: () => {}, cleanTitle: (t) => String(t).trim(), saving: null, state: { view: 'note' }, app: {} };
   vm.createContext(page);
+  vm.runInContext(paneHelpers(), page);
   vm.runInContext(`${core.slice(core.indexOf('function snapshot('), core.indexOf('function flush('))}\n${core.slice(core.indexOf('function readLine('), core.indexOf('async function showNote('))}\n${marginNotes.slice(marginNotes.indexOf('function marginIdle('), marginNotes.indexOf('function marginSettle('))}`, page);
   const local = storage();
   const sent = [];
@@ -375,11 +377,12 @@ function notePage(body) {
   page.saving = leoSaving.create({ api: async (_, { body: b }) => { sent.push(b.body); return { ...note, ...b, version: 'v2' }; }, storage: local, schedule: () => 1, cancel: () => {}, now: () => 1000 });
   const s = page.saving.open(note);
   s.title = { textContent: 'Note' };
+  page.state.main = page.state.session = s;
   const area = { value: '', selectionStart: 0, selectionEnd: 0, closest: () => ({ style: {} }) };
   const editing = { area, start: 2, end: 3, prefix: '', kind: 'line' };
   const lines = body.split('\n');
   const noop = () => {};
-  const d = typingOf(lines, editing, { classList: { toggle: noop } }, (text) => { page.changed(s, text); page.readSoon(text); }, noop, Date, noop, noop, noop, noop, false, noop, noop, noop, noop, noop, ed);
+  const d = typingOf(lines, editing, { classList: { toggle: noop } }, (text) => { page.changed(s, text); page.readSoon(s, text); }, noop, Date, noop, noop, noop, noop, false, noop, noop, noop, noop, noop, ed);
   s.doc = { source: d.source };
   const settle = () => { while (timers.length) timers.shift()(); };
   const draft = () => JSON.parse(local.getItem(s.key)).edit.body;

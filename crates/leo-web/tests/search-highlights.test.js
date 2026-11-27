@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
+const { paneHelpers } = require('./page-source');
 
 function fixture(texts, supported = true) {
   const source = fs.readFileSync(path.resolve(__dirname, '../src/web/app/core.js'), 'utf8');
@@ -63,8 +64,9 @@ test('search result and Quick Leo navigation carry their own query only to a not
   const start = source.indexOf('const SEARCH_HIGHLIGHT_MS');
   const end = source.indexOf('const folderHash', start);
   const value = fixture([]);
-  Object.assign(value, { seq: 0, history: { pushState() {}, replaceState() {} }, saving: { flush: async () => true }, state: { view: 'search', query: 'math' }, location: { hash: '#/search/math' }, route() {} });
+  Object.assign(value, { seq: 0, history: { pushState() {}, replaceState() {} }, saving: { flush: async () => true }, state: { view: 'search', query: 'math' }, location: { hash: '#/search/math' }, route() {}, app: {}, marginPage: null });
   vm.createContext(value);
+  vm.runInContext(paneHelpers(), value);
   vm.runInContext(source.slice(start, end) + '\nconst pending = () => searchPassage;', value);
   await vm.runInContext("go('#/n/one');", value);
   assert.equal(vm.runInContext('pending().query', value), 'math');

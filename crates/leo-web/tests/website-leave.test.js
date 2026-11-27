@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const { paneHelpers } = require('./page-source');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../src/web/app/events.js'), 'utf8').replace(/\r\n/g, '\n');
 const start = source.indexOf('const unsaved =');
 const end = source.indexOf("window.addEventListener(\n  'scroll',", start);
@@ -24,9 +25,10 @@ function environment({ draft = false, panel = null } = {}) {
     Blob,
     location: { hash: '#/n/kept' },
     localStorage: { setItem: (...args) => places.push(args) },
-    route: () => {}, render: async () => { rendered++; }, fail: () => {}, marginLeave: () => {},
+    route: () => {}, render: async () => { rendered++; }, fail: () => {}, marginLeave: () => {}, marginPage: null,
   };
   vm.createContext(context);
+  vm.runInContext(paneHelpers(), context);
   vm.runInContext(source.slice(start, end), context);
   return { context, windows, documents, sent, saved, places, rendered: () => rendered };
 }
@@ -62,7 +64,7 @@ test('navigation still flushes the departing draft before routing', async () => 
   const e = environment();
   const calls = [];
   const session = { doc: { stop: () => calls.push('stop'), destroy: () => calls.push('destroy') } };
-  e.context.state.session = session;
+  e.context.state.main = e.context.state.session = session;
   e.context.flush = async (leaving) => { assert.equal(leaving, session); calls.push('flush'); };
   e.context.route = () => calls.push('route');
   await e.windows.hashchange();

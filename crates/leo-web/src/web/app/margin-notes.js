@@ -128,7 +128,7 @@ function marginLeave() {
   marginPage.wanted = null;
 }
 
-async function marginMount(s, mine) {
+async function marginMount(s, current) {
   marginLeave();
   const columns = $('.note-columns');
   if (!columns) return;
@@ -155,9 +155,9 @@ async function marginMount(s, mine) {
     marginPage.watch.observe($('#doc'), { childList: true });
   }
   $('#doc').addEventListener('focusin', marginRedraw);
-  if (s.note.id) return marginLoad(s, () => mine === seq);
+  if (s.note.id) return marginLoad(s, current);
   const prefs = await marginLoadPrefs();
-  if (mine !== seq || marginPage.s !== s) return;
+  if (!current() || marginPage.s !== s) return;
   marginPage.mode = prefs.default_mode || 'ask';
   marginPage.persona = prefs.default_persona || 'reader';
   marginControl();
