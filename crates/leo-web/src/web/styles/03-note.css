@@ -34,10 +34,10 @@
 .note-outline .outline-spacer { flex: none; width: 24px; }
 .note-outline .outline-ticks, .note-outline .outline-preview, .note-outline .outline-page { display: none; }
 :where(.note-layout:not([data-wide])) .note-outline { position: relative; top: 0; height: 0; width: 100%; max-width: var(--note-width); justify-self: center; }
-:where(.note-layout:not([data-wide])) .note-outline .source-more { position: relative; width: 32px; margin-top: 8px; }
+:where(.note-layout:not([data-wide])) .note-outline .source-more { width: 32px; margin-top: 8px; }
 :where(.note-layout:not([data-wide])) .note-outline .source-more > summary { width: 32px; height: 32px; padding: 0; justify-content: center; align-items: center; border-radius: 50%; }
 :where(.note-layout:not([data-wide])) .note-outline .source-more > summary:hover { background: var(--tint); }
-:where(.note-layout:not([data-wide])) .note-outline nav { position: absolute; top: 100%; left: 0; width: min(280px, calc(100vw - 32px)); padding: 6px; border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow); }
+:where(.note-layout:not([data-wide])) .note-outline nav { position: absolute; width: min(280px, 100%); padding: 6px; border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow); }
 :where(.note-layout:not([data-wide]) .note-columns:has(> .note-outline:not([hidden]))) .note-meta { min-height: 32px; padding-left: 44px; }
 :where(.note-layout[data-wide]) .note-columns { padding-inline: 48px; min-height: calc(100dvh - var(--bar-height) - 16px); }
 :where(.note-layout[data-wide]) .note-outline { top: var(--outline-center, 50dvh); justify-self: start; width: 48px; margin-left: -48px; display: flex; flex-direction: column; }
@@ -239,7 +239,7 @@ textarea.set-input:focus { outline: 2px solid var(--focus); outline-offset: 1px;
 .note-meta .margin-mode { font-size: var(--fs-sm); }
 #margin-status { margin-left: auto; }
 .margin-mode-wrap { position: relative; flex: none; display: flex; align-items: center; }
-.note-meta > * { min-height: inherit; }
+.note-meta > .margin-mode-wrap { min-height: inherit; }
 .margin-instructions { margin: 0 0 16px; }
 .writeup-pending { margin: 0 0 16px; }
 .writeup-pending .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
@@ -309,6 +309,7 @@ body.split #beside { position: fixed; top: 0; bottom: 0; right: var(--right); wi
 body:not(.beside-on) .beside-resize::before { left: auto; right: 3px; background: linear-gradient(to left, var(--line) 1px, var(--split-shade) 1px, transparent); }
 .pane-close-row { display: none; position: sticky; top: calc(var(--bar-height) + 8px); z-index: 3; height: 0; justify-content: flex-end; align-items: flex-start; }
 body.split .pane-close-row { display: flex; }
+body.split .note-find > div { margin-right: 40px; }
 body.split .note-meta { min-height: 32px; padding-right: 40px; }
 .pane-close { width: 32px; height: 32px; margin-top: 8px; border-radius: 50%; background: var(--page); color: var(--muted); opacity: 0; transition: opacity var(--t-fade) ease-out; }
 .pane-close svg { width: 16px; height: 16px; }

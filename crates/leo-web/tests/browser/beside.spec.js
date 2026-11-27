@@ -57,6 +57,8 @@ test('a note dropped on the right half opens beside with its own width marks and
     await page.locator('#app').dispatchEvent('dragover', at);
     return { transfer, at };
   };
+  await drag(b, (box) => box.x + box.width * 0.6);
+  await expect(page.locator('body')).toHaveAttribute('data-note-drop', 'beside');
   const right = await drag(b, (box) => box.x + box.width - 40);
   await expect(page.locator('body')).toHaveAttribute('data-note-drop', 'beside');
   await page.locator('#app').dispatchEvent('drop', right.at);
