@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { paneHelpers } = require('./page-source');
 const core = fs.readFileSync(path.resolve(__dirname, '../src/web/app/core.js'), 'utf8');
 const sheets = fs.readFileSync(path.resolve(__dirname, '../src/web/app/sheets.js'), 'utf8');
 
@@ -10,12 +11,13 @@ test('note deletion preserves failures and never redirects another open note', a
   for (const mode of ['success', 'error', 'navigate']) {
     let destroyed = 0, went = 0, failed = 0;
     const session = { note: { id: 'note' }, doc: { destroy() { destroyed++; } } };
-    const context = { state: { session }, closeSheet() {}, enc: encodeURIComponent, loadSideFolders() {}, toast() {}, restore() {}, fail: () => failed++, go: () => went++ };
+    const context = { state: { session, main: session }, app: {}, marginPage: null, closeSheet() {}, enc: encodeURIComponent, loadSideFolders() {}, toast() {}, restore() {}, fail: () => failed++, go: () => went++ };
     context.api = async () => {
       if (mode === 'error') throw Error('offline');
-      if (mode === 'navigate') context.state.session = { note: { id: 'other' } };
+      if (mode === 'navigate') context.state.main = context.state.session = { note: { id: 'other' } };
     };
     vm.createContext(context);
+    vm.runInContext(paneHelpers(), context);
     vm.runInContext(sheets.slice(sheets.indexOf('let trashing = null;'), sheets.indexOf('async function restore(')), context);
     await context.trashNote({ id: 'note' }).catch(context.fail);
     assert.equal(went, mode === 'success' ? 1 : 0);
@@ -183,7 +185,7 @@ test('opening a note fades only the note text from .6 over 140 ms, never the tit
     assert.deepEqual(JSON.parse(JSON.stringify(runs)), still ? [] : [{ frames: [{ opacity: .6 }, { opacity: 1 }], timing: { duration: 140, easing: 'arrive' } }]);
   }
   const show = core.slice(core.indexOf('async function showNote('), core.indexOf('function newNote('));
-  assert.match(show, /if \(opened\) arriveOnPage\(\$\('#doc'\)\);/);
+  assert.match(show, /if \(opened\) arriveOnPage\(inPane\('#doc', pane\)\);/);
   assert.doesNotMatch(show, /title\.animate/);
 });
 
