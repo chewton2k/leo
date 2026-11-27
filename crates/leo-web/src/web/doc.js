@@ -1134,9 +1134,12 @@
         return lineStart(editing.start) + editing.prefix.length + Math.min(range.toString().length, editing.area.value.length);
       }
       if (editing && blk.classList.contains('editing')) {
-        const around = document.createRange();
-        around.selectNode(editing.area);
-        const where = editing.run ? around.comparePoint(node, offset) : 0;
+        let where = 0;
+        if (editing.run) {
+          const around = document.createRange();
+          around.selectNode(editing.area);
+          where = around.comparePoint(node, offset);
+        }
         if (!where) return lineStart(editing.start) + editing.prefix.length + (side === 'start' ? 0 : editing.area.value.length);
         const range = document.createRange();
         if (where < 0) range.setStart(blk, 0);

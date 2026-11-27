@@ -86,7 +86,7 @@ async function boardsFixture(browser, run, { width = 1280, height = 800 } = {}) 
     ${read('doc.js')}
     ${read('chat.js')}
     const leoDoc=window.leoDoc;
-    const SEARCH_STEP=60;const noteHash=id=>'#/n/'+enc(id);
+    const SEARCH_STEP=60;const noteHash=id=>'#/n/'+enc(id);const split=()=>false;
     ${sheets.slice(sheets.indexOf('async function openTitle('), sheets.indexOf('function openSearch('))}
     ${read('app/boards.js')}
     const actions={'kanban-new-board':()=>kanbanNewBoard(),'kanban-board-menu':kanbanBoardMenu,'kanban-column-menu':kanbanColumnMenu,'kanban-add-card':el=>kanbanComposer(el.dataset.col),'kanban-add-column':()=>kanbanAddColumn(),'kanban-open-card':el=>kanbanCardPanel(el.dataset.card),close:()=>closeSheet(),'open-title':el=>openTitle(el.dataset.title||'')};
