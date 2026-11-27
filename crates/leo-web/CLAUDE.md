@@ -1305,6 +1305,13 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   (every move kept, absent when empty so old files are unchanged); `on` stays the
   original date. `tasks::occurs_on` and `schedule.occurrences` apply it; .ics
   adds EXDATE + RECURRENCE-ID; Google gets the weekly rule only.
+  Richer repeats (2026-11-27): `every` (1-12, absent when 1), `monthly` (the
+  day of `date`'s month; a month without that day is skipped) and `until` (last
+  day) sit beside `repeat`, all absent by default so old files are unchanged.
+  `Task::repeats()` / `schedule.repeats` (`repeat` non-empty or `monthly`) is
+  the one "does it repeat" check; `tasks::Repeat` (`Task::rule()`,
+  `Listed::rule()`) feeds `repeats_on`, `occurs_on`, `rrule_of`, and
+  `schedule.js` mirrors the same rules.
 - Felix's task tools preserve missing descriptions, an explicit empty update
   clears one; Delete Undo restores the original id with a fresh timestamp so
   the restore wins over its tombstone.

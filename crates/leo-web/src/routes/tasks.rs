@@ -127,7 +127,24 @@ pub(crate) struct NewTask {
     #[serde(default)]
     repeat: Vec<u8>,
     #[serde(default)]
+    every: Option<i64>,
+    #[serde(default)]
+    monthly: bool,
+    #[serde(default)]
+    until: Option<NaiveDate>,
+    #[serde(default)]
     request: Option<String>,
+}
+
+const BAD_EVERY: &str = "Repeat every 1 to 12 weeks or months.";
+const BAD_UNTIL: &str = "A repeat can only end on or after the task's first day.";
+
+fn every_of(n: i64) -> Option<u8> {
+    u8::try_from(n).ok().filter(|n| (1..=12).contains(n))
+}
+
+fn ends_early(until: Option<NaiveDate>, date: Option<NaiveDate>) -> bool {
+    until.is_some_and(|until| date.is_none_or(|date| until < date))
 }
 
 pub(crate) async fn create_task(
@@ -141,6 +158,9 @@ pub(crate) async fn create_task(
     }
     let (Ok(time), Ok(end)) = (time_of(body.time.as_deref()), time_of(body.end.as_deref())) else {
         return error(StatusCode::BAD_REQUEST, "Write times like 14:30.");
+    };
+    let Some(every) = body.every.map_or(Some(1), every_of) else {
+        return error(StatusCode::BAD_REQUEST, BAD_EVERY);
     };
     let id = match body.id {
         Some(id) if tasks::valid_id(&id) && !id.starts_with('n') => id,
@@ -161,18 +181,22 @@ pub(crate) async fn create_task(
         }
         let now = Utc::now();
         let repeat = tasks::clean_repeat(&body.repeat);
-        let date = if repeat.is_empty() {
+        let repeats = !repeat.is_empty() || body.monthly;
+        let date = if !repeats {
             body.date
         } else {
             body.date
                 .or_else(|| Some(chrono::Local::now().date_naive()))
         };
+        if ends_early(body.until, date) {
+            return error(StatusCode::BAD_REQUEST, BAD_UNTIL);
+        }
         let task = Task {
             id,
             title,
             description,
             kind: tasks::clean_kind(body.kind.as_deref().unwrap_or("other")),
-            done: body.done && repeat.is_empty(),
+            done: body.done && !repeats,
             date,
             time: date.and(time),
             end: date.and(time).and(end),
@@ -181,6 +205,9 @@ pub(crate) async fn create_task(
             created_at: now,
             updated_at: now,
             repeat,
+            every,
+            monthly: body.monthly,
+            until: body.until,
             done_on: Vec::new(),
             moved: Default::default(),
             deleted: false,
@@ -222,6 +249,12 @@ pub(crate) struct Change {
     #[serde(default)]
     repeat: Option<Vec<u8>>,
     #[serde(default)]
+    every: Option<i64>,
+    #[serde(default)]
+    monthly: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    until: Option<Option<NaiveDate>>,
+    #[serde(default)]
     on: Option<NaiveDate>,
     #[serde(default)]
     occurrence: Option<NaiveDate>,
@@ -240,6 +273,10 @@ pub(crate) async fn change_task(
         time_of(change.end.as_deref()),
     ) else {
         return error(StatusCode::BAD_REQUEST, "Write times like 14:30.");
+    };
+    let every = match change.every.map(every_of) {
+        Some(None) => return error(StatusCode::BAD_REQUEST, BAD_EVERY),
+        every => every.flatten(),
     };
     let description = change
         .description
@@ -268,15 +305,24 @@ pub(crate) async fn change_task(
             }
             if let Some(repeat) = &change.repeat {
                 task.repeat = tasks::clean_repeat(repeat);
-                if !task.repeat.is_empty() {
-                    task.done = false;
-                    if task.date.is_none() && change.date.is_none() {
-                        task.date = Some(chrono::Local::now().date_naive());
-                    }
+            }
+            if let Some(monthly) = change.monthly {
+                task.monthly = monthly;
+            }
+            if let Some(every) = every {
+                task.every = every;
+            }
+            if let Some(until) = change.until {
+                task.until = until;
+            }
+            if (change.repeat.is_some() || change.monthly.is_some()) && task.repeats() {
+                task.done = false;
+                if task.date.is_none() && change.date.is_none() {
+                    task.date = Some(chrono::Local::now().date_naive());
                 }
             }
             if let Some(done) = change.done {
-                if task.repeat.is_empty() {
+                if !task.repeats() {
                     task.done = done;
                 } else {
                     let day = change
@@ -290,7 +336,7 @@ pub(crate) async fn change_task(
                 }
             }
             if let Some(on) = change.occurrence {
-                if !tasks::repeats_on(&task.repeat, task.date, on) {
+                if !tasks::repeats_on(&task.rule(), on) {
                     return Ok(error(
                         StatusCode::BAD_REQUEST,
                         "That day is not one of this task's days.",
@@ -318,6 +364,9 @@ pub(crate) async fn change_task(
             }
             if let Some(sent) = change.sent {
                 task.sent_at = sent.then(Utc::now);
+            }
+            if ends_early(task.until, task.date) {
+                return Ok(error(StatusCode::BAD_REQUEST, BAD_UNTIL));
             }
             task.updated_at = Utc::now();
             if tasks::put(&chats, &task).is_err() {
@@ -602,6 +651,7 @@ fn restore_piece(chats: &std::path::Path, piece: Vec<Task>) -> (usize, usize) {
         task.title = task.title.trim().to_string();
         task.kind = tasks::clean_kind(&task.kind);
         task.repeat = tasks::clean_repeat(&task.repeat);
+        task.every = task.every.clamp(1, 12);
         task.done_on.sort_unstable();
         task.done_on.dedup();
         task.deleted = false;

@@ -176,27 +176,57 @@ function repeatBubbles(on) {
   }).join('')}</div>`;
 }
 
-function repeatHint(repeat) {
-  return repeat.length ? S.repeatLabel(repeat, calLocale()) : 'Does not repeat';
+function repeatHint(task) {
+  return S.repeats(task) ? S.repeatLabel(task, calLocale()) : 'Does not repeat';
 }
 
-function repeatPicker(box, start, onChange) {
-  const days = [...start];
+function repeatMore(task) {
+  const every = Math.max(1, task.every || 1);
+  const counts = [...new Set([1, 2, 3, 4, every])].sort((a, c) => a - c);
+  return `<div class="repeat-more">
+    ${segmented({ label: 'Repeat by', action: 'cal-unit', key: 'cal-unit', current: task.monthly ? 'monthly' : 'weekly', choices: [['weekly', 'Weekly'], ['monthly', 'Monthly']] })}
+    <span class="repeat-every"><span class="hint">Every</span><label class="select-control"><select id="cal-peek-every" aria-label="Repeat every">${counts.map((n) => `<option value="${n}"${n === every ? ' selected' : ''}>${n}</option>`).join('')}</select>${ICON.chevron}</label><span class="hint repeat-unit">${task.monthly ? 'months' : 'weeks'}</span></span>
+    <span class="repeat-every"><span class="hint">Until</span><input class="set-input" type="date" id="cal-peek-until" aria-label="Repeat until" value="${esc(task.until || '')}"${task.date ? ` min="${esc(task.date)}"` : ''}></span>
+  </div>`;
+}
+
+function repeatPicker(box, task, onChange) {
+  const rule = { repeat: [...(task.repeat || [])], every: Math.max(1, task.every || 1), monthly: Boolean(task.monthly), until: task.until || null };
+  const changed = () => {
+    const hint = box.querySelector('.repeat-hint');
+    if (hint) hint.textContent = repeatHint({ ...rule, date: task.date });
+    box.querySelector('.repeat-days').hidden = rule.monthly;
+    const unit = box.querySelector('.repeat-unit');
+    if (unit) unit.textContent = rule.monthly ? 'months' : 'weeks';
+    onChange({ ...rule, repeat: [...rule.repeat] });
+  };
   box.addEventListener('click', (e) => {
     const b = e.target.closest('[data-repeat-day]');
-    if (!b) return;
-    const d = Number(b.dataset.repeatDay);
-    const at = days.indexOf(d);
-    if (at >= 0) days.splice(at, 1);
-    else days.push(d);
-    days.sort((a, c) => a - c);
-    b.classList.toggle('on', at < 0);
-    b.setAttribute('aria-pressed', String(at < 0));
-    const hint = box.querySelector('.repeat-hint');
-    if (hint) hint.textContent = repeatHint(days);
-    onChange([...days]);
+    const u = e.target.closest('[data-cal-unit]');
+    if (b) {
+      const d = Number(b.dataset.repeatDay);
+      const at = rule.repeat.indexOf(d);
+      if (at >= 0) rule.repeat.splice(at, 1);
+      else rule.repeat.push(d);
+      rule.repeat.sort((x, y) => x - y);
+      b.classList.toggle('on', at < 0);
+      b.setAttribute('aria-pressed', String(at < 0));
+    } else if (u) {
+      rule.monthly = u.dataset.calUnit === 'monthly';
+      for (const o of box.querySelectorAll('[data-cal-unit]')) {
+        o.classList.toggle('on', o === u);
+        o.setAttribute('aria-pressed', String(o === u));
+      }
+      syncSegmented(u.closest('.segmented'));
+    } else return;
+    changed();
   });
-  return days;
+  box.addEventListener('change', (e) => {
+    if (e.target.id === 'cal-peek-every') rule.every = Number(e.target.value);
+    else if (e.target.id === 'cal-peek-until') rule.until = e.target.value || null;
+    else return;
+    changed();
+  });
 }
 
 function calDate(minutes) {
@@ -802,7 +832,7 @@ async function calMove(task, next, scope = null) {
 }
 
 function calAskScope(task, next) {
-  const box = sheet(`<h3>Move “${esc(task.title)}”</h3><p class="hint">It repeats ${esc(S.repeatLabel(task.repeat, calLocale()).toLowerCase())}.</p>
+  const box = sheet(`<h3>Move “${esc(task.title)}”</h3><p class="hint">It repeats ${esc(S.repeatLabel(task, calLocale()).toLowerCase())}.</p>
     ${sheetButtons(['Only this one', 'id="cal-move-one"'], { middle: '<button type="button" class="btn" id="cal-move-all">Every time</button>' })}`);
   $('#cal-move-one', box).addEventListener('click', () => { closeSheet(); calMove(task, next, 'one').catch(fail); });
   $('#cal-move-all', box).addEventListener('click', () => { closeSheet(); calMove(task, next, 'all').catch(fail); });
@@ -824,10 +854,11 @@ function calBodies(base, task, next, scope) {
     const shift = Math.round((S.fromKey(next.date) - S.fromKey(task.date)) / 86400000);
     const start = S.dayKey(S.addDays(S.fromKey(base.date || task.date), shift));
     const repeat = S.shiftRepeat(base.repeat, shift);
+    const until = base.until ? S.dayKey(S.addDays(S.fromKey(base.until), shift)) : null;
     return {
-      body: { date: start, time: next.time, end: next.end, repeat },
-      undo: { date: base.date, time: calHM(base.time), end: calHM(base.end), repeat: base.repeat },
-      local: (t) => Object.assign(t, { date: start, time: next.time, end: next.end, repeat }),
+      body: { date: start, time: next.time, end: next.end, repeat, until },
+      undo: { date: base.date, time: calHM(base.time), end: calHM(base.end), repeat: base.repeat, until: base.until || null },
+      local: (t) => Object.assign(t, { date: start, time: next.time, end: next.end, repeat, until }),
     };
   }
   return {
@@ -1207,7 +1238,7 @@ function calPeekTask(side, id, on) {
       <input class="set-input" type="time" id="cal-peek-start" aria-label="Starts" value="${esc(calHM(slot.time) || '')}"${slot.date ? '' : ' disabled'}>
       ${leo ? `<span class="hint">to</span><input class="set-input" type="time" id="cal-peek-end" aria-label="Ends" value="${esc(calHM(slot.end) || '')}"${slot.time ? '' : ' disabled'}>` : ''}
     </span></div>
-    ${leo ? `<div class="set-row column task-repeat" id="cal-peek-repeat"><span class="set-label">Repeat</span>${repeatBubbles(task.repeat || [])}<span class="hint repeat-hint">${esc(repeatHint(task.repeat || []))}</span></div>` : ''}
+    ${leo ? `<div class="set-row column task-repeat" id="cal-peek-repeat"><span class="set-label">Repeat</span>${repeatBubbles(task.repeat || [])}${repeatMore(task)}<span class="hint repeat-hint">${esc(repeatHint(task))}</span></div>` : ''}
     ${kindChips('cal-peek-kinds', task.kind)}
     <textarea class="cal-peek-about" id="cal-peek-about" rows="4" placeholder="Add a description…" aria-label="Description">${esc(task.description || '')}</textarea>
     <div class="set-row"><span class="set-label">Note</span><span class="set-value">${task.note ? `<a href="${noteHash(task.note.id)}">${esc(task.note.title || 'Untitled')}</a>` : 'Added in leo'}</span></div>
@@ -1220,7 +1251,7 @@ function calPeekTask(side, id, on) {
     said('Saving…');
     try {
       const out = await api(`/api/tasks/${enc(task.id)}`, { method: 'PATCH', body });
-      if (out && out.id) Object.assign(task, out);
+      if (out && out.id) Object.assign(task, { repeat: [], every: 1, monthly: false, until: null }, out);
       else Object.assign(task, body);
       said('Saved');
       tasksWin.revision++;
@@ -1280,7 +1311,10 @@ function calPeekTask(side, id, on) {
   };
   for (const sel of ['#cal-peek-date', '#cal-peek-start', '#cal-peek-end']) $(sel, side)?.addEventListener('change', () => Promise.resolve(when()).catch(fail));
   const repeatBox = $('#cal-peek-repeat', side);
-  if (repeatBox) repeatPicker(repeatBox, task.repeat || [], (days) => patch({ repeat: days }).catch(fail));
+  if (repeatBox) {
+    repeatBox.querySelector('.repeat-days').hidden = Boolean(task.monthly);
+    repeatPicker(repeatBox, task, (rule) => patch({ repeat: rule.repeat, every: rule.every, monthly: rule.monthly, until: rule.until }).then((ok) => ok || calPeekTask(side, id, on), fail));
+  }
   let kindLatest = 0;
   let kindSaved = task.kind;
   const pickKind = (on) => {
@@ -1457,7 +1491,7 @@ function newTaskSheet(day = null) {
         <input class="set-input task-title" id="task-title" placeholder="What needs doing?" autocomplete="off" aria-label="Title">
         <label class="set-row column task-about"><span class="set-label">Description <span class="hint">optional</span></span><textarea class="set-input" id="task-description" rows="3" placeholder="Add a description…"></textarea></label>
         ${kindChips('task-kinds', 'other')}
-        <div class="set-row column task-repeat" id="task-repeat"><span class="set-label">Repeat</span>${repeatBubbles([])}<span class="hint repeat-hint">${esc(repeatHint([]))}</span></div>
+        <div class="set-row column task-repeat" id="task-repeat"><span class="set-label">Repeat</span>${repeatBubbles([])}<span class="hint repeat-hint">${esc(repeatHint({}))}</span></div>
       </div>
       <div class="picker-box" id="pick-box"></div>
     </div>
@@ -1465,7 +1499,7 @@ function newTaskSheet(day = null) {
   let kind = 'other';
   let repeat = [];
   const pick = pickerBody($('#pick-box', box), { date: day }, { meeting: false });
-  repeatPicker($('#task-repeat', box), [], (days) => { repeat = days; });
+  repeatPicker($('#task-repeat', box), {}, (rule) => { repeat = rule.repeat; });
   $('#task-kinds', box).addEventListener('click', (e) => {
     const chip = e.target.closest('[data-kind]');
     if (!chip) return;
@@ -1579,7 +1613,7 @@ function taskSheet(id, on = null) {
     ${task.found === false ? '<p class="set-note warn">leo could not find this checkbox in the note any more. Open the note to check it.</p>' : ''}
     <div class="set-row column"><label class="set-label" for="task-description">Description <span class="hint">optional</span><span class="hint task-saved" id="task-description-state" role="status"></span></label><textarea class="set-input" id="task-description" rows="3" placeholder="Add a description…">${esc(task.description || '')}</textarea></div>
     <div class="set-row"><span class="set-label">${repeating ? 'Starts' : 'Date'}</span><span class="set-value">${esc(when)}<button type="button" class="btn plain sm" data-action="task-date" data-id="${esc(task.id)}">${task.date ? 'Change' : 'Set date'}</button></span></div>
-    ${task.source === 'leo' ? `<div class="set-row column task-repeat" id="task-repeat"><span class="set-label">Repeat</span>${repeatBubbles(task.repeat || [])}<span class="hint repeat-hint">${esc(repeatHint(task.repeat || []))}</span></div>` : ''}
+    ${task.source === 'leo' ? `<div class="set-row column task-repeat" id="task-repeat"><span class="set-label">Repeat</span>${repeatBubbles(task.repeat || [])}<span class="hint repeat-hint">${esc(repeatHint(task))}</span></div>` : ''}
     ${kindChips('task-kinds', task.kind)}
     <div class="set-row"><span class="set-label">Note</span><span class="set-value">${task.note ? `<a href="${noteHash(task.note.id)}">${esc(task.note.title || 'Untitled')}</a>` : 'Added in leo'}</span></div>
     <div class="set-row"><span class="set-label">Google</span><span class="set-value">${esc(google)}</span></div>
@@ -1630,7 +1664,7 @@ function taskSheet(id, on = null) {
   if (earlier) earlier.field.flush().then(field.flush).catch(fail);
   const repeatBox = $('#task-repeat', box);
   if (repeatBox) {
-    repeatPicker(repeatBox, task.repeat || [], async (days) => {
+    repeatPicker(repeatBox, task, async ({ repeat: days }) => {
       try {
         const saved = await api(`/api/tasks/${enc(task.id)}`, { method: 'PATCH', body: { repeat: days } });
         Object.assign(task, saved && saved.id ? saved : { repeat: days });

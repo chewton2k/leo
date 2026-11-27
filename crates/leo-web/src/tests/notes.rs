@@ -816,6 +816,8 @@ fn moving_a_task_in_felix_keeps_its_end_time_and_the_undo_does_too() {
                 time: None,
                 task_kind: None,
                 on: None,
+                every: None,
+                until: None,
             };
             let shown = crate::routes::organize::act_now(&state, &moved).unwrap();
             let stored = crate::tasks::load(&state.chats, &id).unwrap();
@@ -827,6 +829,61 @@ fn moving_a_task_in_felix_keeps_its_end_time_and_the_undo_does_too() {
             let back = crate::tasks::load(&state.chats, &id).unwrap();
             assert_eq!(back.date, chrono::NaiveDate::from_ymd_opt(2026, 11, 3));
             assert_eq!(back.end, chrono::NaiveTime::from_hms_opt(15, 0, 0));
+        })
+        .await
+        .unwrap();
+    });
+}
+
+#[test]
+fn felix_makes_a_repeat_every_other_week_until_a_day_and_the_undo_puts_it_back() {
+    let (state, _dir, _ids) = state_with(&[]);
+    run(async {
+        let state = state.clone();
+        tokio::task::spawn_blocking(move || {
+            let add = crate::tools::Proposal::AddTask {
+                summary: "Add".into(),
+                title: "Gym".into(),
+                description: String::new(),
+                date: Some("2026-11-02".into()),
+                time: None,
+                task_kind: None,
+                repeat: vec![0, 2],
+                every: Some(2),
+                monthly: false,
+                until: Some("2026-12-19".into()),
+            };
+            let shown = crate::routes::organize::act_now(&state, &add).unwrap();
+            let id = shown["task"].as_str().unwrap().to_string();
+            let stored = crate::tasks::load(&state.chats, &id).unwrap();
+            assert_eq!(
+                (stored.every, stored.until),
+                (2, chrono::NaiveDate::from_ymd_opt(2026, 12, 19))
+            );
+            let change = crate::tools::Proposal::UpdateTask {
+                summary: "Change".into(),
+                id: id.clone(),
+                description: None,
+                done: None,
+                date: None,
+                clear_date: false,
+                time: None,
+                task_kind: None,
+                on: None,
+                every: Some(3),
+                until: Some(String::new()),
+            };
+            let shown = crate::routes::organize::act_now(&state, &change).unwrap();
+            let stored = crate::tasks::load(&state.chats, &id).unwrap();
+            assert_eq!((stored.every, stored.until), (3, None));
+            let undo: crate::tools::Proposal =
+                serde_json::from_value(shown["undo"].clone()).unwrap();
+            crate::routes::organize::act_now(&state, &undo).unwrap();
+            let back = crate::tasks::load(&state.chats, &id).unwrap();
+            assert_eq!(
+                (back.every, back.until),
+                (2, chrono::NaiveDate::from_ymd_opt(2026, 12, 19))
+            );
         })
         .await
         .unwrap();

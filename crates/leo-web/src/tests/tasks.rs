@@ -305,6 +305,65 @@ fn a_repeating_task_keeps_every_done_day() {
 }
 
 #[test]
+fn a_repeat_may_skip_weeks_go_monthly_and_stop_on_a_day_and_bad_values_are_refused() {
+    let (state, _dir, _) = state_with(&[]);
+    let make = |body: serde_json::Value| {
+        run(create_task(
+            State(state.clone()),
+            Json(serde_json::from_value(body).unwrap()),
+        ))
+    };
+    for bad in [
+        serde_json::json!({"title": "A", "date": "2026-11-02", "repeat": [0], "every": 0}),
+        serde_json::json!({"title": "A", "date": "2026-11-02", "repeat": [0], "every": 13}),
+        serde_json::json!({"title": "A", "date": "2026-11-02", "repeat": [0], "every": 99999}),
+        serde_json::json!({"title": "A", "date": "2026-11-02", "repeat": [0], "until": "2026-11-01"}),
+        serde_json::json!({"title": "A", "repeat": [0], "until": "2026-11-01"}),
+    ] {
+        assert_eq!(make(bad).status(), 400);
+    }
+    let made = json_of(make(serde_json::json!({
+        "title": "Gym", "date": "2026-11-02", "repeat": [0, 2], "every": 2, "until": "2026-12-19"
+    })));
+    assert_eq!(
+        (made["every"].clone(), made["until"].clone()),
+        (serde_json::json!(2), serde_json::json!("2026-12-19"))
+    );
+    let id = made["id"].as_str().unwrap();
+    assert_eq!(
+        change(&state, id, serde_json::json!({"every": 0})).status(),
+        400
+    );
+    assert_eq!(
+        change(&state, id, serde_json::json!({"every": 13})).status(),
+        400
+    );
+    assert_eq!(
+        change(&state, id, serde_json::json!({"until": "2026-11-01"})).status(),
+        400
+    );
+    assert_eq!(
+        crate::tasks::load(&state.chats, id).unwrap().until,
+        chrono::NaiveDate::from_ymd_opt(2026, 12, 19)
+    );
+    let kept = json_of(change(
+        &state,
+        id,
+        serde_json::json!({"monthly": true, "every": 1, "until": null}),
+    ));
+    assert_eq!(kept["monthly"], true);
+    assert!(kept.get("until").is_none() && kept.get("every").is_none());
+    let plain = json_of(make(
+        serde_json::json!({"title": "Plain", "date": "2026-11-02"}),
+    ));
+    assert!(plain.get("every").is_none() && plain.get("monthly").is_none());
+    let monthly = json_of(make(
+        serde_json::json!({"title": "Rent", "date": "2026-11-15", "monthly": true}),
+    ));
+    assert_eq!(monthly["monthly"], true);
+}
+
+#[test]
 fn checkbox_descriptions_are_separate_from_the_note_and_survive_date_and_kind_changes() {
     let (state, _dir, ids) = state_with(&[("Plan", "")]);
     {
@@ -843,6 +902,9 @@ fn bench_state(n: usize) -> (AppState, tempfile::TempDir, tempfile::TempDir) {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             repeat: Vec::new(),
+            every: 1,
+            monthly: false,
+            until: None,
             done_on: Vec::new(),
             moved: Default::default(),
             deleted: false,
@@ -1115,6 +1177,9 @@ fn stored_task(n: usize) -> crate::tasks::Task {
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
         repeat: Vec::new(),
+        every: 1,
+        monthly: false,
+        until: None,
         done_on: Vec::new(),
         moved: Default::default(),
         deleted: false,

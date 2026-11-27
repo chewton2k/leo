@@ -582,6 +582,57 @@ fn repeat_of(text: &str) -> Result<Vec<u8>, String> {
     Ok(tasks::clean_repeat(&out))
 }
 
+fn ordinal(n: u32) -> String {
+    let end = match (n % 100, n % 10) {
+        (11..=13, _) => "th",
+        (_, 1) => "st",
+        (_, 2) => "nd",
+        (_, 3) => "rd",
+        _ => "th",
+    };
+    format!("{n}{end}")
+}
+
+fn repeat_words(rule: &tasks::Repeat) -> String {
+    use chrono::Datelike;
+    let unit = if rule.monthly { "month" } else { "week" };
+    let mut text = match (rule.every, rule.monthly) {
+        (2.., _) => format!("every {} {unit}s", rule.every),
+        (_, true) => "monthly".to_string(),
+        _ => "weekly".to_string(),
+    };
+    if rule.monthly {
+        if let Some(start) = rule.start {
+            text += &format!(" on the {}", ordinal(start.day()));
+        }
+    } else {
+        text += &format!(
+            " on {}",
+            rule.days
+                .iter()
+                .map(|d| DAY_NAMES[*d as usize])
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    if let Some(until) = rule.until {
+        text += &format!(" until {}", until.format("%b %-d"));
+    }
+    text
+}
+
+fn every_of(text: &str) -> Result<Option<u8>, String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    text.parse::<u8>()
+        .ok()
+        .filter(|n| (1..=12).contains(n))
+        .map(Some)
+        .ok_or_else(|| "\"every\" must be a number from 1 to 12".to_string())
+}
+
 fn add_task(call: &Call) -> Result<Proposal, String> {
     let title = call.text("title").trim().to_string();
     if title.is_empty() {
@@ -594,22 +645,32 @@ fn add_task(call: &Call) -> Result<Proposal, String> {
         None
     };
     let kind = kind_of(&call.text("type"))?;
-    let repeat = repeat_of(&call.text("repeat"))?;
-    let every = if repeat.is_empty() {
-        String::new()
+    let repeat_text = call.text("repeat").to_lowercase();
+    let monthly = repeat_text.contains("monthly");
+    let repeat = repeat_of(&repeat_text.replace("monthly", ""))?;
+    let every = every_of(&call.text("every"))?;
+    let until = date_of(&call.text("until"))?;
+    let rule = tasks::Repeat {
+        days: &repeat,
+        every: every.unwrap_or(1),
+        monthly,
+        until,
+        start: date.or_else(|| Some(chrono::Local::now().date_naive())),
+    };
+    if !rule.repeats() && (every.is_some() || until.is_some()) {
+        return Err("\"every\" and \"until\" are only for repeating tasks".into());
+    }
+    if until.is_some_and(|u| rule.start.is_some_and(|s| u < s)) {
+        return Err("\"until\" cannot be before the task's first day".into());
+    }
+    let every_text = if rule.repeats() {
+        format!(" · repeats {}", repeat_words(&rule))
     } else {
-        format!(
-            " · every {}",
-            repeat
-                .iter()
-                .map(|d| DAY_NAMES[*d as usize])
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+        String::new()
     };
     Ok(Proposal::AddTask {
         summary: format!(
-            "Add the task “{title}”{}{every}",
+            "Add the task “{title}”{}{every_text}",
             if date.is_some() {
                 format!(" · {}", when_label(date, time))
             } else {
@@ -622,6 +683,9 @@ fn add_task(call: &Call) -> Result<Proposal, String> {
         time: time.map(|t| t.format("%H:%M").to_string()),
         task_kind: kind,
         repeat,
+        every,
+        monthly,
+        until: until.map(|d| d.to_string()),
     })
 }
 
@@ -648,14 +712,32 @@ fn update_task(state: &AppState, call: &Call) -> Result<Proposal, String> {
     };
     let time = time_of(&call.text("time"))?;
     let kind = kind_of(&call.text("type"))?;
+    let every = every_of(&call.text("every"))?;
+    let until_text = call.text("until");
+    let clear_until = until_text.trim().eq_ignore_ascii_case("none");
+    let until = if clear_until {
+        None
+    } else {
+        date_of(&until_text)?
+    };
+    let reshaped = every.is_some() || until.is_some() || clear_until;
     if done.is_none()
         && date.is_none()
         && !clear_date
         && time.is_none()
         && kind.is_none()
         && description.is_none()
+        && !reshaped
     {
-        return Err("say what to change: description, done, date, time or type".into());
+        return Err(
+            "say what to change: description, done, date, time, type, every or until".into(),
+        );
+    }
+    if reshaped && !task.repeats() {
+        return Err("\"every\" and \"until\" are only for repeating tasks".into());
+    }
+    if until.is_some_and(|u| date.or(task.date).is_none_or(|d| u < d)) {
+        return Err("\"until\" cannot be before the task's first day".into());
     }
     if time.is_some() && date.is_none() && task.date.is_none() {
         return Err("give the task a date along with the time".into());
@@ -683,6 +765,20 @@ fn update_task(state: &AppState, call: &Call) -> Result<Proposal, String> {
             when_label(date.or(task.date), time.or(task.time))
         ));
     }
+    if reshaped {
+        let rule = tasks::Repeat {
+            every: every.unwrap_or(task.every),
+            monthly: task.monthly,
+            until: if clear_until {
+                None
+            } else {
+                until.or(task.until)
+            },
+            start: date.or(task.date),
+            ..task.rule()
+        };
+        parts.push(format!("repeat {}", repeat_words(&rule)));
+    }
     if let Some(kind) = &kind {
         parts.push(format!(
             "make it {} {kind}",
@@ -694,7 +790,7 @@ fn update_task(state: &AppState, call: &Call) -> Result<Proposal, String> {
         ));
     }
     let on = date_of(&call.text("on"))?;
-    if on.is_some() && task.repeat.is_empty() {
+    if on.is_some() && !task.repeats() {
         return Err("\"on\" is only for repeating tasks".into());
     }
     Ok(Proposal::UpdateTask {
@@ -707,6 +803,12 @@ fn update_task(state: &AppState, call: &Call) -> Result<Proposal, String> {
         time: time.map(|t| t.format("%H:%M").to_string()),
         task_kind: kind,
         on: on.map(|d| d.to_string()),
+        every,
+        until: if clear_until {
+            Some(String::new())
+        } else {
+            until.map(|d| d.to_string())
+        },
     })
 }
 
@@ -859,7 +961,7 @@ fn schedule(state: &AppState, call: &Call) -> Done {
     )];
     let overdue: Vec<&Listed> = all
         .iter()
-        .filter(|t| !t.done && t.repeat.is_empty() && t.date.is_some_and(|d| d < today))
+        .filter(|t| !t.done && !t.repeats() && t.date.is_some_and(|d| d < today))
         .collect();
     if !overdue.is_empty() {
         lines.push("Overdue:".into());
@@ -908,21 +1010,21 @@ fn schedule(state: &AppState, call: &Call) -> Done {
             ));
         }
         for t in all.iter() {
-            let on = if t.repeat.is_empty() {
-                (t.date == Some(day)).then_some(day)
+            let on = if t.repeats() {
+                tasks::occurs_on(&t.rule(), &t.moved, day)
             } else {
-                tasks::occurs_on(&t.repeat, t.date, &t.moved, day)
+                (t.date == Some(day)).then_some(day)
             };
             let Some(on) = on else { continue };
             let mut seen = t.clone();
-            if let Some(slot) = t.moved.get(&on).filter(|_| !t.repeat.is_empty()) {
+            if let Some(slot) = t.moved.get(&on).filter(|_| t.repeats()) {
                 seen.time = slot.time;
             }
             items.push((
                 seen.time
                     .map(|tm| tm.format("%H:%M").to_string())
                     .unwrap_or_else(|| "00:00".into()),
-                if t.repeat.is_empty() {
+                if !t.repeats() {
                     task_line(t)
                 } else {
                     seen.done = t.done_on.contains(&on);
@@ -931,7 +1033,11 @@ fn schedule(state: &AppState, call: &Call) -> Done {
                     } else {
                         format!(" · moved here from {on} (on: {on})")
                     };
-                    format!("{} · repeats weekly{from}", task_line(&seen))
+                    format!(
+                        "{} · repeats {}{from}",
+                        task_line(&seen),
+                        repeat_words(&t.rule())
+                    )
                 },
             ));
         }
@@ -1027,12 +1133,15 @@ pub(crate) async fn act(
             time,
             task_kind,
             repeat,
+            every,
+            monthly,
+            until,
             ..
         } => {
             let made = reply_of(
                 task_routes::create_task(
                     State(state.clone()),
-                    Json(parse(serde_json::json!({ "title": title, "description": description, "date": date, "time": time, "kind": task_kind.clone().unwrap_or_else(|| "other".into()), "repeat": repeat }))?),
+                    Json(parse(serde_json::json!({ "title": title, "description": description, "date": date, "time": time, "kind": task_kind.clone().unwrap_or_else(|| "other".into()), "repeat": repeat, "every": every, "monthly": monthly, "until": until }))?),
                 )
                 .await,
             )
@@ -1094,6 +1203,8 @@ pub(crate) async fn act(
             time,
             task_kind,
             on,
+            every,
+            until,
             ..
         } => {
             let all = listed_now(state)?;
@@ -1140,6 +1251,15 @@ pub(crate) async fn act(
             if let Some(kind) = task_kind {
                 change.insert("kind".into(), serde_json::json!(kind));
             }
+            if let Some(every) = every {
+                change.insert("every".into(), serde_json::json!(every));
+            }
+            if let Some(until) = until {
+                change.insert(
+                    "until".into(),
+                    serde_json::json!((!until.is_empty()).then_some(until)),
+                );
+            }
             reply_of(
                 task_routes::change_task(
                     State(state.clone()),
@@ -1154,10 +1274,10 @@ pub(crate) async fn act(
                 .as_deref()
                 .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
                 .unwrap_or_else(|| chrono::Local::now().date_naive());
-            let was_done = if before.repeat.is_empty() {
-                before.done
-            } else {
+            let was_done = if before.repeats() {
                 before.done_on.contains(&day)
+            } else {
+                before.done
             };
             Ok((
                 serde_json::Value::Null,
@@ -1178,7 +1298,11 @@ pub(crate) async fn act(
                         None
                     },
                     task_kind: task_kind.as_ref().map(|_| before.kind.clone()),
-                    on: (!before.repeat.is_empty()).then(|| day.to_string()),
+                    on: before.repeats().then(|| day.to_string()),
+                    every: every.map(|_| before.every),
+                    until: until
+                        .as_ref()
+                        .map(|_| before.until.map(|d| d.to_string()).unwrap_or_default()),
                 },
             ))
         }
@@ -1927,5 +2051,68 @@ mod trash_tests {
         let only = [row("b", "Two", "cs130", false)];
         let said = folder_to_restore(&only, "cs130").unwrap_err();
         assert!(said.contains("cannot be read"), "{said}");
+    }
+}
+
+#[cfg(test)]
+mod repeat_tests {
+    use super::*;
+
+    fn call(args: serde_json::Value) -> Call {
+        Call {
+            name: "add_task".into(),
+            args,
+        }
+    }
+
+    #[test]
+    fn felix_words_every_other_week_monthly_and_until() {
+        let Ok(Proposal::AddTask {
+            summary,
+            every,
+            monthly,
+            until,
+            ..
+        }) = add_task(&call(serde_json::json!({
+            "title": "Gym", "date": "2026-11-02", "repeat": "mon, wed", "every": "2", "until": "2026-12-19"
+        })))
+        else {
+            panic!("expected a task");
+        };
+        assert!(
+            summary.ends_with("repeats every 2 weeks on Mon, Wed until Dec 19"),
+            "{summary}"
+        );
+        assert_eq!(
+            (every, monthly, until.as_deref()),
+            (Some(2), false, Some("2026-12-19"))
+        );
+        let Ok(Proposal::AddTask {
+            summary, monthly, ..
+        }) = add_task(&call(serde_json::json!({
+            "title": "Rent", "date": "2026-11-22", "repeat": "monthly"
+        })))
+        else {
+            panic!("expected a task");
+        };
+        assert!(
+            summary.ends_with("repeats monthly on the 22nd"),
+            "{summary}"
+        );
+        assert!(monthly);
+    }
+
+    #[test]
+    fn felix_is_told_when_a_repeat_choice_cannot_be_used() {
+        let refused = |args: serde_json::Value| add_task(&call(args)).unwrap_err();
+        assert!(
+            refused(serde_json::json!({"title": "A", "repeat": "mon", "every": "13"}))
+                .contains("1 to 12")
+        );
+        assert!(
+            refused(serde_json::json!({"title": "A", "date": "2026-11-02", "every": "2"}))
+                .contains("only for repeating")
+        );
+        assert!(refused(serde_json::json!({"title": "A", "date": "2026-11-02", "repeat": "mon", "until": "2026-11-01"})).contains("before"));
     }
 }

@@ -212,15 +212,55 @@ test('a repeating task shows on its weekdays from its start, done day by day, ne
   assert.equal(S.weekdayOf('2026-10-12'), 0);
   assert.equal(S.weekdayOf('2026-10-18'), 6);
   assert.equal(S.nextOpen(gym, '2026-10-12', '2026-10-19').date, '2026-10-14');
-  assert.equal(S.repeatLabel([0, 1, 2, 3, 4]), 'Every weekday');
-  assert.equal(S.repeatLabel([6, 5, 0, 1, 2, 3, 4]), 'Every day');
-  assert.equal(S.rrule([4, 0, 2]), 'RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR');
+  assert.equal(S.repeatLabel({ repeat: [0, 1, 2, 3, 4] }), 'Every weekday');
+  assert.equal(S.repeatLabel({ repeat: [6, 5, 0, 1, 2, 3, 4] }), 'Every day');
+  assert.equal(S.rrule({ repeat: [4, 0, 2] }), 'RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR;WKST=MO');
 });
 
 test('Google gets a weekly rule starting on the first repeat day', () => {
   const link = new URL(S.googleLink({ id: 'g', title: 'Gym', date: '2026-10-13', repeat: [2], kind: 'other' }));
-  assert.equal(link.searchParams.get('recur'), 'RRULE:FREQ=WEEKLY;BYDAY=WE');
+  assert.equal(link.searchParams.get('recur'), 'RRULE:FREQ=WEEKLY;BYDAY=WE;WKST=MO');
   assert.equal(link.searchParams.get('dates'), '20261014/20261015');
+});
+
+test('every other week keeps whole weeks from the start week', () => {
+  const gym = { id: 'g', title: 'Gym', date: '2026-11-04', repeat: [0, 2], every: 2 };
+  const days = S.occurrences(gym, '2026-11-01', '2026-11-30').map((o) => o.date);
+  assert.deepEqual(days, ['2026-11-04', '2026-11-16', '2026-11-18', '2026-11-30']);
+  assert.equal(S.repeatsOn(gym, '2026-11-02'), false);
+});
+
+test('a monthly task keeps its day, skips months without it, and every two months skips alternate ones', () => {
+  const rent = { id: 'r', title: 'Rent', date: '2026-01-31', monthly: true };
+  assert.deepEqual(S.occurrences(rent, '2026-01-01', '2026-06-30').map((o) => o.date), ['2026-01-31', '2026-03-31', '2026-05-31']);
+  assert.equal(S.repeats(rent), true);
+  const bills = { ...rent, every: 2 };
+  assert.deepEqual(S.occurrences(bills, '2026-01-01', '2026-09-30').map((o) => o.date), ['2026-01-31', '2026-03-31', '2026-05-31', '2026-07-31']);
+  assert.equal(S.repeatsOn(bills, '2026-08-31'), false);
+});
+
+test('nothing repeats after its until day, and moves and done days follow the real occurrences', () => {
+  const gym = { id: 'g', title: 'Gym', date: '2026-11-02', repeat: [0], every: 2, until: '2026-11-30', done_on: ['2026-11-16'], moved: { '2026-11-09': { date: '2026-11-10', time: null }, '2026-11-16': { date: '2026-11-17', time: null } } };
+  const out = S.occurrences(gym, '2026-11-01', '2026-12-31');
+  assert.deepEqual(out.map((o) => o.date), ['2026-11-02', '2026-11-17', '2026-11-30']);
+  assert.deepEqual(out.map((o) => o.done), [false, true, false]);
+  assert.equal(S.repeatsOn(gym, '2026-12-14'), false);
+});
+
+test('repeat words, rules and Google links carry the interval, month day and last day', () => {
+  const gym = { id: 'g', title: 'Gym', date: '2026-11-02', repeat: [0, 2], every: 2, until: '2026-12-19' };
+  assert.equal(S.repeatLabel(gym, 'en-US'), 'Every 2 weeks on Mon, Wed until Dec 19');
+  assert.equal(S.rrule(gym), 'RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;WKST=MO;UNTIL=20261219');
+  const timed = S.rrule({ ...gym, time: '09:00:00' });
+  assert.equal(timed, `RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;WKST=MO;UNTIL=${new Date(2026, 11, 19, 23, 59, 59).toISOString().replace(/[-:]|\.\d+/g, '')}`);
+  const rent = { id: 'r', title: 'Rent', date: '2026-11-22', monthly: true };
+  assert.equal(S.repeatLabel(rent, 'en-US'), 'Monthly on the 22nd');
+  assert.equal(S.repeatLabel({ ...rent, every: 3, until: '2027-02-01' }, 'en-US'), 'Every 3 months on the 22nd until Feb 1');
+  assert.equal(S.rrule({ ...rent, every: 3 }), 'RRULE:FREQ=MONTHLY;INTERVAL=3;BYMONTHDAY=22');
+  const link = new URL(S.googleLink(rent));
+  assert.equal(link.searchParams.get('recur'), 'RRULE:FREQ=MONTHLY;BYMONTHDAY=22');
+  assert.equal(S.repeatLabel({ date: '2026-11-02' }), '');
+  assert.equal(S.rrule({ date: '2026-11-02' }), '');
 });
 
 test('a moved day of a repeating task shows where it went, keeps its name, and frees its old day', () => {

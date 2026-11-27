@@ -1025,7 +1025,7 @@ pub(crate) async fn schedule(
         let page = listed.len().min(limit);
         let window: Vec<&crate::tasks::Listed> = listed[page..]
             .iter()
-            .filter(|t| !t.repeat.is_empty() || t.date.is_some_and(|d| d >= first && d <= last))
+            .filter(|t| t.repeats() || t.date.is_some_and(|d| d >= first && d <= last))
             .collect();
         serde_json::json!({
             "connected": !linking.calendars.is_empty(),
