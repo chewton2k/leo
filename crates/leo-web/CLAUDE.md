@@ -442,7 +442,7 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   content, so no text node reaches the caret or margin maths; the Markdown is unchanged;
   2026-11-21, the user's call). A heading block (not the first)
   has 16 px of padding above its heading, open or not, so it leads the text below (2026-11-21, the
-  user's call). The line under
+  user's call). An editor opened at the height of the block it replaces keeps that height only while its text fits; when a slash pick turns a plain line into a heading, `fit` grows it so the caret stays visible (2026-11-28). A folded heading's summary counts checkbox lines apart from other lines ("2 lines · 1 of 4 tasks done"). The line under
   the title (`#note-facts`) holds the save state, `#save-state` (the drying mark, its
   words hidden, or a visible problem such as "Not saved"), then `#note-edited` ("Edited …",
   "Edited just now" after a save, hidden while a problem shows), then the read time (`#note-read`, " · N min read" from

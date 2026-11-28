@@ -475,6 +475,51 @@ test('a fold chevron sits level with its heading text, first heading or not', as
   });
 });
 
+test('every slash heading below other text shows its whole line and caret, like typing the marks', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    for (const [query, mark] of [['head', '# '], ['sub', '## '], ['small', '### ']]) {
+      for (const how of ['slash', 'typed']) {
+        await page.goto(url + '/?body=' + encodeURIComponent('First paragraph'));
+        await page.locator('#doc .blk').first().click();
+        await page.keyboard.press('End');
+        await page.keyboard.press('Enter');
+        if (how === 'slash') { await page.keyboard.type('/' + query); await page.keyboard.press('Enter'); }
+        else await page.keyboard.type(mark);
+        const editor = page.locator('#doc textarea');
+        await expect(editor).toBeFocused();
+        await expect(editor).toHaveValue(mark);
+        const box = await editor.evaluate(el => ({ clipped: el.scrollHeight - el.clientHeight, height: el.clientHeight, line: parseFloat(getComputedStyle(el).lineHeight), caret: el.selectionStart }));
+        expect(box.clipped, how + ' ' + mark).toBeLessThanOrEqual(1);
+        expect(box.height, how + ' ' + mark).toBeGreaterThanOrEqual(box.line);
+        expect(box.caret).toBe(mark.length);
+        await page.keyboard.type('Title');
+        expect(await page.evaluate(() => window.doc.source())).toBe('First paragraph\n' + mark + 'Title');
+      }
+    }
+  });
+});
+
+test('a folded heading counts its tasks apart from its lines and keeps the count when a task changes', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    await page.goto(url + '/?body=' + encodeURIComponent('## Tasks\n\n- [ ] Milk\n- [x] Eggs\n- [ ] Bread\n\nSome text\n\n### Sub\n\n- [ ] Deep\n\n## Only tasks\n\n- [x] Done\n\n## Plain\n\nWords\n\n## Open\n\n- [ ] Later'));
+    const heads = page.locator('#doc :is(h2, h3)');
+    for (const name of ['Tasks', 'Only tasks', 'Plain']) await heads.filter({ hasText: new RegExp('^' + name + '$') }).locator('.fold-btn').click({ force: true });
+    await expect(heads.filter({ hasText: /^Tasks$/ })).toHaveAttribute('data-fold-said', '2 lines · 1 of 4 tasks done');
+    await expect(heads.filter({ hasText: /^Only tasks$/ })).toHaveAttribute('data-fold-said', '1 of 1 task done');
+    await expect(heads.filter({ hasText: 'Plain' })).toHaveAttribute('data-fold-said', '1 line');
+    await expect(page.locator('#doc .blk-folded .task')).toHaveCount(5);
+    await page.locator('#doc .task input[type=checkbox]').last().click();
+    await expect.poll(() => page.evaluate(() => window.doc.source().endsWith('- [x] Later'))).toBe(true);
+    await expect(heads.filter({ hasText: /^Tasks$/ })).toHaveAttribute('data-fold-said', '2 lines · 1 of 4 tasks done');
+    await expect(page.locator('#doc .blk-folded .task')).toHaveCount(5);
+    await heads.filter({ hasText: /^Tasks$/ }).locator('.fold-btn').click({ force: true });
+    await expect(heads.filter({ hasText: /^Tasks$/ })).not.toHaveAttribute('data-fold-said', /./);
+    await expect(page.locator('#doc .blk-folded .task')).toHaveCount(1);
+  });
+});
+
 test('a drag from the text before a picture into the open text after it cuts exactly what it covers', async ({ browser }) => {
   await editorFixture(browser, async (context, url) => {
     const page = await context.newPage();

@@ -800,7 +800,8 @@
       if (editing && editing.initialHeight !== null) {
         area.style.height = `${editing.initialHeight}px`;
         area.style.overflowY = 'auto';
-        return;
+        if (area.scrollHeight - area.clientHeight <= 1) return;
+        editing.initialHeight = null;
       }
       area.style.overflowY = 'hidden';
       area.style.height = 'auto';
@@ -2305,9 +2306,12 @@
         }
         const closed = folded.has(head.key);
         const range = closed ? ranges.find((x) => x.owner === i) : null;
-        const lineCount = range ? lines.slice(range.from, range.to).filter((line) => line.trim()).length : 0;
+        const inside = range ? lines.slice(range.from, range.to).filter((line) => line.trim()) : [];
+        const tasks = inside.filter((line) => ed.isBox(line));
+        const done = tasks.filter((line) => /\[[xX]\]/.test(line)).length;
+        const lineCount = inside.length - tasks.length;
         const notes = range ? foldNotes.get(blocks[i].start) || 0 : 0;
-        const said = range ? [lineCount ? `${lineCount} ${lineCount === 1 ? 'line' : 'lines'}` : '', notes ? `${notes} margin ${notes === 1 ? 'note' : 'notes'}` : ''].filter(Boolean).join(' · ') : '';
+        const said = range ? [lineCount ? `${lineCount} ${lineCount === 1 ? 'line' : 'lines'}` : '', tasks.length ? `${done} of ${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'} done` : '', notes ? `${notes} margin ${notes === 1 ? 'note' : 'notes'}` : ''].filter(Boolean).join(' · ') : '';
         const sign = `${closed}|${said}|${head.text}`;
         if (r.fold === sign) return;
         const h = el.querySelector('h1, h2, h3, h4, h5, h6');
