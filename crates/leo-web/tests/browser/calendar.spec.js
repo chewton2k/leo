@@ -9,7 +9,7 @@ const at = (d, h, m = 0) => new Date(2026, 10, d, h, m).toISOString();
 // The Calendar page with its real CSS, icons, sheets, schedule.js and calendar.js over an
 // in-memory API that behaves like routes/tasks.rs (occurrence moves included). A fixed
 // 284 px explorer sits on the left like the desktop sidebar.
-async function calendarFixture(browser, run, { width = 1360, height = 900, view = 'week' } = {}) {
+async function calendarFixture(browser, run, { width = 1360, height = 900, view = 'week', zone } = {}) {
   const web = path.resolve(__dirname, '../../src/web');
   const read = name => fs.readFileSync(path.join(web, name), 'utf8');
   const css = pageCss();
@@ -99,7 +99,7 @@ async function calendarFixture(browser, run, { width = 1360, height = 900, view 
     res.end('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/style.css"><style>body{--side:284px;padding-left:var(--side)}#explorer{position:fixed;left:0;top:0;bottom:0;width:var(--side);background:var(--surface-2)}</style></head><body class="on-calendar"><nav id="explorer">Folders</nav><header class="bar" id="bar"><div class="bar-row"><div class="crumbs" id="crumbs"></div></div></header><main id="app"></main><script src="/schedule.js"></script><script src="/fixture.js"></script></body></html>');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const context = await browser.newContext({ viewport: { width, height }, locale: 'en-US' });
+  const context = await browser.newContext({ viewport: { width, height }, locale: 'en-US', timezoneId: zone });
   try {
     const tab = await context.newPage();
     await tab.clock.install({ time: new Date(2026, 10, 3, 11, 40) });
@@ -1310,6 +1310,30 @@ test('two overlapping busy items are both marked and the peek names the other, w
     await expect(page.locator('#cal-side.peek .cal-peek-title')).toHaveText('Lunch');
     await expect(page.locator('#cal-side.peek')).not.toContainText('Overlaps');
   }, { view: 'day' });
+});
+
+test('with a second time zone chosen the peeks of an event and a timed task show the span there, and nothing when it matches', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const peek = page.locator('#cal-side.peek');
+    const open = async (id, title) => {
+      await page.locator(`.cal-item[data-id="${id}"]`).click();
+      await expect(peek.locator('.cal-peek-title')).toHaveText(title);
+    };
+    await open('e-lecture', 'CS 241 lecture');
+    await expect(peek).not.toContainText('London');
+    await page.evaluate(() => localStorage.setItem('leo-second-zone', 'Europe/London'));
+    await page.locator('.cal-item[data-id="task-study"]').click();
+    await expect(peek.locator('#cal-peek-title')).toHaveValue('Study group');
+    await expect(peek.locator('#cal-peek-extra')).toContainText(/9:00\s*–\s*10:00\s*PM London/);
+    await open('e-lecture', 'CS 241 lecture');
+    await expect(peek.locator('.cal-zone')).toHaveText(/^6:00\s*–\s*7:30\s*PM London$/);
+    await page.evaluate(() => localStorage.setItem('leo-second-zone', 'America/Los_Angeles'));
+    await page.locator('.cal-item[data-id="task-study"]').click();
+    await expect(peek.locator('#cal-peek-title')).toHaveValue('Study group');
+    await expect(peek.locator('#cal-peek-extra')).toBeEmpty();
+    await open('e-lecture', 'CS 241 lecture');
+    await expect(peek.locator('.cal-zone')).toHaveCount(0);
+  }, { zone: 'America/Los_Angeles' });
 });
 
 test('a declined event is drawn muted and says so in its peek, and a free one is dashed', async ({ browser }) => {

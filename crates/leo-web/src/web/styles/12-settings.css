@@ -395,3 +395,5 @@ button.choice-pick .felix { cursor: inherit; }
 .set-status { font-size: var(--fs-xs); font-weight: 650; padding: 2px 9px; border-radius: var(--r-pill); white-space: nowrap; }
 .set-status.ok { background: color-mix(in srgb, var(--good) 15%, var(--raised)); color: var(--good); }
 .set-status.missing { color: var(--muted); }
+.work-times { display: flex; align-items: center; gap: 8px; }
+.work-times .set-input { width: auto; }

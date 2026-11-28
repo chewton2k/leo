@@ -157,6 +157,67 @@ document.addEventListener('change', async (e) => {
   }
 });
 
+const ZONE_FALLBACK = ['America/Los_Angeles', 'America/New_York', 'Europe/London', 'Europe/Paris', 'Asia/Kolkata', 'Asia/Shanghai', 'Asia/Tokyo', 'Australia/Sydney'];
+
+function zoneRow() {
+  let zones;
+  try {
+    zones = Intl.supportedValuesOf('timeZone');
+  } catch (e) {
+    zones = ZONE_FALLBACK;
+  }
+  const now = calSecondZone();
+  return `<label class="set-row" data-find="calendar-zone"><span class="grow">Second time zone<span class="set-desc">Show each event and task time in this zone too.</span></span><span class="select-control"><select data-cal-zone aria-label="Second time zone"><option value="">None</option>${zones.map((z) => `<option value="${esc(z)}"${z === now ? ' selected' : ''}>${esc(z.replace(/_/g, ' '))}</option>`).join('')}</select>${ICON.chevron}</span></label>`;
+}
+
+function workHoursRow() {
+  const hours = calWorkHours();
+  const time = (key, label) => `<input class="set-input" type="time" data-work-time="${key}" aria-label="${label}" value="${esc(hours[key])}" required>`;
+  return `<div class="set-row column work-hours" data-find="calendar-work-hours"><span class="set-label">Working hours<span class="set-desc">Find a time offers free slots inside these hours.</span></span>${repeatBubbles(hours.days, 'Working days')}<span class="work-times">${time('from', 'Working hours start')}<span class="hint">to</span>${time('to', 'Working hours end')}</span></div>`;
+}
+
+function saveWorkHours(hours) {
+  try {
+    localStorage.setItem('leo-work-hours', JSON.stringify(hours));
+    return true;
+  } catch (e) {
+    toast('leo could not save this on this device.', { bad: true });
+    return false;
+  }
+}
+
+document.addEventListener('click', (e) => {
+  const day = e.target.closest?.('.work-hours [data-repeat-day]');
+  if (!day) return;
+  const hours = calWorkHours();
+  const d = Number(day.dataset.repeatDay);
+  const days = hours.days.includes(d) ? hours.days.filter((x) => x !== d) : [...hours.days, d].sort((a, b) => a - b);
+  if (!days.length) return toast('Keep at least one working day.', { bad: true });
+  if (!saveWorkHours({ ...hours, days })) return;
+  day.classList.toggle('on', days.includes(d));
+  day.setAttribute('aria-pressed', String(days.includes(d)));
+});
+
+document.addEventListener('change', (e) => {
+  const field = e.target;
+  if (field.matches?.('[data-cal-zone]')) {
+    try {
+      if (field.value) localStorage.setItem('leo-second-zone', field.value);
+      else localStorage.removeItem('leo-second-zone');
+    } catch (error) {
+      toast('leo could not save this on this device.', { bad: true });
+    }
+  } else if (field.matches?.('[data-work-time]')) {
+    const hours = calWorkHours();
+    const next = { ...hours, [field.dataset.workTime]: field.value };
+    if (!field.value || next.from >= next.to) {
+      field.value = hours[field.dataset.workTime];
+      return toast('Working hours must end after they start.', { bad: true });
+    }
+    saveWorkHours(next);
+  }
+});
+
 function calendarCard(cal) {
   if (!cal) return '';
   const linked = cal.calendars || [];
@@ -185,6 +246,8 @@ function calendarCard(cal) {
     ${count ? `<label class="set-row" data-find="calendar-offer"><span class="grow">Offer to record when an event starts<span class="set-desc">Ask whether to record when a connected calendar event begins.</span></span>${settingsSwitch('data-cal-offer', cal.offer !== false)}</label>` : ''}
     <div class="set-row" data-find="calendar-remind"><span class="grow">Remind me<span class="set-desc">How long before an event or a task with a time.</span></span>${segmented({ label: 'Remind me', field: 'data-cal-lead', current: cal.lead ?? 2, choices: [[0, 'At start'], [2, '2 min'], [5, '5 min'], [10, '10 min'], [15, '15 min']] })}</div>
     <label class="set-row" data-find="calendar-task-remind"><span class="grow">Remind me about tasks with a time<span class="set-desc">A notification when a task with a time is due, even with no calendar connected.</span></span>${settingsSwitch('data-cal-tasks', cal.tasks_remind !== false)}</label>
+    ${zoneRow()}
+    ${workHoursRow()}
     ${briefingRows({ on: false, at: '08:00', wants: '', ...cal.briefing })}
     ${adder}
   </section>`;

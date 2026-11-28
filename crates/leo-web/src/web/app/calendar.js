@@ -39,6 +39,41 @@ function calZone() {
   }
 }
 
+function calSecondZone() {
+  try {
+    return localStorage.getItem('leo-second-zone') || '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function calZoneLine(start, end) {
+  const zone = calSecondZone();
+  if (!zone) return '';
+  try {
+    const clock = { hour: 'numeric', minute: '2-digit' };
+    const part = (timeZone, options) => new Intl.DateTimeFormat(calLocale(), { timeZone, ...options });
+    const alike = (options) => part(zone, options).format(start) === part(undefined, options).format(start);
+    if (alike({ ...clock, day: 'numeric' })) return '';
+    return `${part(zone, alike({ day: 'numeric' }) ? clock : { weekday: 'short', ...clock }).formatRange(start, end)} ${zone.split('/').pop().replace(/_/g, ' ')}`;
+  } catch (e) {
+    return '';
+  }
+}
+
+const CAL_HOURS_DEFAULT = { days: [0, 1, 2, 3, 4], from: '09:00', to: '17:00' };
+
+function calWorkHours() {
+  try {
+    const hours = JSON.parse(localStorage.getItem('leo-work-hours'));
+    const clock = /^\d\d:\d\d$/;
+    if (hours && Array.isArray(hours.days) && hours.days.length && hours.days.every((d) => Number.isInteger(d) && d >= 0 && d < 7) && clock.test(hours.from) && clock.test(hours.to) && hours.from < hours.to) return hours;
+  } catch (e) {
+    return CAL_HOURS_DEFAULT;
+  }
+  return CAL_HOURS_DEFAULT;
+}
+
 function monthOf(key) {
   const d = S.fromKey(key);
   return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -169,8 +204,8 @@ function toneOfTask(task) {
   return TASK_TONES[task.kind] || '--hue-slate';
 }
 
-function repeatBubbles(on) {
-  return `<div class="repeat-days" role="group" aria-label="Repeat every">${[0, 1, 2, 3, 4, 5, 6].map((d) => {
+function repeatBubbles(on, label = 'Repeat every') {
+  return `<div class="repeat-days" role="group" aria-label="${esc(label)}">${[0, 1, 2, 3, 4, 5, 6].map((d) => {
     const day = new Date(2024, 0, 1 + d);
     const name = day.toLocaleDateString(calLocale(), { weekday: 'long' });
     const letter = day.toLocaleDateString(calLocale(), { weekday: 'narrow' });
@@ -1164,6 +1199,7 @@ function calPeekRefresh(id) {
   const google = $('#cal-peek-google', side);
   const acts = $('#cal-peek-acts', side);
   if (!task || !google || !acts) return;
+  $('#cal-peek-extra', side).innerHTML = calTaskLines(task, cal.peek.on);
   google.textContent = calPeekGoogle(task);
   acts.innerHTML = calPeekActs(task);
 }
@@ -1196,7 +1232,8 @@ function eventDetailsHtml(event) {
   const linked = (text) => (/^https?:\/\/\S+$/i.test(text) ? `<a href="${esc(text)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>` : esc(text));
   const status = event.reply === 'declined' ? 'You declined' : event.reply === 'tentative' ? 'Tentative' : event.free ? 'Shown as free' : '';
   const over = event.all_day ? '' : calOverlapLine((i) => i.type === 'event' && i.event.id === event.id, S.dayKey(new Date(event.start)));
-  return `<div class="set-row"><span class="set-label">When</span><span class="set-value">${esc(when)}</span></div>
+  const zone = event.all_day ? '' : calZoneLine(new Date(event.start), new Date(event.end));
+  return `<div class="set-row"><span class="set-label">When</span><span class="set-value">${esc(when)}${zone ? `<span class="hint cal-zone">${esc(zone)}</span>` : ''}</span></div>
     ${status ? `<div class="set-row"><span class="set-label">Status</span><span class="set-value">${status}</span></div>` : ''}
     ${over ? `<p class="hint">${esc(over)}</p>` : ''}
     ${where ? `<div class="set-row"><span class="set-label">Where</span><span class="set-value sched-wrap">${linked(where)}</span></div>` : ''}
@@ -1245,12 +1282,31 @@ function calPeekEvent(side, id) {
   });
 }
 
+function calSlot(task, on) {
+  const day = S.repeats(task) ? on || S.dayKey(new Date()) : null;
+  return { day, slot: day ? (task.moved || {})[day] || { date: day, time: task.time, end: task.end } : task };
+}
+
+function calMoment(date, time) {
+  const at = S.fromKey(date);
+  at.setHours(0, S.minutesOf(time), 0, 0);
+  return at;
+}
+
+function calTaskLines(task, on) {
+  const { day, slot } = calSlot(task, on);
+  if (!slot.date || !slot.time) return '';
+  const start = calMoment(slot.date, slot.time);
+  const zone = calZoneLine(start, slot.end ? calMoment(slot.date, slot.end) : start);
+  const over = calOverlapLine((i) => i.type === 'task' && i.task.id === task.id && (i.task.on || '') === (day || ''), slot.date);
+  return `${zone ? `<p class="hint">${esc(zone)}</p>` : ''}${over ? `<p class="hint">${esc(over)}</p>` : ''}`;
+}
+
 function calPeekTask(side, id, on) {
   const task = calFind(id);
   if (!task) return calClosePeek();
   const repeating = S.repeats(task);
-  const day = repeating ? on || S.dayKey(new Date()) : null;
-  const slot = repeating ? (task.moved || {})[day] || { date: day, time: task.time, end: task.end } : task;
+  const { day, slot } = calSlot(task, on);
   const leo = task.source === 'leo';
   const doneNow = taskDoneOn(task, day);
   const dayName = day ? S.fromKey(day).toLocaleDateString(calLocale(), { weekday: 'short', month: 'short', day: 'numeric' }) : '';
@@ -1266,6 +1322,7 @@ function calPeekTask(side, id, on) {
       <input class="set-input" type="time" id="cal-peek-start" aria-label="Starts" value="${esc(calHM(slot.time) || '')}"${slot.date ? '' : ' disabled'}>
       ${leo ? `<span class="hint">to</span><input class="set-input" type="time" id="cal-peek-end" aria-label="Ends" value="${esc(calHM(slot.end) || '')}"${slot.time ? '' : ' disabled'}>` : ''}
     </span></div>
+    <div id="cal-peek-extra">${calTaskLines(task, on)}</div>
     ${leo ? `<div class="set-row column task-repeat" id="cal-peek-repeat"><span class="set-label">Repeat</span>${repeatBubbles(task.repeat || [])}${repeatMore(task)}<span class="hint repeat-hint">${esc(repeatHint(task))}</span></div>` : ''}
     ${kindChips('cal-peek-kinds', task.kind)}
     <textarea class="cal-peek-about" id="cal-peek-about" rows="4" placeholder="Add a description…" aria-label="Description">${esc(task.description || '')}</textarea>
