@@ -164,6 +164,46 @@
     return out;
   }
 
+  function overlaps(items, key) {
+    const timed = items.filter(busy);
+    const spans = timed.map((item) => spanOn(item, key));
+    const cols = dayColumns(spans);
+    return new Map(timed.flatMap((item, i) => (cols[i].cols > 1 ? [[item, timed.filter((other, j) => j !== i && spans[j].start < spans[i].end && spans[i].start < spans[j].end)]] : [])));
+  }
+
+  function freeSlots({ busy: taken, days, hours, minutes, step = 30, now }) {
+    const spans = taken.map((b) => [new Date(b.start).getTime(), new Date(b.end).getTime()]);
+    const close = minutesOf(hours.to);
+    const at = (key, m) => {
+      const d = fromKey(key);
+      d.setHours(0, m, 0, 0);
+      return d;
+    };
+    return days.filter((key) => hours.days.includes(weekdayOf(key))).map((day) => {
+      const slots = [];
+      for (let m = Math.ceil(minutesOf(hours.from) / step) * step; m + minutes <= close; m += step) {
+        const start = at(day, m);
+        const end = at(day, m + minutes);
+        if (start >= now && !spans.some(([a, b]) => a < end && start < b)) slots.push({ start, end });
+      }
+      return { day, slots };
+    });
+  }
+
+  const MEETING_HOSTS = ['zoom.us', 'meet.google.com', 'teams.microsoft.com', 'teams.live.com', 'webex.com', 'whereby.com'];
+
+  function meetingLink(event) {
+    const host = (url) => {
+      try {
+        return new URL(url).hostname.toLowerCase();
+      } catch (e) {
+        return '';
+      }
+    };
+    const urls = (`${event.location || ''}\n${event.context || ''}`.match(/https:\/\/[^\s<>"']+/gi) || []).map((url) => url.replace(/&amp;/g, '&').replace(/[.,;:!?)\]]+$/, '')).filter(host);
+    return urls.find((url) => MEETING_HOSTS.some((h) => host(url) === h || host(url).endsWith(`.${h}`))) || urls[0] || '';
+  }
+
   function lanes(spans) {
     const order = spans.map((s, i) => i).sort((a, b) => spans[a].a - spans[b].a || spans[b].b - spans[a].b);
     const last = [];
@@ -657,7 +697,7 @@
 
   const busy = (item) => (item.type === 'event' ? !item.event.all_day && !item.event.free && item.event.reply !== 'declined' : !!item.task.time);
 
-  const api = { busy, homeDay, dateline, minutesOf, timeOf, snap, daysOf, spanOn, dayColumns, lanes, shiftRepeat, quickParse, quickRank, richText, eventDetails, dayKey, fromKey, addDays, weekStart, monthGrid, weekOf, eventDays, plan, quickDates, weekdayOf, repeats, repeatsOn, occurrences, nextOpen, repeatLabel, rrule, googleLink, googleDay, timeLabel, dayWord, dayName, tally, nextWeekday };
+  const api = { busy, overlaps, freeSlots, meetingLink, homeDay, dateline, minutesOf, timeOf, snap, daysOf, spanOn, dayColumns, lanes, shiftRepeat, quickParse, quickRank, richText, eventDetails, dayKey, fromKey, addDays, weekStart, monthGrid, weekOf, eventDays, plan, quickDates, weekdayOf, repeats, repeatsOn, occurrences, nextOpen, repeatLabel, rrule, googleLink, googleDay, timeLabel, dayWord, dayName, tally, nextWeekday };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoSchedule = api;
 })(typeof window !== 'undefined' ? window : globalThis);
