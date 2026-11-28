@@ -655,7 +655,8 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   after a restart. The drop boxes are fixed pseudo-elements: `main` never changes layout while a
   note is dragged (a `position: relative` there relaid the whole note per zone change, the drag
   freeze), and `noteOver` writes body attributes only when they change. The explorer lights only the focused pane's note (`on`, pill, `aria-current`), the other is
-  `open`. Trash closes a pane without a save (`paneGone`); Felix's reloads check unsaved
+  `open`. Split panes keep `--fold-room` on the left so heading fold chevrons are never
+  clipped. Trash closes a pane without a save (`paneGone`); Felix's reloads check unsaved
   typing per pane (`saving.get(key)`). Look (Style D2): one background, a 1 px `--line` hairline in
   the 8 px handle, a 10 px shade on the active pane (`--split-shade`, its own light and dark value), the other pane's chips in `--faint`; print
   shows only the focused pane.

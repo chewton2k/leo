@@ -427,6 +427,24 @@ test('the explorer lights only the focused pane’s note and marks the other ope
   await lit(b, a);
 });
 
+test('a heading’s fold chevron is whole and clickable in both panes', async ({ page }) => {
+  const [a, b] = await notes(page, '# Left head\n\nLeft words.', '# Right head\n\nRight words.');
+  await split(page, a, b);
+  for (const pane of ['#app', '#beside']) {
+    const head = page.locator(`${pane} #doc .blk-fold`).first();
+    await head.hover();
+    const button = head.locator('.fold-btn');
+    const box = await button.boundingBox();
+    const clip = await page.locator(pane).evaluate((el) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right }; });
+    expect(box.x, `${pane} chevron starts inside its pane`).toBeGreaterThanOrEqual(clip.left);
+    expect(box.x + box.width).toBeLessThanOrEqual(clip.right);
+    const hit = await page.evaluate(([x, y]) => Boolean(document.elementFromPoint(x, y)?.closest('.fold-btn')), [box.x + box.width / 2, box.y + box.height / 2]);
+    expect(hit, `${pane} chevron is the element under the pointer`).toBe(true);
+    await button.click();
+    await expect(head).toHaveClass(/\bblk-closed\b/);
+  }
+});
+
 test('hovering a note drag over the panes lays the page out once per zone, not on every pause', async ({ page }) => {
   const [a, b] = await notes(page, 'One.', 'Two.');
   await open(page, a);
