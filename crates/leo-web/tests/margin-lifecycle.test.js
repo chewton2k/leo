@@ -1109,7 +1109,7 @@ function foldHarness(...threads) {
   h.context.marginMount({ note: {}, doc: { source: () => '' } }, () => true);
   const block = {
     animate: () => { const r = run(); runs.push(r); return r; },
-    style: { setProperty() {} }, classList: { add() {} }, getBoundingClientRect: () => ({ bottom: 0 }),
+    style: { setProperty() {} }, classList: { add() {} }, getBoundingClientRect: () => ({ bottom: 0 }), querySelector: () => null,
   };
   h.state.threads = threads;
   for (const t of threads) {

@@ -442,7 +442,7 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   content, so no text node reaches the caret or margin maths; the Markdown is unchanged;
   2026-11-21, the user's call). A heading block (not the first)
   has 16 px of padding above its heading, open or not, so it leads the text below (2026-11-21, the
-  user's call). An editor opened at the height of the block it replaces keeps that height only while its text fits; when a slash pick turns a plain line into a heading, `fit` grows it so the caret stays visible (2026-11-28). A folded heading's summary counts checkbox lines apart from other lines ("2 lines · 1 of 4 tasks done"). The line under
+  user's call). An editor opened at the height of the block it replaces keeps that height; only a slash pick, which changes the line's kind under the caret, drops it and refits so a new heading's caret stays visible (2026-11-28). A folded heading's summary counts checkbox lines apart from other lines ("2 lines · 1 of 4 tasks done"). The line under
   the title (`#note-facts`) holds the save state, `#save-state` (the drying mark, its
   words hidden, or a visible problem such as "Not saved"), then `#note-edited` ("Edited …",
   "Edited just now" after a save, hidden while a problem shows), then the read time (`#note-read`, " · N min read" from
@@ -925,7 +925,8 @@ Felix (2026-10-19).
   line, a quote, code, table or maths block, or a slot that hangs past the end of its line) has its blot
   in the 16 px right of the column (`data-aside`), level with its last line and stacked down when two
   meet; a read's blot sits just after the last word (`marginPassageEnd`), or beside the column when that
-  would not fit in it. No blot or count is ever over text (2026-11-24, the user's call). A slot's fit is
+  would not fit in it. The exception is a passage that ends the line being edited: its blot stays just
+  after its last word, so clicking off its note never throws it to the far edge (2026-11-28). No blot or count is ever over text (2026-11-24, the user's call). A slot's fit is
   measured again only when its block's size or the fonts changed (`data-fit`). A window resize
   redraws in the same frame. Opening a line redraws (`focusin` on `#doc`). An open or pinned note sits
   under its block as a raised card (`--raised`, `--shadow-pop`), the block's `--margin-room`
