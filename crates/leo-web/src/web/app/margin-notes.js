@@ -1291,7 +1291,7 @@ function marginPlaceAsMarks(boxes, page, origin, slots) {
     const end = marginPassageEnd(t, rects, origin);
     const room = page.right - origin.left;
     const inline = slot?.height && slot.right <= page.right;
-    let aside = t.id !== 'reading' && !inline;
+    let aside = t.id !== 'reading' && !inline && Boolean(slot);
     mark.toggleAttribute('data-aside', aside);
     let size = mark.offsetWidth;
     let x, y;
