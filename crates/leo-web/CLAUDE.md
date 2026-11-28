@@ -442,7 +442,7 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   content, so no text node reaches the caret or margin maths; the Markdown is unchanged;
   2026-11-21, the user's call). A heading block (not the first)
   has 16 px of padding above its heading, open or not, so it leads the text below (2026-11-21, the
-  user's call). An editor opened at the height of the block it replaces keeps that height; only a slash pick, which changes the line's kind under the caret, drops it and refits so a new heading's caret stays visible (2026-11-28). A folded heading's summary counts checkbox lines apart from other lines ("2 lines · 1 of 4 tasks done"). The line under
+  user's call). An editor opened at the height of the block it replaces keeps that height; only a slash pick, which changes the line's kind under the caret, drops it and refits so a new heading's caret stays visible (2026-11-28). A folded heading's summary counts checkbox lines apart from other lines ("2 lines · 1 of 4 tasks done"; lines inside a code fence are lines, not tasks). The line under
   the title (`#note-facts`) holds the save state, `#save-state` (the drying mark, its
   words hidden, or a visible problem such as "Not saved"), then `#note-edited` ("Edited …",
   "Edited just now" after a save, hidden while a problem shows), then the read time (`#note-read`, " · N min read" from
@@ -653,7 +653,7 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   no conflict copy), as does opening `#/n/<right id>`. The hash names the left pane; Back and
   Forward change only it; a note open in one pane is refused in the other; leaving for a page that
   is not a note remembers the pair (`besideAway`) and coming back to the left note reopens the
-  right beside (`besideBack`); closing a pane by hand forgets it; beside is not restored after a
+  right beside (`besideBack`, quietly, focus back on the pane that had it); closing a pane by hand forgets it; beside is not restored after a
   restart. The drop boxes are fixed pseudo-elements: `main` never changes layout while a
   note is dragged (a `position: relative` there relaid the whole note per zone change, the drag
   freeze), and `noteOver` writes body attributes only when they change. The explorer lights only the focused pane's note (`on`, pill, `aria-current`), the other is

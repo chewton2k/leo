@@ -2311,8 +2311,13 @@
         const closed = folded.has(head.key);
         const range = closed ? ranges.find((x) => x.owner === i) : null;
         const inside = range ? lines.slice(range.from, range.to).filter((line) => line.trim()) : [];
-        const tasks = inside.filter((line) => ed.isBox(line));
-        const done = tasks.filter((line) => /\[[xX]\]/.test(line)).length;
+        let fenced = false;
+        const tasks = inside.filter((line) => {
+          if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+          else if (!fenced) return ed.isBox(line);
+          return false;
+        });
+        const done = tasks.filter((line) => /^\S+ {1,4}\[[xX]\]/.test(line.trimStart())).length;
         const lineCount = inside.length - tasks.length;
         const notes = range ? foldNotes.get(blocks[i].start) || 0 : 0;
         const said = range ? [lineCount ? `${lineCount} ${lineCount === 1 ? 'line' : 'lines'}` : '', tasks.length ? `${done} of ${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'} done` : '', notes ? `${notes} margin ${notes === 1 ? 'note' : 'notes'}` : ''].filter(Boolean).join(' · ') : '';
@@ -2350,7 +2355,7 @@
       const leaving = still ? [] : moved.filter((m) => m.hide).map(({ el }) => {
         const height = el.getBoundingClientRect().height;
         const clone = el.cloneNode(true);
-        clone.classList.remove('blk-folded');
+        clone.classList.remove('blk-folded', 'margin-room');
         clone.classList.add('blk-leaving');
         clone.removeAttribute('data-start');
         clone.removeAttribute('data-i');
@@ -2374,7 +2379,8 @@
         above += height;
         const open = { height: `${height}px`, minHeight: '0px', opacity: 1, overflow: 'visible' };
         const shut = { height: '0px', minHeight: '0px', opacity: 0, overflow: 'hidden' };
-        const frames = closing ? [{ ...open, offset: 0 }, { ...open, offset: 1 - to }, { ...shut, offset: 1 - from }, { ...shut, offset: 1 }] : [{ ...shut, offset: 0 }, { ...shut, offset: from }, { ...open, offset: to }, { ...open, offset: 1 }];
+        const held = { ...open, overflow: 'hidden' };
+        const frames = closing ? [{ ...open, offset: 0 }, { ...held, offset: 1 - to }, { ...shut, offset: 1 - from }, { ...shut, offset: 1 }] : [{ ...shut, offset: 0 }, { ...shut, offset: from }, { ...held, offset: to }, { ...open, offset: 1 }];
         const run = el.animate(frames, { duration: FOLD_MS, easing: ease });
         if (closing) run.finished.finally(() => el.remove());
       }

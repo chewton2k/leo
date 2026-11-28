@@ -103,7 +103,8 @@ document.addEventListener('keydown', (e) => {
 }, true);
 
 window.addEventListener('scroll', (e) => {
-  const doc = inPane('#doc');
+  const at = getSelection().anchorNode;
+  const doc = (at?.nodeType === Node.ELEMENT_NODE ? at : at?.parentElement)?.closest('#doc') || inPane('#doc');
   if (!(e.target instanceof Element) || !doc || e.target.contains(doc) || doc.contains(e.target)) hideAskFloat();
 }, { passive: true, capture: true });
 

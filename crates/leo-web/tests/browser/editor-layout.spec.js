@@ -565,20 +565,21 @@ test('every slash heading below other text shows its whole line and caret, like 
 test('a folded heading counts its tasks apart from its lines and keeps the count when a task changes', async ({ browser }) => {
   await editorFixture(browser, async (context, url) => {
     const page = await context.newPage();
-    await page.goto(url + '/?body=' + encodeURIComponent('## Tasks\n\n- [ ] Milk\n- [x] Eggs\n- [ ] Bread\n\nSome text\n\n### Sub\n\n- [ ] Deep\n\n## Only tasks\n\n- [x] Done\n\n## Plain\n\nWords\n\n## Open\n\n- [ ] Later'));
+    await page.goto(url + '/?body=' + encodeURIComponent('## Tasks\n\n- [ ] Milk\n- [x] Eggs\n- [ ] Bread\n\nSome text\n\n### Sub\n\n- [ ] Deep\n\n## Only tasks\n\n- [x] Done\n\n## Plain\n\nWords\n\n## Tricky\n\n- [ ] compare [x] and [y]\n\n```\n- [x] in code\n```\n\n## Open\n\n- [ ] Later'));
     const heads = page.locator('#doc :is(h2, h3)');
-    for (const name of ['Tasks', 'Only tasks', 'Plain']) await heads.filter({ hasText: new RegExp('^' + name + '$') }).locator('.fold-btn').click({ force: true });
+    for (const name of ['Tasks', 'Only tasks', 'Plain', 'Tricky']) await heads.filter({ hasText: new RegExp('^' + name + '$') }).locator('.fold-btn').click({ force: true });
     await expect(heads.filter({ hasText: /^Tasks$/ })).toHaveAttribute('data-fold-said', '2 lines · 1 of 4 tasks done');
     await expect(heads.filter({ hasText: /^Only tasks$/ })).toHaveAttribute('data-fold-said', '1 of 1 task done');
     await expect(heads.filter({ hasText: 'Plain' })).toHaveAttribute('data-fold-said', '1 line');
-    await expect(page.locator('#doc .blk-folded .task')).toHaveCount(5);
+    await expect(heads.filter({ hasText: /^Tricky$/ })).toHaveAttribute('data-fold-said', '3 lines · 0 of 1 task done');
+    await expect(page.locator('#doc .blk-folded .task')).toHaveCount(6);
     await page.locator('#doc .task input[type=checkbox]').last().click();
     await expect.poll(() => page.evaluate(() => window.doc.source().endsWith('- [x] Later'))).toBe(true);
     await expect(heads.filter({ hasText: /^Tasks$/ })).toHaveAttribute('data-fold-said', '2 lines · 1 of 4 tasks done');
-    await expect(page.locator('#doc .blk-folded .task')).toHaveCount(5);
+    await expect(page.locator('#doc .blk-folded .task')).toHaveCount(6);
     await heads.filter({ hasText: /^Tasks$/ }).locator('.fold-btn').click({ force: true });
     await expect(heads.filter({ hasText: /^Tasks$/ })).not.toHaveAttribute('data-fold-said', /./);
-    await expect(page.locator('#doc .blk-folded .task')).toHaveCount(1);
+    await expect(page.locator('#doc .blk-folded .task')).toHaveCount(2);
   });
 });
 

@@ -66,9 +66,10 @@ function besideClose() {
   besideGrip.hidden = true;
   document.body.classList.remove('split', 'beside-on');
   app.classList.remove('pane-on');
+  const was = state.session;
   if (marginPage === besidePane.margin || state.session === s) usePane(panes[0]);
   pageBarLater();
-  drawSide();
+  if (state.session === was) drawSide();
   window.dispatchEvent(new Event('resize'));
 }
 
@@ -90,7 +91,7 @@ async function besideShut() {
 let besideAway = null;
 async function besideLeave(hash) {
   if (NOTE_PAGE.test(hash || '')) return true;
-  const away = panes[0].s?.note.id && besidePane.s?.note.id ? { left: panes[0].s.note.id, right: besidePane.s.note.id } : null;
+  const away = panes[0].s?.note.id && besidePane.s?.note.id ? { left: panes[0].s.note.id, right: besidePane.s.note.id, onRight: state.session === besidePane.s } : null;
   const closed = await besideShut();
   if (closed) besideAway = away;
   return closed;
@@ -99,7 +100,8 @@ async function besideLeave(hash) {
 function besideBack(id) {
   const away = besideAway;
   besideAway = null;
-  if (away && away.left === id && !split() && panes[0].s?.note.id === id) besideOpen(away.right).catch(fail);
+  if (!away || away.left !== id || split() || panes[0].s?.note.id !== id || !besideRoomy()) return;
+  besideOpen(away.right).then(() => { if (split() && !away.onRight) usePane(panes[0]); }, () => {});
 }
 
 function besideTake(id) {
@@ -145,9 +147,10 @@ async function besideOpen(id, into = besidePane) {
     throw error;
   }
   if (!besidePane.s) return;
+  const was = state.session;
   usePane(besidePane);
   pageBarLater();
-  drawSide();
+  if (state.session === was) drawSide();
 }
 
 function besideRoomy() {
