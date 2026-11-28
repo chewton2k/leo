@@ -1497,4 +1497,14 @@ END:VCALENDAR\r
         .events
         .len()
     }
+
+    #[test]
+    fn a_time_inside_a_spring_forward_gap_moves_to_the_next_valid_hour() {
+        let gap = NaiveDate::from_ymd_opt(2026, 3, 8)
+            .unwrap()
+            .and_hms_opt(2, 30, 0)
+            .unwrap();
+        let zone = Some(chrono_tz::America::New_York);
+        assert_eq!(local_to_utc(gap, zone), Some(at("2026-03-08T07:30:00Z")));
+    }
 }

@@ -126,14 +126,12 @@ fn post(
     until: std::time::SystemTime,
 ) {
     use mac_usernotifications::{block_on, blocking, Notification};
-    use std::sync::atomic::AtomicBool;
-    static ASKING: AtomicBool = AtomicBool::new(false);
-    if crate::permissions::notifications() == Some("denied") || ASKING.swap(true, Ordering::AcqRel)
-    {
-        return;
-    }
-    let allowed = matches!(blocking::request_auth(), Ok(true));
-    ASKING.store(false, Ordering::Release);
+    static ASKING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let allowed = {
+        let _asking = ASKING.lock().unwrap_or_else(|e| e.into_inner());
+        crate::permissions::notifications() != Some("denied")
+            && matches!(blocking::request_auth(), Ok(true))
+    };
     if !allowed {
         return;
     }

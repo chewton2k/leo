@@ -174,6 +174,10 @@ test('only timed tasks and events that are not free, declined or all-day are bus
   assert.equal(S.busy(event({ all_day: true })), false);
   assert.equal(S.busy({ type: 'task', task: { time: '09:00:00' } }), true);
   assert.equal(S.busy({ type: 'task', task: { time: null } }), false);
+  assert.equal(S.busy({ type: 'task', task: { time: '09:00:00', done: true } }), false);
+  const weekly = { id: 'w', date: '2026-03-02', time: '09:00:00', repeat: [0], done_on: ['2026-03-09'] };
+  const days = S.plan([weekly], [], '2026-03-01', { from: '2026-03-02', to: '2026-03-09' }).byDay;
+  assert.deepEqual([days.get('2026-03-02'), days.get('2026-03-09')].map((d) => S.busy(d.timed[0])), [true, false]);
 });
 
 test('quick dates are today, tomorrow, the coming Friday and next Monday', () => {

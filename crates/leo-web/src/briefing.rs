@@ -177,8 +177,11 @@ pub(crate) async fn tick(
     Some(tokio::spawn(work(state.clone(), local.date(), running)))
 }
 
-async fn work(state: AppState, day: NaiveDate, _running: Busy) {
-    let Some(text) = write(&state, day).await.filter(|t| !t.trim().is_empty()) else {
+async fn work(state: AppState, day: NaiveDate, running: Busy) {
+    let Some((text, _running)) = write(&state, day, running)
+        .await
+        .filter(|(t, _)| !t.trim().is_empty())
+    else {
         return;
     };
     let body = text
@@ -298,7 +301,7 @@ fn prompt(
     user
 }
 
-async fn write(state: &AppState, day: NaiveDate) -> Option<String> {
+async fn write(state: &AppState, day: NaiveDate, running: Busy) -> Option<(String, Busy)> {
     let writer = state.briefing.clone()?;
     let index = crate::routes::tasks::listed_index(state).await.ok()?;
     let (notes, calendar) = (state.notes_dir.clone(), Arc::clone(&state.calendar));
@@ -354,14 +357,14 @@ async fn write(state: &AppState, day: NaiveDate) -> Option<String> {
         &tasks_of(&index, day),
         &settings.wants,
     );
-    tokio::time::timeout(
+    let (text, running) = tokio::time::timeout(
         crate::margin::READ_LIMIT + std::time::Duration::from_secs(5),
-        tokio::task::spawn_blocking(move || writer(SYSTEM, &user, TOKENS)),
+        tokio::task::spawn_blocking(move || (writer(SYSTEM, &user, TOKENS), running)),
     )
     .await
     .ok()?
-    .ok()?
-    .ok()
+    .ok()?;
+    Some((text.ok()?, running))
 }
 
 pub(crate) async fn get(State(state): State<AppState>) -> Response {

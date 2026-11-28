@@ -232,7 +232,7 @@ function repeatPicker(box, task, onChange) {
   const changed = () => {
     const hint = box.querySelector('.repeat-hint');
     if (hint) hint.textContent = repeatHint({ ...rule, date: task.date });
-    box.querySelector('.repeat-days').hidden = rule.monthly;
+    if (box.querySelector('.repeat-more')) box.querySelector('.repeat-days').hidden = rule.monthly;
     const unit = box.querySelector('.repeat-unit');
     if (unit) unit.textContent = rule.monthly ? 'months' : 'weeks';
     onChange({ ...rule, repeat: [...rule.repeat] });

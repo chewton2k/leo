@@ -885,7 +885,7 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
 - Change tools: edit_note / create_note (cards; Apply POSTs
   `/api/notes/{id}/suggestion`, 409 unless `find` is there exactly once),
   and the organizing tools in `routes/organize.rs`: add_task (`repeat`:
-  `mon | wed`, `every`, `monthly`, `until`), update_task (`on` = which day of a repeating task),
+  `mon | wed | monthly`, `every`, `until`), update_task (`every`, `until`; `on` = which day of a repeating task),
   delete_task, move_note, make_folder, move_folder, delete_note,
   rename_note, rename_folder (`new_name`), pin_note, restore_note,
   restore_folder (trashed notes from that folder and its subfolders),
@@ -1523,10 +1523,10 @@ picked times on the clipboard (2026-11-27, the user's call).
   Monday-weeks from the start week divisible by `every`; monthly keeps the day
   of `date` and skips months without it; nothing falls after `until`; a moved
   day counts only if its original day was an occurrence. The .ics RRULE carries
-  INTERVAL, BYMONTHDAY, WKST=MO and UNTIL (a UTC date-time for a timed task, a
-  date for an untimed one); the Google link's `recur` is the same. PATCH and POST
+  INTERVAL, BYMONTHDAY, WKST=MO and UNTIL (a floating local `YYYYMMDDT235959` for a timed task, a
+  date for an untimed one); the Google link's `recur` is the same but UTC for a timed task. PATCH and POST
   accept `every` (1-12), `monthly` and `until` (on or after the first day; null
-  clears); Felix's add_task and update_task take `every`, `monthly`, `until`.
+  clears); Felix's add_task takes `every`, `until` and a `repeat` that accepts "monthly"; update_task takes `every` and `until` only.
   `tasks::occurs_on` (Felix's list_schedule) and `schedule.occurrences` apply
   it; the .ics adds EXDATE plus a RECURRENCE-ID event per move; the Google
   link carries the weekly rule only. Felix's `on` still means done only.

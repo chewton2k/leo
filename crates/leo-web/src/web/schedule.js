@@ -695,7 +695,7 @@
     return ['Nothing scheduled today. Next is ', title(next.title), `, ${when}`];
   }
 
-  const busy = (item) => (item.type === 'event' ? !item.event.all_day && !item.event.free && item.event.reply !== 'declined' : !!item.task.time);
+  const busy = (item) => (item.type === 'event' ? !item.event.all_day && !item.event.free && item.event.reply !== 'declined' : !!item.task.time && !item.task.done);
 
   const api = { busy, overlaps, freeSlots, meetingLink, homeDay, dateline, minutesOf, timeOf, snap, daysOf, spanOn, dayColumns, lanes, shiftRepeat, quickParse, quickRank, richText, eventDetails, dayKey, fromKey, addDays, weekStart, monthGrid, weekOf, eventDays, plan, quickDates, weekdayOf, repeats, repeatsOn, occurrences, nextOpen, repeatLabel, rrule, googleLink, googleDay, timeLabel, dayWord, dayName, tally, nextWeekday };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
