@@ -982,3 +982,18 @@ test('a long selection stays in the margin and the Felix bar says what he reads'
   expect(asked).toHaveLength(1);
   expect(asked[0]).toMatchObject({ quote: long.trim(), question: 'Which way does heat flow?' });
 });
+
+test('every choice ring is the size of its selected card', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  for (const at of ['/#/settings/appearance', '/#/settings/felix', '/#/settings/writing', '/#/record']) {
+    await page.goto(at);
+    await expect(page.locator('.choice-cards').first()).toBeVisible();
+    await quiet(page);
+    const off = await page.evaluate(() => [...document.querySelectorAll('.choice-cards')].filter((box) => box.offsetParent && box.querySelector('.choice-pick.on')).flatMap((box) => {
+      const ring = box.querySelector('.choice-ring').getBoundingClientRect();
+      const card = box.querySelector('.choice-pick.on').getBoundingClientRect();
+      return ['top', 'bottom', 'left', 'right'].filter((side) => Math.abs(ring[side] - card[side]) > 1).map((side) => `${box.getAttribute('aria-label')} ${side} ${Math.round(ring[side] - card[side])}px`);
+    }));
+    expect(off, at).toEqual([]);
+  }
+});
