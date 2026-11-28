@@ -1296,8 +1296,9 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   `usage::Purpose::Briefing`; Settings' writing state `not_chosen` counts as none), claims the
   row (other days deleted) and spawns the work: today's busy and all-day events, tasks today
   and Earlier, `calendar::last_of` open items per series, the first 2,000 characters of `wants`,
-  each fenced with a per-call random suffix. Success stores the text and sends
-  `notify(Reminder {"Your briefing is ready", first line, "#/"})`. `GET /api/briefing` →
+  each fenced with a per-call random suffix, waited on up to `READ_LIMIT` + 5 s. Success
+  stores the text and sends `notify(Reminder {"Your briefing is ready", first line, "#/"})`
+  (`leoFromApp('go')` takes `#/` too). `GET /api/briefing` →
   `{day, text, made_at, writing}` or 204; `POST` (Make one now) runs outside the window, resets
   tries, 202, or 503 "Choose a writing AI in Settings → Writing AI first.". Home's `#home-brief`
   sits above `#home-today` (`loadHomeBrief` once on mount, every 3 s only while writing;

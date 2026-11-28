@@ -434,7 +434,7 @@ window.leoFromApp = async (what, which) => {
     saveWebsiteWork();
     return toast(await quitText());
   }
-  if (what === 'go' && /^#\/[a-z]/.test(which)) return go(which);
+  if (what === 'go' && /^#\/(?:[a-z]|$)/.test(which)) return go(which);
   if (what === 'event') {
     const [kind, ...uid] = String(which).split(':');
     return go(`#/record?event=${encodeURIComponent(uid.join(':'))}&kind=${kind === 'microphone' ? 'microphone' : 'call'}`);

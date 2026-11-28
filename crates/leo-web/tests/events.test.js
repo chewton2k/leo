@@ -56,3 +56,10 @@ test('the first quit press still only saves and says press again', async () => {
   await p.window.leoFromApp('quit', '');
   assert.deepEqual(p.said, ['save work', 'toast']);
 });
+
+test('a notification opens Home or a page, and nothing outside the app', async () => {
+  const p = page(() => Promise.resolve(true));
+  p.go = (hash) => p.said.push(`go ${hash}`);
+  for (const hash of ['#/', '#/calendar?day=2026-11-27', 'https://example.com', '#//x', '']) await p.window.leoFromApp('go', hash);
+  assert.deepEqual(p.said, ['go #/', 'go #/calendar?day=2026-11-27']);
+});

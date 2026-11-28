@@ -21,7 +21,7 @@ const RETRY_MINUTES: i64 = 10;
 const MOST_TRIES: i64 = 2;
 const WANTS_READ: usize = 2000;
 const MOST_LINES: usize = 30;
-const TOKENS: u32 = 1500;
+const TOKENS: u32 = 800;
 const NO_WRITER: &str = "Choose a writing AI in Settings → Writing AI first.";
 const SYSTEM: &str = "You are Felix, writing today's briefing for the person who uses leo, a note app. Write Markdown in short bullets: their meetings first, each with what was left open last time; then their tasks for today and from earlier; then the free stretches between meetings. Follow what the person wants in their briefing. Use only the data you are given and say plainly when the day is empty. Say Earlier, never overdue. No greeting, no sign-off, no praise.";
 
@@ -354,10 +354,14 @@ async fn write(state: &AppState, day: NaiveDate) -> Option<String> {
         &tasks_of(&index, day),
         &settings.wants,
     );
-    tokio::task::spawn_blocking(move || writer(SYSTEM, &user, TOKENS))
-        .await
-        .ok()?
-        .ok()
+    tokio::time::timeout(
+        crate::margin::READ_LIMIT + std::time::Duration::from_secs(5),
+        tokio::task::spawn_blocking(move || writer(SYSTEM, &user, TOKENS)),
+    )
+    .await
+    .ok()?
+    .ok()?
+    .ok()
 }
 
 pub(crate) async fn get(State(state): State<AppState>) -> Response {

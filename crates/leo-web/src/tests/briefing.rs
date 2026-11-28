@@ -26,6 +26,23 @@ impl crate::app_settings::AppApi for Told {
     }
 }
 
+struct NotChosen;
+
+impl crate::SettingsApi for NotChosen {
+    fn describe(&self, _: &std::path::Path) -> serde_json::Value {
+        serde_json::json!({})
+    }
+    fn writing(&self, _: bool) -> serde_json::Value {
+        serde_json::json!({"writing": {"state": "not_chosen"}})
+    }
+    fn apply(&self, _: &serde_json::Value) -> anyhow::Result<String> {
+        Ok(String::new())
+    }
+    fn test(&self, _: &str) -> anyhow::Result<String> {
+        Ok(String::new())
+    }
+}
+
 struct Setup {
     state: AppState,
     _dir: tempfile::TempDir,
@@ -140,16 +157,21 @@ fn a_failed_briefing_is_tried_once_more_ten_minutes_later_and_then_stops() {
 #[test]
 fn without_a_writing_ai_nothing_is_tried_and_make_one_now_says_why() {
     let mut s = setup();
-    s.state.briefing = None;
+    s.state.settings = Some(Arc::new(NotChosen));
     turn_on(&s.state, "");
-    assert!(!tick(&s.state, "08:30", 0));
-    assert_eq!(shown(&s.state).status(), StatusCode::NO_CONTENT);
-    let refused = run(crate::briefing::make(State(s.state.clone())));
-    assert_eq!(refused.status(), StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(
-        json_of(refused)["error"],
-        "Choose a writing AI in Settings → Writing AI first."
-    );
+    for _ in 0..2 {
+        assert!(!tick(&s.state, "08:30", 0));
+        assert_eq!(shown(&s.state).status(), StatusCode::NO_CONTENT);
+        let refused = run(crate::briefing::make(State(s.state.clone())));
+        assert_eq!(refused.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            json_of(refused)["error"],
+            "Choose a writing AI in Settings → Writing AI first."
+        );
+        s.state.settings = None;
+        s.state.briefing = None;
+    }
+    assert!(s.asked.lock().unwrap().is_empty());
     assert!(s.told.0.lock().unwrap().is_empty());
 }
 
