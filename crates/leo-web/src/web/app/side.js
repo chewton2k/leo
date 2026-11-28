@@ -195,6 +195,23 @@ function folderShown(path) {
   return !side.shut.has(path) && (side.open.has(path) || side.revealed.has(path));
 }
 
+// Like VS Code's auto reveal: the open note's row is scrolled into the
+// explorer's view once, when it first appears for that note; later redraws keep
+// whatever scroll the user chose. Only the explorer scrolls, never the page.
+function revealNoteRow(tree) {
+  const id = panes[0].s?.note?.id;
+  if (!id) side.shownNote = null;
+  // A hidden explorer has nothing to scroll; try again when it shows.
+  if (!tree || !id || side.shownNote === id || !tree.clientHeight) return;
+  const row = [...tree.querySelectorAll('.side-note[data-id]')].find((el) => el.dataset.id === id);
+  if (!row) return;
+  side.shownNote = id;
+  const at = row.getBoundingClientRect();
+  const view = tree.getBoundingClientRect();
+  if (at.top < view.top) tree.scrollTop -= Math.ceil(view.top - at.top);
+  else if (at.bottom > view.bottom) tree.scrollTop += Math.ceil(at.bottom - view.bottom);
+}
+
 const HOVER_ROWS = '.side-note-wrap, .side-folder, .card[draggable="true"]';
 let hoverRow = null;
 let hoverPoint = null;
@@ -215,23 +232,6 @@ function hoverAgain() {
 }
 for (const type of ['pointerover', 'pointerout']) document.addEventListener(type, hoverFromPointer, { passive: true });
 document.addEventListener('scroll', hoverAgain, { capture: true, passive: true });
-
-// Like VS Code's auto reveal: the open note's row is scrolled into the
-// explorer's view once, when it first appears for that note; later redraws keep
-// whatever scroll the user chose. Only the explorer scrolls, never the page.
-function revealNoteRow(tree) {
-  const id = panes[0].s?.note?.id;
-  if (!id) side.shownNote = null;
-  // A hidden explorer has nothing to scroll; try again when it shows.
-  if (!tree || !id || side.shownNote === id || !tree.clientHeight) return;
-  const row = [...tree.querySelectorAll('.side-note[data-id]')].find((el) => el.dataset.id === id);
-  if (!row) return;
-  side.shownNote = id;
-  const at = row.getBoundingClientRect();
-  const view = tree.getBoundingClientRect();
-  if (at.top < view.top) tree.scrollTop -= Math.ceil(view.top - at.top);
-  else if (at.bottom > view.bottom) tree.scrollTop += Math.ceil(at.bottom - view.bottom);
-}
 
 function sideLeave() {
   return side.root ? sideRow('side-unfocus', ICON.close, folderLabel(side.root), { attrs: ` data-dir="${esc(side.root)}"`, aria: `${folderLabel(side.root)}: show all notes`, hint: `Showing only ${folderLabel(side.root)}. Click to show all notes` }) : '';
