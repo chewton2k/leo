@@ -388,7 +388,7 @@ function calHead(days) {
     </div>
     <div class="cal-status" role="status">${calStatus()}</div>
     <div class="cal-views">${segmented({ label: 'View', action: 'cal-view', key: 'view', current: cal.view, choices: CAL_VIEWS.map(([v, label]) => [v, label, '', `${label} (${label[0]})`]) })}</div>
-    <button type="button" class="btn sm cal-new" data-action="cal-find">${ICON.search}<span>Find a time</span></button>
+    <button type="button" class="icon-btn cal-arrow" data-action="cal-find" aria-label="Find a time" title="Find a time">${ICON.search}</button>
     <button type="button" class="btn sm cal-new" data-action="task-new" data-day="${esc(cal.selected)}">${ICON.plus}<span>New task</span></button>
   </header>`;
 }
