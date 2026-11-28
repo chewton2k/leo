@@ -800,8 +800,7 @@
       if (editing && editing.initialHeight !== null) {
         area.style.height = `${editing.initialHeight}px`;
         area.style.overflowY = 'auto';
-        if (area.scrollHeight - area.clientHeight <= 1) return;
-        editing.initialHeight = null;
+        return;
       }
       area.style.overflowY = 'hidden';
       area.style.height = 'auto';
@@ -1459,7 +1458,12 @@
       stop();
       const target = line + done.line;
       const index = blockAtLine(target);
-      if (index >= 0) edit(index, lineStart(target) - lineStart(blocks[index].start) + done.caret);
+      if (index < 0) return;
+      edit(index, lineStart(target) - lineStart(blocks[index].start) + done.caret);
+      if (!editing) return;
+      editing.initialHeight = null;
+      editing.area.closest('.blk').style.minHeight = '';
+      fit(editing.area);
     }
 
     function onInput(e) {
