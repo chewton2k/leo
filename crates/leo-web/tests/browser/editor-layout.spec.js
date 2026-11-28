@@ -457,6 +457,36 @@ test('a picture inserted into a checkbox or bullet stays in the item, and Enter,
   });
 });
 
+test('a picture pasted right after another picture lands after it, never at the end of the note', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    const [a, b, c] = ['a', 'b', 'c'].map(name => `![${name}](/api/image?${name}=1)`);
+    for (const [start, enter] of [['First line', false], ['First line', true], ['- item', false], ['- [ ] task', false], ['1. step', false]]) {
+      await page.goto(url + '/?body=' + encodeURIComponent(`${start}\n\nMiddle\n\nLast line`));
+      await page.locator('#doc .blk').first().click();
+      await page.keyboard.press('End');
+      if (enter) await page.keyboard.press('Enter');
+      for (const pic of [a, b, c]) {
+        await page.evaluate(src => doc.insert(src), pic);
+        await expect(page.locator('#doc img.note-img')).toHaveCount([a, b, c].indexOf(pic) + 1);
+      }
+      const source = await page.evaluate(() => doc.source());
+      const at = (text) => source.indexOf(text);
+      expect(at(a), `${start} ${enter}: ${source}`).toBeLessThan(at(b));
+      expect(at(b), `${start} ${enter}: ${source}`).toBeLessThan(at(c));
+      expect(at(c), `${start} ${enter}: ${source}`).toBeLessThan(at('Middle'));
+    }
+    await page.goto(url + '/?body=' + encodeURIComponent(`Intro\n\n${a}\n\nMiddle`));
+    await page.locator('#doc img.note-img').click();
+    await expect(page.locator('.pic-frame')).toHaveCount(1);
+    await page.evaluate(src => doc.insert(src), b);
+    await expect(page.locator('#doc img.note-img')).toHaveCount(2);
+    const clicked = await page.evaluate(() => doc.source());
+    expect(clicked.indexOf(b), clicked).toBeGreaterThan(clicked.indexOf(a));
+    expect(clicked.indexOf(b), clicked).toBeLessThan(clicked.indexOf('Middle'));
+  });
+});
+
 test('folding a heading hides every block type under it and unfolding restores each one exactly', async ({ browser }) => {
   const under = ['Plain text', '- [ ] Open task\n- [x] Done task', '- Bullet\n  - Nested bullet', '1. First\n2. Second', '> A quote\n> More', '> [!note] A callout\n> Body', '```js\nconst a = 1;\n```', '| A | B |\n| --- | --- |\n| 1 | 2 |', '---', '$$\nx = 2\n$$', '#### Deeper heading\n\n- [ ] Deeper task'];
   await editorFixture(browser, async (context, url) => {

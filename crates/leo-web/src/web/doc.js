@@ -2430,6 +2430,7 @@
 
     function insert(text) {
       if (editing && editing.selectionText) stop();
+      if (!editing && framed && framed.img.isConnected) enterAfter(framed.img, '');
       if (editing) {
         const { area } = editing;
         const before = lineValue().slice(0, editing.prefix.length + area.selectionStart);
