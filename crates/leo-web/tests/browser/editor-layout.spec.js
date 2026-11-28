@@ -15,7 +15,7 @@ async function editorFixture(browser, run, { remember = false, body = null, touc
   const source = body ?? (remember ? Array.from({ length: 160 }, (_, i) => `Paragraph number ${i + 1} about reading.`).join('\n\n') : 'An ordinary paragraph.');
   const fixture = `window.doc = leoDoc.mount(document.querySelector('#doc'), {
     source: new URLSearchParams(location.search).get('body') ?? ${JSON.stringify(source)}, onChange() {},
-    dir: new URLSearchParams(location.search).get('dir') ?? '', onPictures: new URLSearchParams(location.search).has('pics') ? files => (window.pictured ??= []).push(files.length) : null, outline: document.querySelector('.note-outline'), noteTools: new URLSearchParams(location.search).has('tools')
+    dir: new URLSearchParams(location.search).get('dir') ?? '', onPictures: new URLSearchParams(location.search).has('pics') ? files => (window.pictured ??= []).push(files.length) : null, outline: document.querySelector('.note-outline'), noteTools: new URLSearchParams(location.search).has('tools'), foldKey: new URLSearchParams(location.search).get('fold') ?? ''
   });
   window.audit = { pick: width => leoTheme.setNoteWidth(width), anchor: () => JSON.parse(localStorage.getItem('fixture-reading') || 'null') };
   ${related ? `const hideAskFloat = () => {};
@@ -452,6 +452,40 @@ test('a picture inserted into a checkbox or bullet stays in the item, and Enter,
         await page.keyboard.press('Enter');
         expect(await items()).toBe(3);
         await expect(page.locator('#doc img.note-img')).toHaveCount(1);
+      }
+    }
+  });
+});
+
+test('folding a heading hides every block type under it and unfolding restores each one exactly', async ({ browser }) => {
+  const under = ['Plain text', '- [ ] Open task\n- [x] Done task', '- Bullet\n  - Nested bullet', '1. First\n2. Second', '> A quote\n> More', '> [!note] A callout\n> Body', '```js\nconst a = 1;\n```', '| A | B |\n| --- | --- |\n| 1 | 2 |', '---', '$$\nx = 2\n$$', '#### Deeper heading\n\n- [ ] Deeper task'];
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    for (const level of ['##', '###']) {
+      for (const sample of under) {
+        await page.goto(url + '/?tools&fold=f&body=' + encodeURIComponent(`${level} Folded\n\n${sample}\n\n${level} Next\n\nAfter`));
+        const blocks = page.locator('#doc > .blk');
+        const shape = () => page.evaluate(() => [...document.querySelectorAll('#doc > .blk')].map(b => [b.textContent, Math.round(b.getBoundingClientRect().height)]));
+        const before = await shape();
+        const head = blocks.first();
+        await head.hover();
+        await head.locator('.fold-btn').click();
+        await expect(head).toHaveClass(/blk-closed/);
+        await expect(page.locator('#doc .blk-leaving')).toHaveCount(0);
+        const folded = await page.evaluate(() => {
+          const first = document.querySelector('#doc > .blk').getBoundingClientRect();
+          const next = [...document.querySelectorAll('#doc :is(h1, h2, h3, h4, h5, h6)')].find(h => h.textContent.includes('Next')).getBoundingClientRect();
+          const leaks = [...document.querySelectorAll('#doc *')].filter(el => el.closest('.blk-folded') && el.getClientRects().length > 0).length;
+          const stray = [...document.querySelectorAll('#doc > .blk:not(.blk-folded)')].map(b => b.textContent.replace(/\u200b/g, '')).filter(Boolean);
+          return { gap: next.top - first.bottom, leaks, stray };
+        });
+        expect(folded.leaks, sample).toBe(0);
+        expect(folded.stray, sample).toEqual([expect.stringContaining('Folded'), 'Next', 'After']);
+        expect(folded.gap, sample).toBeLessThan(48);
+        await head.locator('.fold-btn').click();
+        await expect(head).not.toHaveClass(/blk-closed/);
+        await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0);
+        expect(await shape(), sample).toEqual(before);
       }
     }
   });
