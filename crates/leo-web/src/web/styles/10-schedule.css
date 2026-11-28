@@ -124,7 +124,7 @@ body.on-calendar main { max-width: none; margin: 0; padding: 0 0 var(--bottom); 
 .cal-item.event.free:not(.peeked) { outline: 1px dashed color-mix(in srgb, var(--tone) 55%, transparent); outline-offset: -1px; }
 .cal-item.event.declined { background: none; box-shadow: none; }
 .cal-item.event.declined:not(.peeked) { outline: 1px solid var(--tone); outline-offset: -1px; }
-.cal-item.declined .cal-title { color: var(--faint); text-decoration: line-through; }
+.cal-item.declined .cal-title { color: var(--faint); }
 .cal-item.done .cal-title { color: var(--muted); }
 .cal-grip { position: absolute; left: 0; right: 0; bottom: 0; height: 7px; cursor: ns-resize; }
 .cal-now { position: absolute; left: -1px; right: 0; height: 2px; background: var(--hue-red); z-index: 20; pointer-events: none; }

@@ -1257,6 +1257,34 @@ test('a press interrupted by the window, a cancel, another pointer or a release 
   });
 });
 
+test('an event with a meeting link shows Join with that link, in its peek and its menu, unless it was declined', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    await page.evaluate(() => {
+      const at = (d, h) => new Date(2026, 10, d, h).toISOString();
+      window.db.events.push(
+        { id: 'e-meet', title: 'Design sync', start: at(5, 9), end: at(5, 10), all_day: false, calendar: 'Work', context: 'Agenda https://example.com/doc and https://meet.google.com/abc-defg-hij', location: '' },
+        { id: 'e-nolink', title: 'Walk', start: at(5, 15), end: at(5, 16), all_day: false, calendar: 'Work', context: '', location: 'Campus' },
+        { id: 'e-no', title: 'Skipped call', start: at(6, 9), end: at(6, 10), all_day: false, calendar: 'Work', context: '', location: 'https://us02web.zoom.us/j/1', reply: 'declined' }
+      );
+    });
+    await page.evaluate(() => loadSchedule());
+    const menu = page.locator('.popup-menu');
+    await page.locator('.cal-item[data-id="e-meet"]').click({ button: 'right' });
+    expect(await menu.locator('[role^="menuitem"]').allTextContents()).toEqual(['Details', 'Join meeting', 'Record this event']);
+    await page.keyboard.press('Escape');
+    await page.locator('.cal-item[data-id="e-meet"]').click();
+    const join = page.locator('#cal-side.peek a.btn', { hasText: 'Join' });
+    await expect(join).toHaveAttribute('href', 'https://meet.google.com/abc-defg-hij');
+    await expect(join).toHaveAttribute('target', '_blank');
+    await page.locator('.cal-item[data-id="e-nolink"]').click();
+    await expect(page.locator('#cal-side.peek .cal-peek-title')).toHaveText('Walk');
+    await expect(page.locator('#cal-side.peek a.btn')).toHaveCount(0);
+    await page.locator('.cal-item[data-id="e-no"]').click();
+    await expect(page.locator('#cal-side.peek .cal-peek-title')).toHaveText('Skipped call');
+    await expect(page.locator('#cal-side.peek a.btn')).toHaveCount(0);
+  });
+});
+
 test('a declined event is drawn muted and says so in its peek, and a free one is dashed', async ({ browser }) => {
   await calendarFixture(browser, async page => {
     await page.evaluate(() => {
@@ -1271,7 +1299,7 @@ test('a declined event is drawn muted and says so in its peek, and a free one is
     await expect(declined).toHaveClass(/declined/);
     await expect(page.locator('.cal-item[data-id="e-free"]')).toHaveClass(/free/);
     await expect(page.locator('.cal-item[data-id="e-lecture"]')).not.toHaveClass(/declined|free/);
-    expect(await declined.locator('.cal-title').evaluate(el => getComputedStyle(el).textDecorationLine)).toBe('line-through');
+    expect(await declined.locator('.cal-title').evaluate(el => getComputedStyle(el).textDecorationLine)).toBe('none');
     await declined.click({ button: 'right' });
     expect(await page.locator('.popup-menu [role^="menuitem"]').allTextContents()).toEqual(['Details']);
     await page.keyboard.press('Escape');

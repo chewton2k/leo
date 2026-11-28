@@ -1046,7 +1046,8 @@ function calMenu(target, point = null) {
     const { id, kind, on = null } = item.dataset;
     const event = kind === 'event' && ((cal.data && cal.data.events) || []).find((e) => e.id === id);
     const task = kind === 'task' && calFind(id);
-    if (event) rows = [{ text: 'Details', icon: ICON.note, run: () => calOpenPeek('event', id) }, ...(!event.all_day && event.reply !== 'declined' && new Date(event.end) > Date.now() ? [{ text: 'Record this event', icon: ICON.mic, run: () => go(recordHref(event)) }] : [])];
+    const join = event && event.reply !== 'declined' ? S.meetingLink(event) : '';
+    if (event) rows = [{ text: 'Details', icon: ICON.note, run: () => calOpenPeek('event', id) }, ...(join ? [{ text: 'Join meeting', icon: ICON.screen, run: () => window.open(join, '_blank', 'noopener') }] : []), ...(!event.all_day && event.reply !== 'declined' && new Date(event.end) > Date.now() ? [{ text: 'Record this event', icon: ICON.mic, run: () => go(recordHref(event)) }] : [])];
     else if (task) {
       const done = taskDoneOn(task, on);
       rows = [{ text: 'Open', icon: ICON.note, run: () => calOpenPeek('task', id, on) }, { text: done ? 'Mark not done' : 'Mark done', icon: ICON.check, run: () => setTaskDone(id, !done, on) }, { line: true }, { text: 'Delete task', icon: ICON.trash, danger: true, run: () => deleteTask(id) }];
@@ -1214,9 +1215,12 @@ function calPeekEvent(side, id) {
   const event = ((cal.data && cal.data.events) || []).find((e) => e.id === id);
   if (!event) return calClosePeek();
   side.style.setProperty('--tone', `var(${toneOfEvent(event)})`);
+  const declined = event.reply === 'declined';
+  const join = declined ? '' : S.meetingLink(event);
+  const record = calEventSoon(event) && !declined;
   side.innerHTML = `${calPeekBar(event.calendar || 'Google Calendar')}<h2 class="cal-peek-title">${esc(event.title)}</h2>${eventDetailsHtml(event)}
     <p class="hint">Events from your calendar link are read-only here.</p>
-    ${calEventSoon(event) && event.reply !== 'declined' ? '<div class="buttons"><button type="button" class="btn primary" data-action="record">Record this meeting</button></div>' : ''}<div id="cal-peek-last"></div>`;
+    ${join || record ? `<div class="buttons">${join ? `<a class="btn plain" href="${esc(join)}" target="_blank" rel="noopener noreferrer">${ICON.screen}Join</a>` : ''}${record ? '<button type="button" class="btn primary" data-action="record">Record this meeting</button>' : ''}</div>` : ''}<div id="cal-peek-last"></div>`;
   lastTime(event.series).then((last) => {
     const slot = cal.peek && cal.peek.id === id && $('#cal-peek-last', side);
     if (slot && last) slot.innerHTML = lastTimeHtml(last, true);
