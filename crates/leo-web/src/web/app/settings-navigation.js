@@ -285,11 +285,11 @@ function settingsSwitch(attrs, on, label = '') {
 function segmented({ label, choices, current, field = '', action = '', key = '' }) {
   const options = choices.map(([value, text, icon = '', hint = '']) => {
     const on = String(value) === String(current);
-    const what = action ? ` data-action="${action}" data-${key}="${esc(value)}" aria-pressed="${on}"` : ` data-action="segment-pick" data-value="${esc(value)}" role="radio" aria-checked="${on}" tabindex="${on ? 0 : -1}"`;
+    const what = action ? ` data-action="${action}" data-${key}="${esc(String(value))}" aria-pressed="${on}"` : ` data-action="segment-pick" data-value="${esc(String(value))}" role="radio" aria-checked="${on}" tabindex="${on ? 0 : -1}"`;
     return `<button type="button" class="segment${on ? ' on' : ''}"${what} title="${esc(hint || text)}">${icon}<span>${esc(text)}</span></button>`;
   }).join('');
   const index = Math.max(0, choices.findIndex(([value]) => String(value) === String(current)));
-  const hidden = field ? `<input type="hidden" ${field} value="${esc(current ?? '')}">` : '';
+  const hidden = field ? `<input type="hidden" ${field} value="${esc(String(current ?? ''))}">` : '';
   return `<div class="segmented" role="${action ? 'group' : 'radiogroup'}" aria-label="${esc(label)}" style="--count:${choices.length};--at:${index}">${hidden}<span class="segment-pill" aria-hidden="true"></span>${options}</div>`;
 }
 // Move the highlight to whichever option is on. `from` lets a redraw slide from where it was.

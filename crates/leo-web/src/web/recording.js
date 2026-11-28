@@ -1167,7 +1167,7 @@
           const dir=box.querySelector('#rec-dir').value;
           const events = (s.calendar && s.calendar.events) || [];
           const picked = s.event !== null ? events[s.event] : null;
-          await start(source, dir, box.querySelector('#rec-title').value.trim(), { context: picked ? picked.context : '', event: picked ? picked.series || '' : '', wants: box.querySelector('#rec-wants').value.trim(), speakers: speakersOn() && speakersReady() }, picked);
+          await start(source, dir, box.querySelector('#rec-title').value.trim(), { context: picked ? picked.context : '', ...(picked && picked.series ? { event: picked.series } : {}), wants: box.querySelector('#rec-wants').value.trim(), speakers: speakersOn() && speakersReady() }, picked);
         } finally {
           if (button && button.isConnected) button.disabled = false;
         }
