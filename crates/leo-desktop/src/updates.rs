@@ -10,7 +10,9 @@ use std::{
 };
 use tauri::AppHandle;
 use tauri_plugin_updater::{Update, UpdaterExt};
-const CHECK_GAP: Duration = Duration::from_secs(60 * 60);
+const CHECK_GAP: Duration = Duration::from_secs(30 * 60);
+const RETRY_GAP: Duration = Duration::from_secs(5 * 60);
+const TICK: Duration = Duration::from_secs(60);
 const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const MOST_UPDATE_BYTES: u64 = 1024 * 1024 * 1024;
@@ -165,12 +167,14 @@ impl Updates {
     }
     fn run(self: Arc<Self>, rx: mpsc::Receiver<Command>) {
         let mut pending: Option<Pending> = None;
+        let mut last: Option<(SystemTime, bool)> = None;
         loop {
-            let command = match rx.recv_timeout(CHECK_GAP) {
+            let command = match rx.recv_timeout(TICK) {
                 Ok(command) => command,
                 Err(mpsc::RecvTimeoutError::Disconnected) => return,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if self.preferences().is_some_and(|p| p.automatic_updates)
+                    if due(last, SystemTime::now())
+                        && self.preferences().is_some_and(|p| p.automatic_updates)
                         && std::env::var_os("LEO_NO_UPDATE_CHECK").is_none()
                         && self
                             .operating
@@ -188,12 +192,11 @@ impl Updates {
                 Command::Check => {
                     self.set("state", "checking");
                     let checked = tauri::async_runtime::block_on(self.check());
+                    let now = SystemTime::now();
+                    last = Some((now, checked.is_ok()));
                     self.set(
                         "last_checked",
-                        SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs(),
+                        now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
                     );
                     match checked {
                         Ok(Some(update))=> {
@@ -341,6 +344,12 @@ impl UpdateApi for Updates {
         }
     }
 }
+fn due(last: Option<(SystemTime, bool)>, now: SystemTime) -> bool {
+    last.is_none_or(|(at, worked)| {
+        now.duration_since(at).unwrap_or(Duration::MAX)
+            >= if worked { CHECK_GAP } else { RETRY_GAP }
+    })
+}
 fn hold_quit(installed: bool, gate: &leo_core::activity::Gate) -> bool {
     !installed && gate.installing()
 }
@@ -421,6 +430,25 @@ fn restart(app: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn checks_by_wall_clock_every_half_hour_and_retries_a_failure_after_five_minutes() {
+        use std::time::{Duration, SystemTime};
+        let at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let after = |minutes: u64| at + Duration::from_secs(minutes * 60);
+        assert!(super::due(None, at));
+        assert!(!super::due(Some((at, true)), after(29)));
+        assert!(super::due(Some((at, true)), after(30)));
+        assert!(
+            super::due(Some((at, true)), after(600)),
+            "a long sleep counts"
+        );
+        assert!(!super::due(Some((at, false)), after(4)));
+        assert!(super::due(Some((at, false)), after(5)));
+        assert!(
+            super::due(Some((at, true)), at - Duration::from_secs(60)),
+            "a clock set back checks again"
+        );
+    }
     #[test]
     fn repeated_quit_waits_for_an_installation_but_recording_can_quit_normally() {
         let gate = leo_core::activity::Gate::default();
