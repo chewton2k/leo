@@ -147,6 +147,8 @@ Decided: one app, window only (2026-10-31).
   the sidebar button opens the explorer as a drawer over the page (`side-drawer`;
   Esc, a click outside or opening a note closes it; focus goes to Filter and back).
   The More sheet (`#menu`) is for phones only (under 600 px).
+- The window itself never moves: `html` has `overscroll-behavior: none`, so the note's end or top
+  never rubber-bands the rail, explorer and panes (2026-11-27, the user's call).
 - Layout variables on `body`: `--side`, `--right`, `--mid`. Fixed things
   (toolbar, select bar, toasts, FABs, `#dock`) use them so nothing covers
   anything. Page toolbars share one geometry: 760 px at most below 1000 px; from 1000 px
@@ -641,8 +643,10 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   the explorer to its rail while the room is short (unfolding it then opens the narrow-window drawer,
   `side-drawer`, over both panes), and a window with less room closes beside ("Not enough room for two
   notes"). Each pane saves and restores its own reading place (`readingScrolled`, `restoreReading`, `p.reading`). Open beside
-  is in the explorer note menu (with Close split view while split) and a right-half drop zone
-  ("Open here" / "Open beside", the files overlay's style, never for files, Felix first); exit by the
+  is in the explorer note menu (with Close split view while split) and a drop zone split where the
+  panes meet, or where beside will open (`--drop-x`, set by drag.js `noteOver`) ("Open here" / "Open
+  beside", each box on its pane below the bar; the one under the pointer raised with an ink outline,
+  the other dimmed behind a dashed hairline; 2026-11-27, the user's call; never for files, Felix first); exit by the
   `.pane-close` × on each pane, the ⋯ menu's Close this pane or any page that is not a note (beside is
   saved first; a failed save keeps it with Close anyway when the draft is kept). Closing the left
   pane promotes the right with its unsaved typing (`besideTake`, `replaceState`, the same session, so
@@ -1259,11 +1263,70 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   the full parsed values. The repeat-rule guards stay. leo.db `calendar_feeds` keeps the times, ETag and Last-Modified (a missing file means an
   unconditional fetch); an old stored `body` is moved to a file on first read.
   GET `/api/schedule?from&to&live` (≤43 days).
+- Busy and RSVP (2026-11-27, the user's call): `ics` reads `TRANSP:TRANSPARENT`
+  as `Event.free` and, when the feed's `X-WR-CALNAME` is an email address (it must
+  come before the events, as the format requires), that address's `PARTSTAT` as
+  `Event.reply` (`declined`, `tentative`, `accepted`; an unknown owner leaves it empty,
+  never guessed). `Event::busy()` (not all-day, not free, not declined) gates
+  `calendar::starting`; `schedule.busy(item)` is its page twin. Declined events are
+  drawn muted (a faint title and an outline, never struck through: items only dim) and get no
+  Record button; free ones get a dashed edge.
+- Day tools (2026-11-27, the user's call; all page-side, no Rust): `schedule.meetingLink(event)`
+  (first https URL in location then description on zoom.us, meet.google.com, teams.microsoft.com,
+  teams.live.com, webex.com or whereby.com, else the first https URL) gives a Join link-button
+  before Record in the event peek (`target="_blank"`, opened by the desktop like every link) and
+  "Join meeting" in the right-click menu, never on a declined event. `schedule.overlaps(items, key)`
+  (busy items only, from `dayColumns`) marks tiles `.overlap` with two pencil strokes in ink at 55%
+  (`KANBAN_STROKES`, now in core.js, shared with the board priority marks) and names up to two
+  others in the peek ("Overlaps Sync 8:15 – 9:00 AM and 1 more"). `leo-second-zone` (localStorage,
+  Settings → Calendar) adds the same span in that zone under When in event and timed-task peeks
+  (`calZoneLine`; nothing when None or the offset matches). `leo-work-hours` (`{days, from, to}`,
+  Mon = 0, default Mon–Fri 09:00–17:00) feeds Find a time (`findTimeSheet`, header button): the
+  next 5 working days, `schedule.freeSlots` on a 30-minute grid from the next step, minus busy
+  events and timed tasks, 15/30/45/60 minutes; a picked slot is circled with `calRing`'s drawing
+  (stretched to the chip) and Copy writes "Tue, Dec 2: 2:00 – 2:30 PM, …", with the second zone
+  appended per slot when set. Pencil marks only where a person would mark the page: the overlap
+  strokes and the circled slot; Join, chips and controls stay crisp.
+- Prep from last time (2026-11-27, the user's call): events carry `series` (`Event::series()`,
+  the id before its last `@`) in `/api/calendar` and `/api/schedule`. The Record page sends it
+  as `profile.event`; `record::run` writes it as front matter `event:` on a note a recording
+  creates, never on an append or an existing note. `GET /api/calendar/last?event&not` answers
+  the newest live note with that `event` (`{id, title, updated_at, open, open_total}`, `open` the
+  first 8 unchecked `- [ ]` / `* [ ]` lines) or 204. The Record page's chip and the event peek
+  show it as "Last time" (`lastTime`, `lastTimeHtml` in `app/core.js`); late answers are ignored.
 - Offer to record: `calendar::offer_to_record`, a 60 s task (only with
   `Powers.app_settings`) over cached expansions after `catch_up` (same `Busy`
-  guard): a timed event once when start−2 min ≤ now < start+10 min and nothing
+  guard): a timed event once when start−lead ≤ now < start+10 min and nothing
   is recording (`record::live`); it never presses Start. leo.db `calendar_prompted(uid, start)` dedupes
-  (pruned after 2 days); `offer` in calendars.json (absent = on).
+  (pruned after 2 days); `offer` in calendars.json (absent = on). Reminders
+  (2026-11-27): `lead` (0, 2, 5, 10, 15 minutes; absent = 2) and `tasks_remind`
+  (absent = on) sit beside `offer` in calendars.json, are returned and PATCHed with it
+  (`lead` validated), and every `Linking` writer carries all three (`keep_settings`).
+  `calendar::due_tasks` runs from the same 60 s tick over `listed_index`: a not-done timed
+  task occurrence (repeats, moved and `done_on` through `tasks::occurs_on`) is announced once
+  (uid `task:<id>`, start = its instant) through `AppApi::notify(Reminder {title, body, route})`
+  with route `#/calendar?day=<day>`; it needs no linked calendar, ignores `offer` and fires
+  while recording.
+- Morning briefing (2026-11-27, the user's call): `briefing {on, at "HH:MM" (default 08:00),
+  wants}` in calendars.json (off by default; PATCH `/api/calendar {briefing: {on?, at?, wants?}}`
+  merges per field, `at` validated, `wants` kept whole; `keep_settings` carries it). The 60 s
+  tick only decides (`briefing::tick`): due from `at` until `at`+3 h, today's leo.db
+  `briefing(day, text, tries, made_at)` row empty, under 2 tries, the second 10 min after the
+  first (`made_at` is the last try until text lands); it takes `Calendar.briefing` (the `Busy`
+  guard, also `writing` in GET), checks a writer (`Powers.briefing`, the toolless route with
+  `usage::Purpose::Briefing`; Settings' writing state `not_chosen` counts as none), claims the
+  row (other days deleted) and spawns the work: today's busy and all-day events, tasks today
+  and Earlier, `calendar::last_of` open items per series, the first 2,000 characters of `wants`,
+  each fenced with a per-call random suffix, waited on up to `READ_LIMIT` + 5 s. Success
+  stores the text and sends `notify(Reminder {"Your briefing is ready", first line, "#/"})`
+  (`leoFromApp('go')` takes `#/` too). `GET /api/briefing` →
+  `{day, text, made_at, writing}` or 204; `POST` (Make one now) runs outside the window, resets
+  tries, 202, or 503 "Choose a writing AI in Settings → Writing AI first.". Home's `#home-brief`
+  sits above `#home-today` (`loadHomeBrief` once on mount, every 3 s only while writing;
+  `source-label` rule, `.prose` folded to 6 lines with Show all; `.felix-writing` with the
+  breathing `margin-drop`; a briefing made during the view settles from `--felix`
+  via `inkLand('briefing', true)`). Settings → Calendar: switch, time, wishes (`data-reads`),
+  Make one now.
 - Standalone tasks: `<notes>/.leo/tasks/<id>.json` (`tasks::tasks_dir`), one
   JSON line per save through `jsonline.rs` (one generic reader/writer for any
   `Line`: `DIR`, `id`, `stamp`; shared with boards and cards), written atomically; the newest `updated_at`
@@ -1298,6 +1361,13 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   (every move kept, absent when empty so old files are unchanged); `on` stays the
   original date. `tasks::occurs_on` and `schedule.occurrences` apply it; .ics
   adds EXDATE + RECURRENCE-ID; Google gets the weekly rule only.
+  Richer repeats (2026-11-27): `every` (1-12, absent when 1), `monthly` (the
+  day of `date`'s month; a month without that day is skipped) and `until` (last
+  day) sit beside `repeat`, all absent by default so old files are unchanged.
+  `Task::repeats()` / `schedule.repeats` (`repeat` non-empty or `monthly`) is
+  the one "does it repeat" check; `tasks::Repeat` (`Task::rule()`,
+  `Listed::rule()`) feeds `repeats_on`, `occurs_on`, `rrule_of`, and
+  `schedule.js` mirrors the same rules.
 - Felix's task tools preserve missing descriptions, an explicit empty update
   clears one; Delete Undo restores the original id with a fresh timestamp so
   the restore wins over its tombstone.
@@ -1647,5 +1717,9 @@ Config and data file paths use the same `leo_core::paths::own` names as uninstal
   follow-ups (`.note-follow`, `NOTE_FOLLOW_ASKS`, each `chat.askNew`). The Calendar shows "Nothing
   this week/day" with New task when no visible day holds anything (`calQuiet`), tray tasks read at
   normal weight with the note they came from (`.cal-from`), and Google Calendar is a row with
-  Connect. The calendar peek and the card panel slide in (`panelArrive`) and out
-  (`panelLeave`, the panel itself, inert while it leaves), none under `stillMotion()`.
+  Connect. The calendar's tray and peek share one 320 px column with the tray's surface (2026-11-27,
+  the user's call: the calendar never moves), so opening and closing swaps the column's content and
+  fades the new content in (`calSideArrive`, opacity over `OPEN_MS`); where the peek is an overlay
+  (`@container cal` ≤ 832 px, `position: fixed`, `--raised`) it slides in (`panelArrive`) and out
+  (`panelLeave`), as the card panel does (the panel itself, inert while it leaves); none under
+  `stillMotion()`.

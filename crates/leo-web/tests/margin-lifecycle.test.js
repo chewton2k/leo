@@ -1103,7 +1103,7 @@ function foldHarness(...threads) {
   let observed;
   const watch = { watched: null, ended: false };
   h.context.ResizeObserver = h.context.window.ResizeObserver = class { constructor(fn) { observed = fn; } observe() {} disconnect() {} };
-  h.context.MutationObserver = h.context.window.MutationObserver = class { constructor(fn) { watch.fn = fn; } observe(el, options) { watch.watched = options; } disconnect() { watch.ended = true; } };
+  h.context.MutationObserver = h.context.window.MutationObserver = class { constructor(fn) { watch.fn = fn; } observe(el, options) { watch.el = el; watch.watched = options; } disconnect() { watch.ended = true; } };
   h.context.marginLayout = () => 'both';
   h.context.document.createElement = () => ({ setAttribute() {}, addEventListener() {}, firstChild: {}, parentElement: columns });
   h.context.marginMount({ note: {}, doc: { source: () => '' } }, () => true);
@@ -1119,13 +1119,17 @@ function foldHarness(...threads) {
   return { ...h, runs, draws, block, watch, observe: () => observed(), el: (id) => h.state.els.get(id), finish: async () => { for (const r of runs) r.finish(); await new Promise(setImmediate); } };
 }
 
-test('a block the doc replaces, as when its line editor closes, redraws so the blot gets its slot back', () => {
+test('a block the doc replaces, as when its line editor closes, or a formula drawn in it redraws so the blot gets its slot back', () => {
   const h = foldHarness();
   let redraws = 0;
   h.context.marginRedraw = () => redraws++;
-  assert.deepEqual({ ...h.watch.watched }, { childList: true });
-  h.watch.fn();
+  assert.equal(JSON.stringify(h.watch.watched), JSON.stringify({ childList: true, subtree: true, attributeFilter: ['data-drawn'] }));
+  h.watch.fn([{ type: 'childList', target: h.watch.el }]);
   assert.equal(redraws, 1);
+  h.watch.fn([{ type: 'attributes', target: {} }]);
+  assert.equal(redraws, 2);
+  h.watch.fn([{ type: 'childList', target: {} }]);
+  assert.equal(redraws, 2);
   h.state.layer = { remove() {} };
   h.context.marginLeave();
   assert.equal(h.watch.ended, true);

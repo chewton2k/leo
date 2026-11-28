@@ -56,7 +56,10 @@ a test, or leave it unset to see the user's own data.
   bundled page stay in the window; navigation and new windows elsewhere open in
   the default browser.
 - Calendar events (2026-11-09, `notify.rs`): `AppApi::event_starting` posts
-  "<title> is starting"; a tap (Windows: the plugin's `on_action` with uid and kind in
+  "<title> is starting", or "<title> starts in N min" when `lead` > 0 and the start is
+  still ahead (2026-11-27); `AppApi::notify` (`notify::remind`) posts a task reminder
+  the same way (title, body) and a tap opens its `route` through `leoFromApp('go', route)`
+  (the page follows only `#/` routes); a tap (Windows: the plugin's `on_action` with uid and kind in
   `extra`; macOS: `post`) shows the window and navigates to
   `#/record?event=<uid>&kind=<call|microphone>` through
   `leoFromApp('event', '<kind>:<uid>')` (`notify::open` JSON-quotes its argument, offers it for 5 s while the page may still be

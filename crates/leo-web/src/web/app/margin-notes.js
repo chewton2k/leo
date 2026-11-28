@@ -155,8 +155,9 @@ async function marginMount(s, current) {
     marginPage.observer.observe($('#doc', marginPage.root));
   }
   if (window.MutationObserver) {
-    marginPage.watch = new MutationObserver(marginLater(() => marginRedraw()));
-    marginPage.watch.observe($('#doc', marginPage.root), { childList: true });
+    const doc = $('#doc', marginPage.root);
+    marginPage.watch = new MutationObserver(marginLater((records) => records.some((r) => r.target === doc || r.type === 'attributes') && marginRedraw()));
+    marginPage.watch.observe(doc, { childList: true, subtree: true, attributeFilter: ['data-drawn'] });
   }
   $('#doc', marginPage.root).addEventListener('focusin', marginLater(() => marginRedraw()));
   if (s.note.id) return marginLoad(s, current);

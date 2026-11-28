@@ -71,7 +71,9 @@ const DRAWN = {
   broken: lineDrawing('broken', '0 0 120 92', '<g transform="rotate(-24 66 44)"><path d="M50 37.4 Q71 36.8 90.6 37.6 M50.2 52.2 Q71 52.6 90.4 51.8"/><path d="M90.6 37.6 Q97.4 37.8 97.8 44.8 Q97.4 51.6 90.4 51.8"/><path d="M50 37.4 Q44.6 40.4 40.8 42.2 Q42.4 43.6 40.6 45.2 Q42.4 46.4 40.6 47.8 Q44.8 49.6 50.2 52.2"/><path d="M85.4 37.8 Q85.8 44.8 85.4 51.8 M81.2 37.8 Q81.6 44.8 81.2 51.8 M52.6 44.8 Q66 45.1 78.6 44.8" stroke-width="1.1" opacity=".55"/></g><path d="M27.6 72.4 Q32.6 67.6 37.6 66 Q37.4 70.6 36 74.4 Q31.6 73.8 27.6 72.4" stroke-width="1.3"/><path d="M42.4 74.6 Q42.7 74.4 43 74.6 M46 71.4 Q46.3 71.2 46.6 71.4" stroke-width="1.1" opacity=".55"/>'),
 };
 
-const recorder = window.leoRecording.create({ bytes: speechBytes, encodePicture: async (file) => base64((await pictureFor(file)).blob), api, esc, toast, go: (hash, opts) => go(hash, opts), noteHash: (id) => noteHash(id), felix, icons: ICON, folderOptions: (folders, here) => folderOptions(folders, here), choiceCards: (options) => choiceCards(options), syncChoiceCards: (box) => syncChoiceCards(box), desktop: () => desktopApp, chat: () => chat, noteReady: () => showLatest().catch(() => {}) });
+const KANBAN_STROKES = ['<path d="M2.2 11.6 Q3.1 7.4 4.3 3.1"/>', '<path d="M6.1 11.8 Q7.2 7.6 8.2 3.3"/>', '<path d="M10.1 11.5 Q11.1 7.2 12.3 3.2"/>'];
+
+const recorder = window.leoRecording.create({ bytes: speechBytes, encodePicture: async (file) => base64((await pictureFor(file)).blob), api, esc, toast, go: (hash, opts) => go(hash, opts), noteHash: (id) => noteHash(id), felix, icons: ICON, folderOptions: (folders, here) => folderOptions(folders, here), choiceCards: (options) => choiceCards(options), syncChoiceCards: (box) => syncChoiceCards(box), desktop: () => desktopApp, chat: () => chat, noteReady: () => showLatest().catch(() => {}), lastTime: (series) => lastTime(series), lastTimeHtml: (last) => lastTimeHtml(last) });
 const chat = felix.create({
   render: (text, options) => md.render(text, options),
   escape: md.escape,
@@ -673,6 +675,21 @@ async function go(hash, { replace = false, search = null, note = null, isCurrent
 const folderHash = (dir) => (dir ? `#/f/${enc(dir)}` : '#/');
 const noteHash = (id) => `#/n/${enc(id)}`;
 
+async function lastTime(series) {
+  if (!series) return null;
+  try { return await api(`/api/calendar/last?event=${enc(series)}`); } catch (e) { return null; }
+}
+
+function lastTimeHtml(last, compact) {
+  if (!last) return '';
+  const link = `<a href="${noteHash(last.id)}">${esc(last.title || 'Untitled')}</a>`;
+  const label = '<div class="source-label">Last time</div>';
+  if (compact) return `<div class="last-time">${label}<p>${link}${last.open_total ? ` · ${last.open_total} open` : ''}</p></div>`;
+  const more = last.open_total - last.open.length;
+  const items = last.open.length ? `<div class="prose">${md.render(last.open.map((t) => `- [ ] ${t}`).join('\n'), { interactive: false })}</div>` : '';
+  return `<div class="last-time">${label}<p>${link}</p>${items}${more > 0 ? `<p class="hint">${more} more</p>` : ''}</div>`;
+}
+
 const asideHash = (hash) => /^#\/(settings|trash)(\/|$)/.test(hash || '');
 const entryAt = () => (Number.isInteger(history.state?.leoAt) ? history.state.leoAt : null);
 const places = { before: '', from: '', now: location.hash, at: entryAt() ?? 0, fromAt: -1 };
@@ -728,11 +745,13 @@ async function showWorkspace(dir = null) {
   document.body.classList.remove('on-note');
   chrome();
   swap('workspace', () => {
-    app.innerHTML = `<section class="workspace-empty"><header class="home-head"><h1 class="home-day" id="home-day"></h1><p class="home-line" id="home-line"></p><div class="home-week" id="home-week" role="group" aria-label="This week"></div></header><hr class="home-rule"><label class="quick-bar home-ask">${ICON.search}<input id="home-ask" placeholder="Search notes, or ask Felix" autocomplete="off" spellcheck="false" enterkeyhint="go" maxlength="2000" aria-label="Search notes, or ask Felix"><kbd>${shortcutText(shortcutKeys('quick'))}</kbd></label><p class="hint home-dictate" hidden></p><section class="home-today" id="home-today" aria-label="Today" tabindex="-1" hidden></section><section class="home-recent${(homeRecent.notes ? homeRecent.notes.length : side.notes.get('')?.items?.length) ? ' reserve' : ''}" id="home-recent" aria-label="Recently written"></section><div class="home-foot">${DRAWN.arrow}<p id="home-foot"></p>${!sideWide() ? '<button class="btn plain" data-action="folders">Folders</button>' : ''}<button class="btn plain" data-action="new" title="New note (${shortcutText(shortcutKeys('new'))})">${ICON.filePlus}New note</button></div></section>`;
+    app.innerHTML = `<section class="workspace-empty"><header class="home-head"><h1 class="home-day" id="home-day"></h1><p class="home-line" id="home-line"></p><div class="home-week" id="home-week" role="group" aria-label="This week"></div></header><hr class="home-rule"><label class="quick-bar home-ask">${ICON.search}<input id="home-ask" placeholder="Search notes, or ask Felix" autocomplete="off" spellcheck="false" enterkeyhint="go" maxlength="2000" aria-label="Search notes, or ask Felix"><kbd>${shortcutText(shortcutKeys('quick'))}</kbd></label><p class="hint home-dictate" hidden></p><section class="home-brief" id="home-brief" aria-label="Briefing" hidden></section><section class="home-today" id="home-today" aria-label="Today" tabindex="-1" hidden></section><section class="home-recent${(homeRecent.notes ? homeRecent.notes.length : side.notes.get('')?.items?.length) ? ' reserve' : ''}" id="home-recent" aria-label="Recently written"></section><div class="home-foot">${DRAWN.arrow}<p id="home-foot"></p>${!sideWide() ? '<button class="btn plain" data-action="folders">Folders</button>' : ''}<button class="btn plain" data-action="new" title="New note (${shortcutText(shortcutKeys('new'))})">${ICON.filePlus}New note</button></div></section>`;
     wireHomeAsk();
     drawTasksWindow();
     drawHomeToday();
     loadHomeWeek();
+    homeBrief.seen = null;
+    loadHomeBrief();
     if (!(Date.now() - tasksWin.eventsAt < CAL_POLL_MS)) loadTasksWindow().catch(() => {});
     dictateHint($('.home-dictate'));
     scrollToTop();

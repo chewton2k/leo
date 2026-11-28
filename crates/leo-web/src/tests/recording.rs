@@ -1731,3 +1731,44 @@ fn felix_reads_the_transcript_of_a_note_with_1001_recordings() {
     })
     .unwrap();
 }
+
+#[test]
+fn a_recording_for_a_calendar_event_makes_a_note_that_names_its_series() {
+    for (into, expected) in [(false, Some("standup@example.com")), (true, None)] {
+        let (mut state, _d, ids) = state_with(&[("Earlier", "")]);
+        let append = into.then(|| ids[0].clone());
+        state.listener = Some(Arc::new(
+            move |_: record::Listening, _: &mut dyn FnMut(record::Heard)| {
+                Ok(record::Recorded {
+                    title: "Standup".into(),
+                    body: "notes".into(),
+                    into: append.clone(),
+                    ..Default::default()
+                })
+            },
+        ));
+        let started = run(record::start(
+            State(state.clone()),
+            Json(
+                serde_json::from_value(serde_json::json!({
+                    "source": "microphone",
+                    "profile": { "event": " standup@example.com " },
+                }))
+                .unwrap(),
+            ),
+        ));
+        assert_eq!(started.status(), StatusCode::ACCEPTED);
+        let view = recording_until(&state, |s| s == "done" || s == "failed");
+        assert_eq!(view.state, "done", "{view:?}");
+        let note = state
+            .fresh()
+            .find_note(view.note.as_deref().unwrap())
+            .unwrap()
+            .clone();
+        assert_eq!(
+            note.extra.get("event").and_then(|v| v.as_str()),
+            expected,
+            "into: {into}"
+        );
+    }
+}

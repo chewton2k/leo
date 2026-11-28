@@ -89,16 +89,22 @@ function scrollTreeNear(e) {
 function noteZone(e) {
   const p = dragging.note && carries(e, NOTE_DRAG) && state.view === 'note' && !$('.scrim') && panes.find((q) => q.s && q.el.contains(e.target));
   if (!p) return null;
-  const left = app.getBoundingClientRect().left;
-  const right = (split() ? besidePane.el : app).getBoundingClientRect().right;
-  return { p, zone: e.clientX > (left + right) / 2 ? 'beside' : 'here' };
+  const box = app.getBoundingClientRect();
+  const mid = Math.round(split() ? box.right : box.right - besideWidth());
+  return { p, mid, zone: e.clientX > mid ? 'beside' : 'here' };
 }
 
-function noteOver(zone) {
+function noteOver(over) {
+  const body = document.body;
   clearTimeout(dragging.zoneTimer);
-  if (zone) document.body.dataset.noteDrop = zone;
-  else delete document.body.dataset.noteDrop;
-  if (zone) dragging.zoneTimer = setTimeout(() => delete document.body.dataset.noteDrop, 160);
+  if (!over) {
+    delete body.dataset.noteDrop;
+    body.style.removeProperty('--drop-x');
+    return;
+  }
+  body.dataset.noteDrop = over.zone;
+  body.style.setProperty('--drop-x', `${over.mid}px`);
+  dragging.zoneTimer = setTimeout(() => noteOver(null), 160);
 }
 
 function filesOver(on) {
@@ -168,7 +174,7 @@ document.addEventListener('dragover', (e) => {
     return;
   }
   const over = noteZone(e);
-  noteOver(over?.zone);
+  noteOver(over);
   if (over) {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';

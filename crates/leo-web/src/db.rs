@@ -127,6 +127,12 @@ CREATE TABLE IF NOT EXISTS calendar_feeds (
     problem TEXT,
     body BLOB
 );
+CREATE TABLE IF NOT EXISTS briefing (
+    day TEXT PRIMARY KEY,
+    text TEXT NOT NULL DEFAULT '',
+    tries INTEGER NOT NULL DEFAULT 0,
+    made_at TEXT
+);
 CREATE TABLE IF NOT EXISTS calendar_prompted (
     uid TEXT NOT NULL,
     start TEXT NOT NULL,

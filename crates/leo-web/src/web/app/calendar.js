@@ -39,6 +39,41 @@ function calZone() {
   }
 }
 
+function calSecondZone() {
+  try {
+    return localStorage.getItem('leo-second-zone') || '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function calZoneLine(start, end) {
+  const zone = calSecondZone();
+  if (!zone) return '';
+  try {
+    const clock = { hour: 'numeric', minute: '2-digit' };
+    const part = (timeZone, options) => new Intl.DateTimeFormat(calLocale(), { timeZone, ...options });
+    const alike = (options) => part(zone, options).format(start) === part(undefined, options).format(start);
+    if (alike({ ...clock, day: 'numeric' })) return '';
+    return `${part(zone, alike({ day: 'numeric' }) ? clock : { weekday: 'short', ...clock }).formatRange(start, end)} ${zone.split('/').pop().replace(/_/g, ' ')}`;
+  } catch (e) {
+    return '';
+  }
+}
+
+const CAL_HOURS_DEFAULT = { days: [0, 1, 2, 3, 4], from: '09:00', to: '17:00' };
+
+function calWorkHours() {
+  try {
+    const hours = JSON.parse(localStorage.getItem('leo-work-hours'));
+    const clock = /^\d\d:\d\d$/;
+    if (hours && Array.isArray(hours.days) && hours.days.length && hours.days.every((d) => Number.isInteger(d) && d >= 0 && d < 7) && clock.test(hours.from) && clock.test(hours.to) && hours.from < hours.to) return hours;
+  } catch (e) {
+    return CAL_HOURS_DEFAULT;
+  }
+  return CAL_HOURS_DEFAULT;
+}
+
 function monthOf(key) {
   const d = S.fromKey(key);
   return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -53,11 +88,13 @@ function calWindow() {
   return { days, from: S.fromKey(days[0]).toISOString(), to: S.addDays(S.fromKey(days[days.length - 1]), 1).toISOString() };
 }
 
-async function showCalendar() {
+async function showCalendar(arg = '') {
   const mine = ++seq;
   state = { view: 'calendar', dir: '' };
   chrome();
   document.title = 'Calendar · leo';
+  const asked = /^\?day=(\d{4}-\d{2}-\d{2})$/.exec(arg)?.[1];
+  if (asked) cal.selected = asked;
   if (!cal.selected) cal.selected = S.dayKey(new Date());
   calDragEnd();
   if (!cal.compose?.failed) cal.compose = null;
@@ -167,8 +204,8 @@ function toneOfTask(task) {
   return TASK_TONES[task.kind] || '--hue-slate';
 }
 
-function repeatBubbles(on) {
-  return `<div class="repeat-days" role="group" aria-label="Repeat every">${[0, 1, 2, 3, 4, 5, 6].map((d) => {
+function repeatBubbles(on, label = 'Repeat every') {
+  return `<div class="repeat-days" role="group" aria-label="${esc(label)}">${[0, 1, 2, 3, 4, 5, 6].map((d) => {
     const day = new Date(2024, 0, 1 + d);
     const name = day.toLocaleDateString(calLocale(), { weekday: 'long' });
     const letter = day.toLocaleDateString(calLocale(), { weekday: 'narrow' });
@@ -176,27 +213,57 @@ function repeatBubbles(on) {
   }).join('')}</div>`;
 }
 
-function repeatHint(repeat) {
-  return repeat.length ? S.repeatLabel(repeat, calLocale()) : 'Does not repeat';
+function repeatHint(task) {
+  return S.repeats(task) ? S.repeatLabel(task, calLocale()) : 'Does not repeat';
 }
 
-function repeatPicker(box, start, onChange) {
-  const days = [...start];
+function repeatMore(task) {
+  const every = Math.max(1, task.every || 1);
+  const counts = [...new Set([1, 2, 3, 4, every])].sort((a, c) => a - c);
+  return `<div class="repeat-more">
+    ${segmented({ label: 'Repeat by', action: 'cal-unit', key: 'cal-unit', current: task.monthly ? 'monthly' : 'weekly', choices: [['weekly', 'Weekly'], ['monthly', 'Monthly']] })}
+    <span class="repeat-every"><span class="hint">Every</span><label class="select-control"><select id="cal-peek-every" aria-label="Repeat every">${counts.map((n) => `<option value="${n}"${n === every ? ' selected' : ''}>${n}</option>`).join('')}</select>${ICON.chevron}</label><span class="hint repeat-unit">${task.monthly ? 'months' : 'weeks'}</span></span>
+    <span class="repeat-every"><span class="hint">Until</span><input class="set-input" type="date" id="cal-peek-until" aria-label="Repeat until" value="${esc(task.until || '')}"${task.date ? ` min="${esc(task.date)}"` : ''}></span>
+  </div>`;
+}
+
+function repeatPicker(box, task, onChange) {
+  const rule = { repeat: [...(task.repeat || [])], every: Math.max(1, task.every || 1), monthly: Boolean(task.monthly), until: task.until || null };
+  const changed = () => {
+    const hint = box.querySelector('.repeat-hint');
+    if (hint) hint.textContent = repeatHint({ ...rule, date: task.date });
+    if (box.querySelector('.repeat-more')) box.querySelector('.repeat-days').hidden = rule.monthly;
+    const unit = box.querySelector('.repeat-unit');
+    if (unit) unit.textContent = rule.monthly ? 'months' : 'weeks';
+    onChange({ ...rule, repeat: [...rule.repeat] });
+  };
   box.addEventListener('click', (e) => {
     const b = e.target.closest('[data-repeat-day]');
-    if (!b) return;
-    const d = Number(b.dataset.repeatDay);
-    const at = days.indexOf(d);
-    if (at >= 0) days.splice(at, 1);
-    else days.push(d);
-    days.sort((a, c) => a - c);
-    b.classList.toggle('on', at < 0);
-    b.setAttribute('aria-pressed', String(at < 0));
-    const hint = box.querySelector('.repeat-hint');
-    if (hint) hint.textContent = repeatHint(days);
-    onChange([...days]);
+    const u = e.target.closest('[data-cal-unit]');
+    if (b) {
+      const d = Number(b.dataset.repeatDay);
+      const at = rule.repeat.indexOf(d);
+      if (at >= 0) rule.repeat.splice(at, 1);
+      else rule.repeat.push(d);
+      rule.repeat.sort((x, y) => x - y);
+      b.classList.toggle('on', at < 0);
+      b.setAttribute('aria-pressed', String(at < 0));
+    } else if (u) {
+      rule.monthly = u.dataset.calUnit === 'monthly';
+      for (const o of box.querySelectorAll('[data-cal-unit]')) {
+        o.classList.toggle('on', o === u);
+        o.setAttribute('aria-pressed', String(o === u));
+      }
+      syncSegmented(u.closest('.segmented'));
+    } else return;
+    changed();
   });
-  return days;
+  box.addEventListener('change', (e) => {
+    if (e.target.id === 'cal-peek-every') rule.every = Number(e.target.value);
+    else if (e.target.id === 'cal-peek-until') rule.until = e.target.value || null;
+    else return;
+    changed();
+  });
 }
 
 function calDate(minutes) {
@@ -276,11 +343,13 @@ const CAL_RINGS = [
   'M7.5 4.3L9.2 3.5 10.9 3 12.8 2.8 14.6 2.9 16.4 3.4 18 4.2 19.5 5.2 20.7 6.5 21.6 7.9 22.4 9.3 22.9 10.9 23.1 12.5 23.1 14.1 22.9 15.8 22.4 17.4 21.6 18.9 20.5 20.3 19.2 21.5 17.6 22.5 15.8 23.1 13.9 23.5 12 23.4 10.2 23 8.4 22.3 6.9 21.4 5.6 20.2 4.5 18.8 3.6 17.3 3 15.8 2.7 14.1 2.6 12.4 2.7 10.8 3.1 9.1 3.9 7.5 4.9 6 6.2 4.7 7.7 3.6 9.4 2.8 11.3 2.4 13.3 2.3',
 ];
 
-function calRing(key, still = false) {
+const calOverlapMark = () => `<svg class="cal-overlap-mark" viewBox="0 0 10 14" aria-hidden="true">${KANBAN_STROKES.slice(0, 2).join('')}</svg>`;
+
+function calRing(key, still = false, fit = false) {
   if (!still) cal.ringAt ??= performance.now();
   const ago = still ? CAL_RING_MS : performance.now() - cal.ringAt;
   const draw = ago < CAL_RING_MS ? ` class="inking" style="animation-delay: ${-Math.round(ago)}ms"` : '';
-  return `<svg class="cal-ring" viewBox="0 0 26 26" aria-hidden="true"><path pathLength="1"${draw} d="${CAL_RINGS[S.fromKey(key).getDate() % CAL_RINGS.length]}"/></svg>`;
+  return `<svg class="cal-ring" viewBox="0 0 26 26"${fit ? ' preserveAspectRatio="none"' : ''} aria-hidden="true"><path pathLength="1"${draw} d="${CAL_RINGS[S.fromKey(key).getDate() % CAL_RINGS.length]}"/></svg>`;
 }
 
 function calCheck(task) {
@@ -288,14 +357,16 @@ function calCheck(task) {
   return `<input type="checkbox" class="cal-check" data-action="task-done" data-id="${esc(task.id)}"${on} aria-label="Done: ${esc(task.title)}"${task.done ? ` checked${tickWrite(task.id, task.on)}` : ''}>`;
 }
 
-function calChip(item, day, { style = '', sub = '', extra = '', tall = false, inline = false } = {}) {
+function calChip(item, day, { style = '', sub = '', extra = '', tall = false, inline = false, over = false } = {}) {
   const task = item.type === 'task' ? item.task : null;
   const kind = task ? 'task' : 'event';
   const done = task && task.done ? ' done' : '';
+  const mark = task ? '' : item.event.reply === 'declined' ? ' declined' : item.event.free ? ' free' : '';
   const peeked = cal.peek && cal.peek.id === (task ? task.id : item.event.id) && (!task || !task.on || cal.peek.on === task.on) ? ' peeked' : '';
-  return `<div class="cal-item ${kind}${done}${peeked}${tall ? ' tall' : ''}${inline ? ' inline' : ''}" ${calAttrs(item, day)} style="--tone: var(${calTone(item)});${style}">
+  const name = `${calLabel(item)}${sub ? ` · ${sub}` : ''}`;
+  return `<div class="cal-item ${kind}${done}${mark}${over ? ' overlap' : ''}${peeked}${tall ? ' tall' : ''}${inline ? ' inline' : ''}" ${calAttrs(item, day)} style="--tone: var(${calTone(item)});${style}">
     ${task ? calCheck(task) : ''}
-    <button type="button" class="cal-open" data-action="cal-open" ${task ? `data-kind="task" data-id="${esc(task.id)}"${task.on ? ` data-on="${esc(task.on)}"` : ''}` : `data-kind="event" data-id="${esc(item.event.id)}"`} title="${esc(calLabel(item))}${sub ? ` · ${esc(sub)}` : ''}"><span class="cal-title">${esc(calLabel(item))}</span>${sub ? `<span class="cal-sub">${esc(sub)}</span>` : ''}</button>${extra}
+    <button type="button" class="cal-open" data-action="cal-open" ${task ? `data-kind="task" data-id="${esc(task.id)}"${task.on ? ` data-on="${esc(task.on)}"` : ''}` : `data-kind="event" data-id="${esc(item.event.id)}"`} title="${esc(name)}"${over ? ` aria-label="${esc(name)}, overlaps another item"` : ''}><span class="cal-title">${esc(calLabel(item))}</span>${sub ? `<span class="cal-sub">${esc(sub)}</span>` : ''}</button>${extra}${over ? calOverlapMark() : ''}
   </div>`;
 }
 
@@ -317,6 +388,7 @@ function calHead(days) {
     </div>
     <div class="cal-status" role="status">${calStatus()}</div>
     <div class="cal-views">${segmented({ label: 'View', action: 'cal-view', key: 'view', current: cal.view, choices: CAL_VIEWS.map(([v, label]) => [v, label, '', `${label} (${label[0]})`]) })}</div>
+    <button type="button" class="icon-btn cal-arrow" data-action="cal-find" aria-label="Find a time" title="Find a time">${ICON.search}</button>
     <button type="button" class="btn sm cal-new" data-action="task-new" data-day="${esc(cal.selected)}">${ICON.plus}<span>New task</span></button>
   </header>`;
 }
@@ -364,6 +436,7 @@ function calColumn(key, plan, today, room = Infinity) {
   const floor = (item) => 1440 - (item.type === 'task' && !item.task.end ? CAL_DUE_MIN : Math.ceil(20 / CAL_HOUR_PX * 60));
   const placed = spans.map((s, i) => ({ start: Math.min(s.start, floor(items[i])), end: s.end }));
   const cols = S.dayColumns(placed);
+  const crowded = S.overlaps(items, key);
   const more = new Map();
   items.forEach((item, i) => {
     if (cols[i].col < room) return;
@@ -386,7 +459,7 @@ function calColumn(key, plan, today, room = Infinity) {
     const sub = length <= 30 && !task ? '' : task && !task.end ? `Due ${calTime(start)}` : calRange(start, item.type === 'event' ? end : S.minutesOf(task.end));
     const grip = task && task.source === 'leo' && calMovable(task) ? '<span class="cal-grip" data-drag="resize" aria-hidden="true"></span>' : '';
     const rest = more.get(i) ? `<button type="button" class="cal-stack-more" data-action="cal-pick" data-day="${key}" data-to="day" style="top: ${top + 2}px; z-index: ${room + 2};" aria-label="${more.get(i)} more at this time, open the day">+${more.get(i)}</button>` : '';
-    return calChip(item, key, { style: ` top: ${top}px; height: ${height}px; left: calc(${area} * ${left / 100} + 2px); width: calc(${area} * ${width / 100} - 5px); z-index: ${col + 1};`, sub, extra: grip, tall: end - start >= 90, inline: Boolean(task) && length < 60 }) + rest;
+    return calChip(item, key, { style: ` top: ${top}px; height: ${height}px; left: calc(${area} * ${left / 100} + 2px); width: calc(${area} * ${width / 100} - 5px); z-index: ${col + 1};`, sub, extra: grip, tall: end - start >= 90, inline: Boolean(task) && length < 60, over: crowded.has(item) }) + rest;
   }).join('');
   let now = '';
   if (key === today) {
@@ -801,7 +874,7 @@ async function calMove(task, next, scope = null) {
 }
 
 function calAskScope(task, next) {
-  const box = sheet(`<h3>Move “${esc(task.title)}”</h3><p class="hint">It repeats ${esc(S.repeatLabel(task.repeat, calLocale()).toLowerCase())}.</p>
+  const box = sheet(`<h3>Move “${esc(task.title)}”</h3><p class="hint">It repeats ${esc(S.repeatLabel(task, calLocale()).toLowerCase())}.</p>
     ${sheetButtons(['Only this one', 'id="cal-move-one"'], { middle: '<button type="button" class="btn" id="cal-move-all">Every time</button>' })}`);
   $('#cal-move-one', box).addEventListener('click', () => { closeSheet(); calMove(task, next, 'one').catch(fail); });
   $('#cal-move-all', box).addEventListener('click', () => { closeSheet(); calMove(task, next, 'all').catch(fail); });
@@ -823,10 +896,11 @@ function calBodies(base, task, next, scope) {
     const shift = Math.round((S.fromKey(next.date) - S.fromKey(task.date)) / 86400000);
     const start = S.dayKey(S.addDays(S.fromKey(base.date || task.date), shift));
     const repeat = S.shiftRepeat(base.repeat, shift);
+    const until = base.until ? S.dayKey(S.addDays(S.fromKey(base.until), shift)) : null;
     return {
-      body: { date: start, time: next.time, end: next.end, repeat },
-      undo: { date: base.date, time: calHM(base.time), end: calHM(base.end), repeat: base.repeat },
-      local: (t) => Object.assign(t, { date: start, time: next.time, end: next.end, repeat }),
+      body: { date: start, time: next.time, end: next.end, repeat, ...(until && { until }) },
+      undo: { date: base.date, time: calHM(base.time), end: calHM(base.end), repeat: base.repeat, ...(base.until && { until: base.until }) },
+      local: (t) => Object.assign(t, { date: start, time: next.time, end: next.end, repeat, until }),
     };
   }
   return {
@@ -1012,7 +1086,8 @@ function calMenu(target, point = null) {
     const { id, kind, on = null } = item.dataset;
     const event = kind === 'event' && ((cal.data && cal.data.events) || []).find((e) => e.id === id);
     const task = kind === 'task' && calFind(id);
-    if (event) rows = [{ text: 'Details', icon: ICON.note, run: () => calOpenPeek('event', id) }, ...(!event.all_day && new Date(event.end) > Date.now() ? [{ text: 'Record this event', icon: ICON.mic, run: () => go(recordHref(event)) }] : [])];
+    const join = event && event.reply !== 'declined' ? S.meetingLink(event) : '';
+    if (event) rows = [{ text: 'Details', icon: ICON.note, run: () => calOpenPeek('event', id) }, ...(join ? [{ text: 'Join meeting', icon: ICON.screen, run: () => window.open(join, '_blank', 'noopener') }] : []), ...(!event.all_day && event.reply !== 'declined' && new Date(event.end) > Date.now() ? [{ text: 'Record this event', icon: ICON.mic, run: () => go(recordHref(event)) }] : [])];
     else if (task) {
       const done = taskDoneOn(task, on);
       rows = [{ text: 'Open', icon: ICON.note, run: () => calOpenPeek('task', id, on) }, { text: done ? 'Mark not done' : 'Mark done', icon: ICON.check, run: () => setTaskDone(id, !done, on) }, { line: true }, { text: 'Delete task', icon: ICON.trash, danger: true, run: () => deleteTask(id) }];
@@ -1088,7 +1163,7 @@ function calOpenPeek(kind, id, on = null) {
   if (kind === 'event') calPeekEvent(side, id);
   else calPeekTask(side, id, on);
   drawCalendar();
-  if (fresh) panelArrive(side);
+  if (fresh) calSideArrive(side);
 }
 
 function calClosePeek() {
@@ -1096,13 +1171,23 @@ function calClosePeek() {
   const flush = cal.peek.flush;
   cal.peek = null;
   if (flush) flush();
-  panelLeave($('#cal-side'), () => {
+  const side = $('#cal-side');
+  const tray = () => {
     if (cal.peek) return;
     drawCalendar();
     if (!cal.redraw) return;
     const today = S.dayKey(new Date());
     calShowTray(calPlanFor(calDays(), today), today);
-  });
+  };
+  if (side && getComputedStyle(side).position === 'fixed') return panelLeave(side, tray);
+  tray();
+  calSideArrive(side);
+}
+
+function calSideArrive(side) {
+  if (!side || stillMotion()) return;
+  if (getComputedStyle(side).position === 'fixed') return panelArrive(side);
+  for (const kid of side.children) kid.animate?.({ opacity: [0, 1] }, { duration: OPEN_MS, easing: EASE_OUT });
 }
 
 function calPlanFor(days, today) {
@@ -1125,6 +1210,7 @@ function calPeekRefresh(id) {
   const google = $('#cal-peek-google', side);
   const acts = $('#cal-peek-acts', side);
   if (!task || !google || !acts) return;
+  $('#cal-peek-extra', side).innerHTML = calTaskLines(task, cal.peek.on);
   google.textContent = calPeekGoogle(task);
   acts.innerHTML = calPeekActs(task);
 }
@@ -1155,13 +1241,30 @@ function eventDetailsHtml(event) {
   const about = S.eventDetails(event.context);
   const where = event.location || about.place;
   const linked = (text) => (/^https?:\/\/\S+$/i.test(text) ? `<a href="${esc(text)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>` : esc(text));
-  return `<div class="set-row"><span class="set-label">When</span><span class="set-value">${esc(when)}</span></div>
+  const status = event.reply === 'declined' ? 'You declined' : event.reply === 'tentative' ? 'Tentative' : event.free ? 'Shown as free' : '';
+  const over = event.all_day ? '' : calOverlapLine((i) => i.type === 'event' && i.event.id === event.id, S.dayKey(new Date(event.start)));
+  const zone = event.all_day ? '' : calZoneLine(new Date(event.start), new Date(event.end));
+  return `<div class="set-row"><span class="set-label">When</span><span class="set-value">${esc(when)}${zone ? `<span class="hint cal-zone">${esc(zone)}</span>` : ''}</span></div>
+    ${status ? `<div class="set-row"><span class="set-label">Status</span><span class="set-value">${status}</span></div>` : ''}
+    ${over ? `<p class="hint">${esc(over)}</p>` : ''}
     ${where ? `<div class="set-row"><span class="set-label">Where</span><span class="set-value sched-wrap">${linked(where)}</span></div>` : ''}
     <div class="set-row"><span class="set-label">Calendar</span><span class="set-value">${esc(event.calendar || 'Google')}</span></div>
     ${about.organiser ? `<div class="set-row"><span class="set-label">Organiser</span><span class="set-value sched-wrap">${esc(about.organiser)}</span></div>` : ''}
     ${about.invited.length ? `<div class="set-row"><span class="set-label">Invited</span><span class="set-value sched-people">${about.invited.map((p) => `<span class="chip">${esc(p)}</span>`).join('')}</span></div>` : ''}
     ${about.description ? `<div class="sched-about prose">${S.richText(about.description)}</div>` : ''}
     ${event.zone_unknown ? '<p class="set-note warn">This event names a time zone leo does not know, so its time may be off.</p>' : ''}`;
+}
+
+function calOverlapLine(match, key) {
+  const items = ((calPlan([key]).byDay.get(key) || {}).timed || []).filter(calShown);
+  const self = items.find(match);
+  const others = (self && S.overlaps(items, key).get(self)) || [];
+  if (!others.length) return '';
+  const named = others.slice(0, 2).map((other) => {
+    const { start, end } = S.spanOn(other, key);
+    return `${calLabel(other)} ${other.type === 'task' && !other.task.end ? calTime(start) : calRange(start, end)}`;
+  });
+  return `Overlaps ${named.join(', ')}${others.length > 2 ? ` and ${others.length - 2} more` : ''}`;
 }
 
 function calEventSoon(event) {
@@ -1178,17 +1281,43 @@ function calPeekEvent(side, id) {
   const event = ((cal.data && cal.data.events) || []).find((e) => e.id === id);
   if (!event) return calClosePeek();
   side.style.setProperty('--tone', `var(${toneOfEvent(event)})`);
+  const declined = event.reply === 'declined';
+  const join = declined ? '' : S.meetingLink(event);
+  const record = calEventSoon(event) && !declined;
   side.innerHTML = `${calPeekBar(event.calendar || 'Google Calendar')}<h2 class="cal-peek-title">${esc(event.title)}</h2>${eventDetailsHtml(event)}
     <p class="hint">Events from your calendar link are read-only here.</p>
-    ${calEventSoon(event) ? '<div class="buttons"><button type="button" class="btn primary" data-action="record">Record this meeting</button></div>' : ''}`;
+    ${join || record ? `<div class="buttons">${join ? `<a class="btn plain" href="${esc(join)}" target="_blank" rel="noopener noreferrer">${ICON.screen}Join</a>` : ''}${record ? '<button type="button" class="btn primary" data-action="record">Record this meeting</button>' : ''}</div>` : ''}<div id="cal-peek-last"></div>`;
+  lastTime(event.series).then((last) => {
+    const slot = cal.peek && cal.peek.id === id && $('#cal-peek-last', side);
+    if (slot && last) slot.innerHTML = lastTimeHtml(last, true);
+  });
+}
+
+function calTaskSlot(task, on) {
+  const day = S.repeats(task) ? on || S.dayKey(new Date()) : null;
+  return { day, slot: day ? (task.moved || {})[day] || { date: day, time: task.time, end: task.end } : task };
+}
+
+function calAt(key, minutes) {
+  const at = S.fromKey(key);
+  at.setHours(0, minutes, 0, 0);
+  return at;
+}
+
+function calTaskLines(task, on) {
+  const { day, slot } = calTaskSlot(task, on);
+  if (!slot.date || !slot.time) return '';
+  const start = calAt(slot.date, S.minutesOf(slot.time));
+  const zone = calZoneLine(start, slot.end ? calAt(slot.date, S.minutesOf(slot.end)) : start);
+  const over = calOverlapLine((i) => i.type === 'task' && i.task.id === task.id && (i.task.on || '') === (day || ''), slot.date);
+  return `${zone ? `<p class="hint">${esc(zone)}</p>` : ''}${over ? `<p class="hint">${esc(over)}</p>` : ''}`;
 }
 
 function calPeekTask(side, id, on) {
   const task = calFind(id);
   if (!task) return calClosePeek();
   const repeating = S.repeats(task);
-  const day = repeating ? on || S.dayKey(new Date()) : null;
-  const slot = repeating ? (task.moved || {})[day] || { date: day, time: task.time, end: task.end } : task;
+  const { day, slot } = calTaskSlot(task, on);
   const leo = task.source === 'leo';
   const doneNow = taskDoneOn(task, day);
   const dayName = day ? S.fromKey(day).toLocaleDateString(calLocale(), { weekday: 'short', month: 'short', day: 'numeric' }) : '';
@@ -1204,7 +1333,8 @@ function calPeekTask(side, id, on) {
       <input class="set-input" type="time" id="cal-peek-start" aria-label="Starts" value="${esc(calHM(slot.time) || '')}"${slot.date ? '' : ' disabled'}>
       ${leo ? `<span class="hint">to</span><input class="set-input" type="time" id="cal-peek-end" aria-label="Ends" value="${esc(calHM(slot.end) || '')}"${slot.time ? '' : ' disabled'}>` : ''}
     </span></div>
-    ${leo ? `<div class="set-row column task-repeat" id="cal-peek-repeat"><span class="set-label">Repeat</span>${repeatBubbles(task.repeat || [])}<span class="hint repeat-hint">${esc(repeatHint(task.repeat || []))}</span></div>` : ''}
+    <div id="cal-peek-extra">${calTaskLines(task, on)}</div>
+    ${leo ? `<div class="set-row column task-repeat" id="cal-peek-repeat"><span class="set-label">Repeat</span>${repeatBubbles(task.repeat || [])}${repeatMore(task)}<span class="hint repeat-hint">${esc(repeatHint(task))}</span></div>` : ''}
     ${kindChips('cal-peek-kinds', task.kind)}
     <textarea class="cal-peek-about" id="cal-peek-about" rows="4" placeholder="Add a description…" aria-label="Description">${esc(task.description || '')}</textarea>
     <div class="set-row"><span class="set-label">Note</span><span class="set-value">${task.note ? `<a href="${noteHash(task.note.id)}">${esc(task.note.title || 'Untitled')}</a>` : 'Added in leo'}</span></div>
@@ -1217,7 +1347,7 @@ function calPeekTask(side, id, on) {
     said('Saving…');
     try {
       const out = await api(`/api/tasks/${enc(task.id)}`, { method: 'PATCH', body });
-      if (out && out.id) Object.assign(task, out);
+      if (out && out.id) Object.assign(task, { repeat: [], every: 1, monthly: false, until: null }, out);
       else Object.assign(task, body);
       said('Saved');
       tasksWin.revision++;
@@ -1277,7 +1407,10 @@ function calPeekTask(side, id, on) {
   };
   for (const sel of ['#cal-peek-date', '#cal-peek-start', '#cal-peek-end']) $(sel, side)?.addEventListener('change', () => Promise.resolve(when()).catch(fail));
   const repeatBox = $('#cal-peek-repeat', side);
-  if (repeatBox) repeatPicker(repeatBox, task.repeat || [], (days) => patch({ repeat: days }).catch(fail));
+  if (repeatBox) {
+    repeatBox.querySelector('.repeat-days').hidden = Boolean(task.monthly);
+    repeatPicker(repeatBox, task, (rule) => patch({ repeat: rule.repeat, every: rule.every, monthly: rule.monthly, until: rule.until }).then((ok) => ok || calPeekTask(side, id, on), fail));
+  }
   let kindLatest = 0;
   let kindSaved = task.kind;
   const pickKind = (on) => {
@@ -1447,6 +1580,116 @@ async function saveDate(task, pick, confirm) {
   }
 }
 
+const FIND_DAYS = 5;
+const FIND_REACH = 42;
+
+function findLabel(day) {
+  return S.fromKey(day).toLocaleDateString(calLocale(), { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function findRange(slot) {
+  const minutes = (at) => at.getHours() * 60 + at.getMinutes();
+  return calRange(minutes(slot.start), minutes(slot.end));
+}
+
+function findWorkLabel(hours) {
+  const name = (d) => new Date(2024, 0, 1 + d).toLocaleDateString(calLocale(), { weekday: 'short' });
+  const last = hours.days[hours.days.length - 1];
+  const run = hours.days.length > 1 && last - hours.days[0] === hours.days.length - 1;
+  return `${run ? `${name(hours.days[0])}–${name(last)}` : hours.days.map(name).join(', ')} ${S.timeLabel(hours.from, calLocale())}–${S.timeLabel(hours.to, calLocale())}`;
+}
+
+function findBusy(data, days) {
+  const plan = S.plan([...(data.tasks || []), ...(data.window || [])], data.events || [], S.dayKey(new Date()), { from: days[0], to: days[days.length - 1] });
+  return days.flatMap((key) => ((plan.byDay.get(key) || {}).timed || []).filter(S.busy).map((item) => {
+    const { start, end } = S.spanOn(item, key);
+    return { start: calAt(key, start), end: calAt(key, end) };
+  }));
+}
+
+function findDayHtml({ day, slots }, picked) {
+  const chips = slots.map((slot) => {
+    const on = picked.has(slot.start.getTime());
+    return `<button type="button" class="slot-chip" data-at="${slot.start.getTime()}" aria-pressed="${on}">${esc(findRange(slot))}${on ? calRing(day, true, true) : ''}</button>`;
+  }).join('');
+  return `<section class="find-day"><div class="source-label">${esc(findLabel(day))}</div>${chips ? `<div class="find-slots">${chips}</div>` : '<p class="hint">No free time</p>'}</section>`;
+}
+
+function findCopyText(slots) {
+  const byDay = new Map();
+  for (const slot of slots) {
+    const day = S.dayKey(slot.start);
+    byDay.set(day, [...(byDay.get(day) || []), slot]);
+  }
+  return [...byDay].map(([day, list]) => `${findLabel(day)}: ${list.map((slot) => {
+    const zone = calZoneLine(slot.start, slot.end);
+    return `${findRange(slot)}${zone ? ` (${zone})` : ''}`;
+  }).join(', ')}`).join('\n');
+}
+
+async function findTimeSheet() {
+  const hours = calWorkHours();
+  const days = [];
+  for (let i = 0; i < FIND_REACH && days.length < FIND_DAYS; i++) {
+    const key = S.dayKey(S.addDays(new Date(), i));
+    if (hours.days.includes(S.weekdayOf(key))) days.push(key);
+  }
+  const box = sheet(`<h3>Find a time</h3>
+    <p class="hint">${esc(findWorkLabel(hours))} · next ${days.length} working days</p>
+    <div class="set-row">${segmented({ label: 'Length', field: 'id="find-minutes"', current: 30, choices: [[15, '15 min'], [30, '30 min'], [45, '45 min'], [60, '1 h']] })}</div>
+    <div class="find-days" id="find-days">Looking at your calendar…</div>
+    <div class="buttons"><span class="hint grow" id="find-count" role="status"></span><button type="button" class="btn primary" id="find-copy" disabled>Copy 0 times</button></div>`);
+  const picked = new Set();
+  let found = [];
+  let busy = null;
+  const count = () => {
+    $('#find-count', box).textContent = `${picked.size} picked`;
+    const copy = $('#find-copy', box);
+    copy.textContent = `Copy ${picked.size} ${picked.size === 1 ? 'time' : 'times'}`;
+    copy.disabled = !picked.size;
+  };
+  const paint = () => {
+    picked.clear();
+    found = S.freeSlots({ busy, days, hours, minutes: Number($('#find-minutes', box).value), now: new Date() });
+    $('#find-days', box).innerHTML = found.map((day) => findDayHtml(day, picked)).join('');
+    count();
+  };
+  box.addEventListener('change', (e) => {
+    if (e.target.id === 'find-minutes' && busy) paint();
+  });
+  box.addEventListener('click', (e) => {
+    const chip = e.target.closest('.slot-chip');
+    if (!chip) return;
+    const at = Number(chip.dataset.at);
+    const on = !picked.has(at);
+    if (on) picked.add(at);
+    else picked.delete(at);
+    chip.setAttribute('aria-pressed', String(on));
+    chip.querySelector('.cal-ring')?.remove();
+    if (on) chip.insertAdjacentHTML('beforeend', calRing(S.dayKey(new Date(at)), true, true));
+    count();
+  });
+  $('#find-copy', box).addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(findCopyText(found.flatMap((day) => day.slots).filter((slot) => picked.has(slot.start.getTime()))));
+      toast('Copied');
+    } catch (e) {
+      toast(`Could not copy: ${e.message || 'the clipboard is not available.'}`, { bad: true });
+    }
+  });
+  let data;
+  try {
+    data = await api(`/api/schedule?from=${enc(S.fromKey(days[0]).toISOString())}&to=${enc(S.addDays(S.fromKey(days[days.length - 1]), 1).toISOString())}&limit=${TASKS_PAGE}`);
+  } catch (e) {
+    if (e instanceof Locked) throw e;
+    if (box.isConnected) $('#find-days', box).textContent = 'leo could not read your calendar. Close this and try again.';
+    return;
+  }
+  if (!box.isConnected) return;
+  busy = findBusy(data, days);
+  paint();
+}
+
 function newTaskSheet(day = null) {
   const box = sheet(`<h3>New task</h3>
     <div class="task-new">
@@ -1454,7 +1697,7 @@ function newTaskSheet(day = null) {
         <input class="set-input task-title" id="task-title" placeholder="What needs doing?" autocomplete="off" aria-label="Title">
         <label class="set-row column task-about"><span class="set-label">Description <span class="hint">optional</span></span><textarea class="set-input" id="task-description" rows="3" placeholder="Add a description…"></textarea></label>
         ${kindChips('task-kinds', 'other')}
-        <div class="set-row column task-repeat" id="task-repeat"><span class="set-label">Repeat</span>${repeatBubbles([])}<span class="hint repeat-hint">${esc(repeatHint([]))}</span></div>
+        <div class="set-row column task-repeat" id="task-repeat"><span class="set-label">Repeat</span>${repeatBubbles([])}<span class="hint repeat-hint">${esc(repeatHint({}))}</span></div>
       </div>
       <div class="picker-box" id="pick-box"></div>
     </div>
@@ -1462,7 +1705,7 @@ function newTaskSheet(day = null) {
   let kind = 'other';
   let repeat = [];
   const pick = pickerBody($('#pick-box', box), { date: day }, { meeting: false });
-  repeatPicker($('#task-repeat', box), [], (days) => { repeat = days; });
+  repeatPicker($('#task-repeat', box), {}, (rule) => { repeat = rule.repeat; });
   $('#task-kinds', box).addEventListener('click', (e) => {
     const chip = e.target.closest('[data-kind]');
     if (!chip) return;
@@ -1576,7 +1819,7 @@ function taskSheet(id, on = null) {
     ${task.found === false ? '<p class="set-note warn">leo could not find this checkbox in the note any more. Open the note to check it.</p>' : ''}
     <div class="set-row column"><label class="set-label" for="task-description">Description <span class="hint">optional</span><span class="hint task-saved" id="task-description-state" role="status"></span></label><textarea class="set-input" id="task-description" rows="3" placeholder="Add a description…">${esc(task.description || '')}</textarea></div>
     <div class="set-row"><span class="set-label">${repeating ? 'Starts' : 'Date'}</span><span class="set-value">${esc(when)}<button type="button" class="btn plain sm" data-action="task-date" data-id="${esc(task.id)}">${task.date ? 'Change' : 'Set date'}</button></span></div>
-    ${task.source === 'leo' ? `<div class="set-row column task-repeat" id="task-repeat"><span class="set-label">Repeat</span>${repeatBubbles(task.repeat || [])}<span class="hint repeat-hint">${esc(repeatHint(task.repeat || []))}</span></div>` : ''}
+    ${task.source === 'leo' ? `<div class="set-row column task-repeat" id="task-repeat"><span class="set-label">Repeat</span>${repeatBubbles(task.repeat || [])}<span class="hint repeat-hint">${esc(repeatHint(task))}</span></div>` : ''}
     ${kindChips('task-kinds', task.kind)}
     <div class="set-row"><span class="set-label">Note</span><span class="set-value">${task.note ? `<a href="${noteHash(task.note.id)}">${esc(task.note.title || 'Untitled')}</a>` : 'Added in leo'}</span></div>
     <div class="set-row"><span class="set-label">Google</span><span class="set-value">${esc(google)}</span></div>
@@ -1627,7 +1870,7 @@ function taskSheet(id, on = null) {
   if (earlier) earlier.field.flush().then(field.flush).catch(fail);
   const repeatBox = $('#task-repeat', box);
   if (repeatBox) {
-    repeatPicker(repeatBox, task.repeat || [], async (days) => {
+    repeatPicker(repeatBox, task, async ({ repeat: days }) => {
       try {
         const saved = await api(`/api/tasks/${enc(task.id)}`, { method: 'PATCH', body: { repeat: days } });
         Object.assign(task, saved && saved.id ? saved : { repeat: days });
@@ -2021,6 +2264,44 @@ function homeTally(today) {
   if (!marks.length) return '';
   const ago = performance.now() - Math.max(...done.map((t) => tickedAt.get(tickKey(t.id, t.on)) ?? -Infinity));
   return `<svg class="home-tally-marks" width="${width}" height="12" viewBox="0 0 ${width} 12" aria-hidden="true">${marks.map((m, i) => `<path${m.x ? ` transform="translate(${m.x} 0)"` : ''} d="${m.d}"${i === marks.length - 1 && ago < TICK_MS ? ` pathLength="1" class="inking" style="animation-delay: ${-Math.round(ago)}ms"` : ''}/>`).join('')}</svg>`;
+}
+
+const homeBrief = { seen: null, open: false, timer: 0 };
+const BRIEF_POLL_MS = 3000;
+const briefInked = (id) => (id === 'briefing' ? document.querySelectorAll('.home-brief-text') : []);
+
+async function loadHomeBrief() {
+  clearTimeout(homeBrief.timer);
+  if (!document.getElementById('home-brief')) return;
+  let data = null;
+  try { data = await api('/api/briefing'); } catch (e) { return; }
+  const box = document.getElementById('home-brief');
+  if (!box) return;
+  drawHomeBrief(box, data);
+  if (data?.writing) homeBrief.timer = setTimeout(loadHomeBrief, BRIEF_POLL_MS);
+}
+
+function drawHomeBrief(box, data) {
+  const text = data?.text || '';
+  const fresh = Boolean(text) && homeBrief.seen !== null && data.made_at !== homeBrief.seen;
+  homeBrief.seen = data?.made_at || '';
+  box.hidden = !text && !data?.writing;
+  if (box.hidden) { box.innerHTML = ''; return; }
+  const made = text && data.made_at ? new Date(data.made_at).toLocaleTimeString(calLocale(), { hour: 'numeric', minute: '2-digit' }) : '';
+  box.innerHTML = `<div class="source-label">Briefing${made ? `<span class="home-brief-at">${esc(made)}</span>` : ''}</div>${data.writing ? `<p class="felix-writing" role="status"><svg class="margin-drop" aria-hidden="true"><use href="#leo-mark"/></svg>Felix is writing your briefing</p>` : ''}${text ? `<div class="prose home-brief-text${homeBrief.open ? ' open' : ''}" id="home-brief-text">${md.render(text, { interactive: false })}</div><button type="button" class="btn plain sm" data-action="home-brief-more" aria-controls="home-brief-text" aria-expanded="${homeBrief.open}">${homeBrief.open ? 'Show less' : 'Show all'}</button>` : ''}`;
+  const body = box.querySelector('.home-brief-text');
+  const more = box.querySelector('[data-action="home-brief-more"]');
+  if (more) more.hidden = !homeBrief.open && body.scrollHeight <= body.clientHeight;
+  if (fresh) inkLand('briefing', true);
+  inkSettle(briefInked);
+}
+
+function toggleHomeBrief(el) {
+  homeBrief.open = !homeBrief.open;
+  const body = document.getElementById('home-brief-text');
+  body?.classList.toggle('open', homeBrief.open);
+  el.setAttribute('aria-expanded', String(homeBrief.open));
+  el.textContent = homeBrief.open ? 'Show less' : 'Show all';
 }
 
 const homeWeek = { events: null, load: 0, from: '', at: 0 };

@@ -4,15 +4,21 @@ const http = require('node:http');
 const path = require('node:path');
 const { pageCss, paneHelpers } = require('../page-source');
 
-const at = (d, h, m = 0) => new Date(2026, 10, d, h, m).toISOString();
+const stamp = (zone, d, h, m = 0) => {
+  if (!zone) return new Date(2026, 10, d, h, m).toISOString();
+  const guess = Date.UTC(2026, 10, d, h, m);
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' }).formatToParts(guess).map(x => [x.type, Number(x.value)]));
+  return new Date(2 * guess - Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute)).toISOString();
+};
 
 // The Calendar page with its real CSS, icons, sheets, schedule.js and calendar.js over an
 // in-memory API that behaves like routes/tasks.rs (occurrence moves included). A fixed
 // 284 px explorer sits on the left like the desktop sidebar.
-async function calendarFixture(browser, run, { width = 1360, height = 900, view = 'week' } = {}) {
+async function calendarFixture(browser, run, { width = 1360, height = 900, view = 'week', zone } = {}) {
   const web = path.resolve(__dirname, '../../src/web');
   const read = name => fs.readFileSync(path.join(web, name), 'utf8');
   const css = pageCss();
+  const at = (d, h, m = 0) => stamp(zone, d, h, m);
   const core = read('app/core.js');
   const icons = core.slice(core.indexOf('const svg ='), core.indexOf('const recorder ='));
   const sheets = read('app/sheets.js');
@@ -64,6 +70,7 @@ async function calendarFixture(browser, run, { width = 1360, height = 900, view 
       if(url.startsWith('/api/schedule')&&window.failSchedule){window.failSchedule=false;throw new Error('offline');}
       if(url.startsWith('/api/schedule'))return {connected:true,calendars:[{id:'c1',name:'School'}],synced:new Date().toISOString(),refreshing:false,events:structuredClone(db.events),tasks:structuredClone(db.tasks),window:[],total:db.tasks.length};
       if(url==='/api/calendar/refresh')return null;
+      if(url.startsWith('/api/calendar/last'))return null;
       if(url==='/api/tasks'&&method==='POST'){const t={id:'task-made'+(++made),source:'leo',title:body.title,description:'',kind:body.kind||'other',done:false,date:body.date||null,time:hms(body.time),end:body.time?hms(body.end):null,note:null,found:true,promoted:false};db.tasks.push(t);return structuredClone(t);}
       if((m=url.match(/^\\/api\\/tasks\\/([^/]+)$/))){
         const t=db.tasks.find(x=>x.id===m[1]);
@@ -80,12 +87,13 @@ async function calendarFixture(browser, run, { width = 1360, height = 900, view 
       throw new Error('No fake for '+method+' '+url);
     }
     ${core.slice(core.indexOf('const MOTION_MS'), core.indexOf('function stillMotion'))}
+    ${core.slice(core.indexOf('async function lastTime('), core.indexOf('const asideHash'))}
     ${core.slice(core.indexOf('const moving'), core.indexOf('function rel('))}
     ${read('app/motion.js')}
     ${read('app/popup-menu.js')}
     ${read('app/settings-navigation.js')}
     ${page}
-    const actions={${calActions}'task-delete':el=>deleteTask(el.dataset.id),'task-new':el=>newTaskSheet(el.dataset.day||null),close:()=>closeSheet()};
+    const actions={${calActions}'segment-pick':el=>pickSegment(el),'task-delete':el=>deleteTask(el.dataset.id),'task-new':el=>newTaskSheet(el.dataset.day||null),close:()=>closeSheet()};
     document.addEventListener('click',e=>{const el=e.target.closest('[data-action]');if(!el||!actions[el.dataset.action])return;e.preventDefault();Promise.resolve(actions[el.dataset.action](el)).catch(fail);});
     document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('.scrim'))closeSheet();});
     window.errors=[];window.db=db;
@@ -99,10 +107,10 @@ async function calendarFixture(browser, run, { width = 1360, height = 900, view 
     res.end('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/style.css"><style>body{--side:284px;padding-left:var(--side)}#explorer{position:fixed;left:0;top:0;bottom:0;width:var(--side);background:var(--surface-2)}</style></head><body class="on-calendar"><nav id="explorer">Folders</nav><header class="bar" id="bar"><div class="bar-row"><div class="crumbs" id="crumbs"></div></div></header><main id="app"></main><script src="/schedule.js"></script><script src="/fixture.js"></script></body></html>');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const context = await browser.newContext({ viewport: { width, height }, locale: 'en-US' });
+  const context = await browser.newContext({ viewport: { width, height }, locale: 'en-US', timezoneId: zone });
   try {
     const tab = await context.newPage();
-    await tab.clock.install({ time: new Date(2026, 10, 3, 11, 40) });
+    await tab.clock.install({ time: new Date(at(3, 11, 40)) });
     const errors = [];
     tab.on('pageerror', error => errors.push(error.message));
     await tab.goto('http://127.0.0.1:' + server.address().port + '/');
@@ -590,6 +598,25 @@ test('Day, Week and Month switch by the control or the keyboard, and the choice 
     await page.locator('.cal-dayhead', { hasText: '5' }).click();
     await expect(page.locator('.cal-dayhead')).toHaveCount(1);
     expect(await page.evaluate(() => localStorage.getItem('leo-calendar-view'))).toBe('day');
+  });
+});
+
+test('the tray and the peek share one column, so opening and closing never moves the calendar', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const width = () => page.locator('#cal-side').evaluate(el => el.getBoundingClientRect().width);
+    const grid = () => page.locator('#cal-main').evaluate(el => el.getBoundingClientRect().width);
+    await expect(page.locator('#cal-side .cal-mini')).toBeVisible();
+    const [side, main] = [await width(), await grid()];
+    expect(side).toBe(320);
+    await page.locator('.cal-item[data-id="task-lab"] .cal-open').click();
+    await expect(page.locator('#cal-side.peek #cal-peek-title')).toBeVisible();
+    expect(await width()).toBe(side);
+    expect(await grid()).toBe(main);
+    expect(await page.locator('#cal-side').evaluate(el => getComputedStyle(el).position)).not.toBe('fixed');
+    await page.locator('[data-action="cal-peek-close"]').click();
+    await expect(page.locator('#cal-side .cal-mini')).toBeVisible();
+    expect(await width()).toBe(side);
+    expect(await grid()).toBe(main);
   });
 });
 
@@ -1254,5 +1281,154 @@ test('a press interrupted by the window, a cancel, another pointer or a release 
     await settled(page);
     expect(await patches(page, 'task-study')).toHaveLength(1);
     expect(await stuck()).toBe(false);
+  });
+});
+
+test('an event with a meeting link shows Join with that link, in its peek and its menu, unless it was declined', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    await page.evaluate(() => {
+      const at = (d, h) => new Date(2026, 10, d, h).toISOString();
+      window.db.events.push(
+        { id: 'e-meet', title: 'Design sync', start: at(5, 9), end: at(5, 10), all_day: false, calendar: 'Work', context: 'Agenda https://example.com/doc and https://meet.google.com/abc-defg-hij', location: '' },
+        { id: 'e-nolink', title: 'Walk', start: at(5, 15), end: at(5, 16), all_day: false, calendar: 'Work', context: '', location: 'Campus' },
+        { id: 'e-no', title: 'Skipped call', start: at(6, 9), end: at(6, 10), all_day: false, calendar: 'Work', context: '', location: 'https://us02web.zoom.us/j/1', reply: 'declined' }
+      );
+    });
+    await page.evaluate(() => loadSchedule());
+    const menu = page.locator('.popup-menu');
+    await page.locator('.cal-item[data-id="e-meet"]').click({ button: 'right' });
+    expect(await menu.locator('[role^="menuitem"]').allTextContents()).toEqual(['Details', 'Join meeting', 'Record this event']);
+    await page.keyboard.press('Escape');
+    await page.locator('.cal-item[data-id="e-meet"]').click();
+    const join = page.locator('#cal-side.peek a.btn', { hasText: 'Join' });
+    await expect(join).toHaveAttribute('href', 'https://meet.google.com/abc-defg-hij');
+    await expect(join).toHaveAttribute('target', '_blank');
+    await page.locator('.cal-item[data-id="e-nolink"]').click();
+    await expect(page.locator('#cal-side.peek .cal-peek-title')).toHaveText('Walk');
+    await expect(page.locator('#cal-side.peek a.btn')).toHaveCount(0);
+    await page.locator('.cal-item[data-id="e-no"]').click();
+    await expect(page.locator('#cal-side.peek .cal-peek-title')).toHaveText('Skipped call');
+    await expect(page.locator('#cal-side.peek a.btn')).toHaveCount(0);
+  });
+});
+
+test('two overlapping busy items are both marked and the peek names the other, while free and declined ones do not count', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    await page.locator('[data-action="cal-view"][data-view="day"]').click();
+    await settled(page);
+    await page.evaluate(() => {
+      const at = (h, m = 0) => new Date(2026, 10, 3, h, m).toISOString();
+      window.db.events.push(
+        { id: 'e-stand', title: 'Standup', start: at(8), end: at(8, 30), all_day: false, calendar: 'Work', context: '' },
+        { id: 'e-sync', title: 'Sync', start: at(8, 15), end: at(9), all_day: false, calendar: 'Work', context: '' },
+        { id: 'e-lunch', title: 'Lunch', start: at(15), end: at(16), all_day: false, calendar: 'Work', context: '' },
+        { id: 'e-focus', title: 'Focus block', start: at(15), end: at(16), all_day: false, calendar: 'Work', context: '', free: true },
+        { id: 'e-skip', title: 'Skipped call', start: at(15), end: at(16), all_day: false, calendar: 'Work', context: '', reply: 'declined' }
+      );
+    });
+    await page.evaluate(() => loadSchedule());
+    const stand = page.locator('.cal-item[data-id="e-stand"]');
+    await expect(stand).toHaveClass(/overlap/);
+    await expect(page.locator('.cal-item[data-id="e-sync"]')).toHaveClass(/overlap/);
+    for (const id of ['e-lunch', 'e-focus', 'e-skip']) await expect(page.locator(`.cal-item[data-id="${id}"]`)).not.toHaveClass(/overlap/);
+    await expect(stand.locator('.cal-overlap-mark')).toHaveAttribute('aria-hidden', 'true');
+    await expect(stand.locator('.cal-open')).toHaveAttribute('aria-label', /, overlaps another item$/);
+    await stand.click();
+    await expect(page.locator('#cal-side.peek')).toContainText(/Overlaps Sync 8:15\s*–\s*9:00\s*AM/);
+    await page.locator('.cal-item[data-id="e-lunch"]').click();
+    await expect(page.locator('#cal-side.peek .cal-peek-title')).toHaveText('Lunch');
+    await expect(page.locator('#cal-side.peek')).not.toContainText('Overlaps');
+  });
+});
+
+test('with a second time zone chosen the peeks of an event and a timed task show the span there, and nothing when it matches', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const peek = page.locator('#cal-side.peek');
+    const open = async (id, title) => {
+      await page.locator(`.cal-item[data-id="${id}"]`).click();
+      await expect(peek.locator('.cal-peek-title')).toHaveText(title);
+    };
+    await open('e-lecture', 'CS 241 lecture');
+    await expect(peek).not.toContainText('London');
+    await page.evaluate(() => localStorage.setItem('leo-second-zone', 'Europe/London'));
+    await page.locator('.cal-item[data-id="task-study"]').click();
+    await expect(peek.locator('#cal-peek-title')).toHaveValue('Study group');
+    await expect(peek.locator('#cal-peek-extra')).toContainText(/9:00\s*–\s*10:00\s*PM London/);
+    await open('e-lecture', 'CS 241 lecture');
+    await expect(peek.locator('.cal-zone')).toHaveText(/^6:00\s*–\s*7:30\s*PM London$/);
+    await page.evaluate(() => localStorage.setItem('leo-second-zone', 'America/Los_Angeles'));
+    await page.locator('.cal-item[data-id="task-study"]').click();
+    await expect(peek.locator('#cal-peek-title')).toHaveValue('Study group');
+    await expect(peek.locator('#cal-peek-extra')).toBeEmpty();
+    await open('e-lecture', 'CS 241 lecture');
+    await expect(peek.locator('.cal-zone')).toHaveCount(0);
+  }, { zone: 'America/Los_Angeles' });
+});
+
+test('Find a time lists the free slots of the next working days, circles the picked ones and copies them', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    await page.evaluate(() => {
+      window.copied = [];
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText: async text => { window.copied.push(text); } }, configurable: true });
+      window.db.events.push({ id: 'e-full', title: 'Offsite', start: new Date(2026, 10, 4, 9).toISOString(), end: new Date(2026, 10, 4, 17).toISOString(), all_day: false, calendar: 'Work', context: '' });
+    });
+    await page.evaluate(() => loadSchedule());
+    await page.getByRole('button', { name: 'Find a time' }).click();
+    const sheet = page.locator('.sheet');
+    await expect(sheet).toContainText('Mon–Fri');
+    const days = sheet.locator('.find-day');
+    await expect(days).toHaveCount(5);
+    await expect(days.nth(0).locator('.source-label')).toHaveText('Tue, Nov 3');
+    const chips = days.nth(0).locator('.slot-chip');
+    expect(await chips.allTextContents().then(all => all.map(t => t.replace(/\s+/g, ' ')))).toEqual(['12:00 – 12:30 PM', '12:30 – 1:00 PM', '2:00 – 2:30 PM', '2:30 – 3:00 PM', '3:00 – 3:30 PM', '3:30 – 4:00 PM', '4:00 – 4:30 PM', '4:30 – 5:00 PM']);
+    await expect(days.nth(1)).toContainText('No free time');
+    await expect(days.nth(4).locator('.source-label')).toHaveText('Mon, Nov 9');
+    await expect(sheet.locator('#find-copy')).toBeDisabled();
+    await chips.nth(0).click();
+    await chips.nth(2).click();
+    await expect(chips.nth(0)).toHaveAttribute('aria-pressed', 'true');
+    await expect(chips.nth(0).locator('.cal-ring')).toHaveCount(1);
+    await expect(chips.nth(1)).toHaveAttribute('aria-pressed', 'false');
+    await expect(sheet.locator('#find-count')).toHaveText('2 picked');
+    await sheet.locator('#find-copy').click();
+    await expect(page.locator('.toast')).toContainText('Copied');
+    expect(await page.evaluate(() => window.copied.map(t => t.replace(/\s+/g, ' ')))).toEqual(['Tue, Nov 3: 12:00 – 12:30 PM, 2:00 – 2:30 PM']);
+    await page.evaluate(() => localStorage.setItem('leo-second-zone', 'Europe/London'));
+    await sheet.locator('#find-copy').click();
+    expect(await page.evaluate(() => window.copied.at(-1).replace(/\s+/g, ' '))).toBe('Tue, Nov 3: 12:00 – 12:30 PM (8:00 – 8:30 PM London), 2:00 – 2:30 PM (10:00 – 10:30 PM London)');
+    await chips.nth(0).click();
+    await expect(chips.nth(0).locator('.cal-ring')).toHaveCount(0);
+    await expect(sheet.locator('#find-count')).toHaveText('1 picked');
+    await sheet.getByRole('radio', { name: '1 h' }).click();
+    await expect(sheet.locator('#find-count')).toHaveText('0 picked');
+    await expect(days.nth(0).locator('.slot-chip').first()).toHaveText(/^12\s*–\s*1\s*PM$/);
+    await page.keyboard.press('Escape');
+    await expect(sheet).toHaveCount(0);
+  }, { zone: 'America/Los_Angeles' });
+});
+
+test('a declined event is drawn muted and says so in its peek, and a free one is dashed', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    await page.evaluate(() => {
+      const at = (d, h) => new Date(2026, 10, d, h).toISOString();
+      window.db.events.push(
+        { id: 'e-declined', title: 'Budget review', start: at(6, 15), end: at(6, 16), all_day: false, calendar: 'Work', context: '', reply: 'declined' },
+        { id: 'e-free', title: 'Focus block', start: at(6, 9), end: at(6, 10), all_day: false, calendar: 'Work', context: '', free: true }
+      );
+    });
+    await page.evaluate(() => loadSchedule());
+    const declined = page.locator('.cal-item[data-id="e-declined"]');
+    await expect(declined).toHaveClass(/declined/);
+    await expect(page.locator('.cal-item[data-id="e-free"]')).toHaveClass(/free/);
+    await expect(page.locator('.cal-item[data-id="e-lecture"]')).not.toHaveClass(/declined|free/);
+    expect(await declined.locator('.cal-title').evaluate(el => getComputedStyle(el).textDecorationLine)).toBe('none');
+    await declined.click({ button: 'right' });
+    expect(await page.locator('.popup-menu [role^="menuitem"]').allTextContents()).toEqual(['Details']);
+    await page.keyboard.press('Escape');
+    await declined.click();
+    await expect(page.locator('#cal-side.peek')).toContainText('You declined');
+    await expect(page.locator('#cal-side.peek')).not.toContainText('Record this');
+    await page.locator('.cal-item[data-id="e-free"]').click();
+    await expect(page.locator('#cal-side.peek')).toContainText('Shown as free');
   });
 });

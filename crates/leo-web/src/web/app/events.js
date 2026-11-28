@@ -332,7 +332,7 @@ async function render() {
     else if (kind === 'new') await newNote(arg);
     else if (kind === 'search') await showSearch(arg);
     else if (kind === 'trash') await showTrash();
-    else if (kind === 'calendar') await showCalendar();
+    else if (kind === 'calendar') await showCalendar(arg);
     else if (kind === 'boards') await showBoards(arg);
     else if (kind === 'settings') await showSettings(arg);
     else if (kind === 'record') await showRecord(arg);
@@ -434,6 +434,7 @@ window.leoFromApp = async (what, which) => {
     saveWebsiteWork();
     return toast(await quitText());
   }
+  if (what === 'go' && /^#\/(?:[a-z]|$)/.test(which)) return go(which);
   if (what === 'event') {
     const [kind, ...uid] = String(which).split(':');
     return go(`#/record?event=${encodeURIComponent(uid.join(':'))}&kind=${kind === 'microphone' ? 'microphone' : 'call'}`);

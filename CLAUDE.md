@@ -283,7 +283,7 @@ the user turns on the AI writing switch (2026-11-02, the user's call; off by def
   stored cloud speech key retirement, the old Google calendar sign-in clean-up).
 
 Recording sources live in `leo-core::recording` (`Archive`, and `Profile {context,
-wants}`: calendar-event details and what the user wants from the notes), shared by
+wants, event}`: calendar-event details, what the user wants from the notes and the event's series, which the note made from the recording keeps as `event:` front matter, 2026-11-27), shared by
 the app, kept per recording as a small header and one-per-line passage and point
 files. Combining notes keeps the full source label on copied recordings
 (`recording::copy_to`). Recordings are listed by header and read a page at a

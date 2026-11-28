@@ -58,6 +58,32 @@ fn a_pasted_calendar_link_shows_upcoming_events_and_is_never_sent_back() {
     )));
     assert_eq!(off["offer"], false);
     assert_eq!(off["calendars"][0]["name"], "Classes");
+    assert_eq!(
+        (page["lead"].as_u64(), page["tasks_remind"].as_bool()),
+        (Some(2), Some(true))
+    );
+    let changed = json_of(run(crate::calendar::change(
+        State(state.clone()),
+        Json(
+            serde_json::from_value(serde_json::json!({"lead": 10, "tasks_remind": false})).unwrap(),
+        ),
+    )));
+    assert_eq!(
+        (
+            changed["offer"].as_bool(),
+            changed["lead"].as_u64(),
+            changed["tasks_remind"].as_bool()
+        ),
+        (Some(false), Some(10), Some(false))
+    );
+    assert_eq!(
+        run(crate::calendar::change(
+            State(state.clone()),
+            Json(serde_json::from_value(serde_json::json!({"lead": 7})).unwrap()),
+        ))
+        .status(),
+        StatusCode::BAD_REQUEST
+    );
 
     fake.pages.lock().unwrap().clear();
     let refreshed = json_of(run(crate::calendar::refresh_now(State(state.clone()))));
@@ -69,6 +95,15 @@ fn a_pasted_calendar_link_shows_upcoming_events_and_is_never_sent_back() {
     let id = page["calendars"][0]["id"].as_str().unwrap().to_string();
     let gone = json_of(run(crate::calendar::remove(State(state.clone()), Path(id))));
     assert_eq!(gone["connected"], false);
+    assert_eq!(
+        (
+            gone["offer"].as_bool(),
+            gone["lead"].as_u64(),
+            gone["tasks_remind"].as_bool()
+        ),
+        (Some(false), Some(10), Some(false)),
+        "removing a calendar keeps the reminder choices"
+    );
     assert!(fake.secrets.lock().unwrap().is_empty());
 }
 
@@ -260,4 +295,61 @@ fn eight_calendars_can_be_linked() {
         last = Some(json_of(add(&state, &link)));
     }
     assert_eq!(last.unwrap()["calendars"].as_array().unwrap().len(), 8);
+}
+
+fn last_time(state: &AppState, query: serde_json::Value) -> Response {
+    run(crate::calendar::last(
+        State(state.clone()),
+        Query(serde_json::from_value(query).unwrap()),
+    ))
+}
+
+#[test]
+fn last_time_is_the_newest_live_note_of_the_series_with_its_open_items() {
+    let (state, _dir, _ids) = state_with(&[]);
+    let mut store = leo_core::store::Store::load_from(&state.notes_dir).unwrap();
+    let mut made = |title: &str, body: &str, series: &str, days: i64| {
+        let id = store.create_note(title, body, "").unwrap().id.clone();
+        let note = store.find_note_mut(&id).unwrap();
+        note.extra.insert("event".into(), series.into());
+        note.updated_at = chrono::Utc::now() - chrono::Duration::days(days);
+        id
+    };
+    let old = made("Standup 1", "- [ ] old item", "standup@x.com", 9);
+    let items: String = (1..=9).map(|i| format!("- [ ] item {i}\n")).collect();
+    let body =
+        format!("# Notes\n- [x] done\n* [ ]  star item \n  - [ ] nested\n- [ ]\n- plain\n{items}");
+    let newest = made("Standup 2", &body, "standup@x.com", 2);
+    let trashed = made("Standup 3", "- [ ] gone", "standup@x.com", 0);
+    made("Other", "- [ ] other", "other@x.com", 0);
+    store.save().unwrap();
+    assert_eq!(store.delete_notes(&[trashed]), 1);
+    store.save().unwrap();
+
+    let found = json_of(last_time(
+        &state,
+        serde_json::json!({"event": "standup@x.com"}),
+    ));
+    assert_eq!(found["id"], newest);
+    assert_eq!(found["title"], "Standup 2");
+    assert_eq!(found["open_total"], 11);
+    let open = found["open"].as_array().unwrap();
+    assert_eq!(open.len(), 8);
+    assert_eq!(open[0], "star item");
+    assert_eq!(open[1], "nested");
+    assert_eq!(open[2], "item 1");
+
+    let before = json_of(last_time(
+        &state,
+        serde_json::json!({"event": "standup@x.com", "not": newest}),
+    ));
+    assert_eq!(before["id"], old);
+    assert_eq!(before["open"], serde_json::json!(["old item"]));
+
+    for query in [
+        serde_json::json!({"event": "nobody@x.com"}),
+        serde_json::json!({"event": ""}),
+    ] {
+        assert_eq!(last_time(&state, query).status(), StatusCode::NO_CONTENT);
+    }
 }

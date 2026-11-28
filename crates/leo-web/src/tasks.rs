@@ -66,12 +66,73 @@ pub struct Task {
     pub updated_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repeat: Vec<u8>,
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub every: u8,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub monthly: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<NaiveDate>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub done_on: Vec<NaiveDate>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub moved: BTreeMap<NaiveDate, Slot>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub deleted: bool,
+}
+
+fn one() -> u8 {
+    1
+}
+
+fn is_one(n: &u8) -> bool {
+    *n == 1
+}
+
+impl Task {
+    pub fn rule(&self) -> Repeat<'_> {
+        Repeat {
+            days: &self.repeat,
+            every: self.every,
+            monthly: self.monthly,
+            until: self.until,
+            start: self.date,
+        }
+    }
+
+    pub fn repeats(&self) -> bool {
+        self.rule().repeats()
+    }
+}
+
+impl Listed {
+    pub fn rule(&self) -> Repeat<'_> {
+        Repeat {
+            days: &self.repeat,
+            every: self.every,
+            monthly: self.monthly,
+            until: self.until,
+            start: self.date,
+        }
+    }
+
+    pub fn repeats(&self) -> bool {
+        self.rule().repeats()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Repeat<'a> {
+    pub days: &'a [u8],
+    pub every: u8,
+    pub monthly: bool,
+    pub until: Option<NaiveDate>,
+    pub start: Option<NaiveDate>,
+}
+
+impl Repeat<'_> {
+    pub fn repeats(&self) -> bool {
+        !self.days.is_empty() || self.monthly
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -90,25 +151,42 @@ pub fn clean_repeat(days: &[u8]) -> Vec<u8> {
     out
 }
 
-pub fn repeats_on(repeat: &[u8], start: Option<NaiveDate>, day: NaiveDate) -> bool {
+pub fn repeats_on(rule: &Repeat, day: NaiveDate) -> bool {
     use chrono::Datelike;
-    !repeat.is_empty()
-        && repeat.contains(&(day.weekday().num_days_from_monday() as u8))
-        && start.is_none_or(|start| day >= start)
+    if !rule.repeats()
+        || rule.until.is_some_and(|until| day > until)
+        || rule.start.is_some_and(|start| day < start)
+    {
+        return false;
+    }
+    let every = i64::from(rule.every.max(1));
+    if rule.monthly {
+        return rule.start.is_some_and(|start| {
+            let months = i64::from(day.year() - start.year()) * 12 + i64::from(day.month())
+                - i64::from(start.month());
+            day.day() == start.day() && months % every == 0
+        });
+    }
+    let monday =
+        |d: NaiveDate| d - chrono::Duration::days(i64::from(d.weekday().num_days_from_monday()));
+    rule.days
+        .contains(&(day.weekday().num_days_from_monday() as u8))
+        && rule
+            .start
+            .is_none_or(|start| (monday(day) - monday(start)).num_weeks() % every == 0)
 }
 
 pub fn occurs_on(
-    repeat: &[u8],
-    start: Option<NaiveDate>,
+    rule: &Repeat,
     moved: &BTreeMap<NaiveDate, Slot>,
     day: NaiveDate,
 ) -> Option<NaiveDate> {
-    if !moved.contains_key(&day) && repeats_on(repeat, start, day) {
+    if !moved.contains_key(&day) && repeats_on(rule, day) {
         return Some(day);
     }
     moved
         .iter()
-        .find(|(on, slot)| slot.date == day && repeats_on(repeat, start, **on))
+        .find(|(on, slot)| slot.date == day && repeats_on(rule, **on))
         .map(|(on, _)| *on)
 }
 
@@ -122,12 +200,34 @@ pub fn move_occurrence(task: &mut Task, on: NaiveDate, slot: Slot) {
 
 const WEEKDAYS: [&str; 7] = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
 
-pub fn rrule_of(repeat: &[u8]) -> Option<String> {
-    let days: Vec<&str> = repeat
-        .iter()
-        .filter_map(|d| WEEKDAYS.get(*d as usize).copied())
-        .collect();
-    (!days.is_empty()).then(|| format!("RRULE:FREQ=WEEKLY;BYDAY={}", days.join(",")))
+pub fn rrule_of(rule: &Repeat, timed: bool) -> Option<String> {
+    use chrono::Datelike;
+    let every = if rule.every > 1 {
+        format!(";INTERVAL={}", rule.every)
+    } else {
+        String::new()
+    };
+    let mut text = if rule.monthly {
+        format!("FREQ=MONTHLY{every};BYMONTHDAY={}", rule.start?.day())
+    } else {
+        let days: Vec<&str> = rule
+            .days
+            .iter()
+            .filter_map(|d| WEEKDAYS.get(*d as usize).copied())
+            .collect();
+        if days.is_empty() {
+            return None;
+        }
+        format!("FREQ=WEEKLY{every};BYDAY={};WKST=MO", days.join(","))
+    };
+    if let Some(until) = rule.until {
+        if timed {
+            text.push_str(&format!(";UNTIL={}T235959", until.format("%Y%m%d")));
+        } else {
+            text.push_str(&format!(";UNTIL={}", until.format("%Y%m%d")));
+        }
+    }
+    Some(format!("RRULE:{text}"))
 }
 
 fn other() -> String {
@@ -215,6 +315,12 @@ pub struct Listed {
     pub sent_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub repeat: Vec<u8>,
+    #[serde(skip_serializing_if = "is_one")]
+    pub every: u8,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub monthly: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub until: Option<NaiveDate>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub done_on: Vec<NaiveDate>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -358,6 +464,9 @@ fn listed(
         promoted,
         sent_at,
         repeat: Vec::new(),
+        every: 1,
+        monthly: false,
+        until: None,
         done_on: Vec::new(),
         moved: BTreeMap::new(),
     }
@@ -389,6 +498,9 @@ pub fn standalone(task: &Task, store: Option<&Store>) -> Listed {
         promoted: false,
         sent_at: task.sent_at,
         repeat: task.repeat.clone(),
+        every: task.every,
+        monthly: task.monthly,
+        until: task.until,
         done_on: task.done_on.clone(),
         moved: task.moved.clone(),
     }
@@ -507,6 +619,7 @@ pub fn ics_of(task: &Listed, stamp: DateTime<Utc>) -> String {
         format!("DTSTAMP:{}", stamp.format("%Y%m%dT%H%M%SZ")),
         format!("SUMMARY:{}", escape(&task.title)),
     ];
+    let rrule = rrule_of(&task.rule(), task.time.is_some());
     if let Some(date) = task.date {
         lines.extend(when_lines(
             date,
@@ -514,11 +627,11 @@ pub fn ics_of(task: &Listed, stamp: DateTime<Utc>) -> String {
             task.end,
             "DTSTART",
             "DTEND",
-            rrule_of(&task.repeat).is_none(),
+            rrule.is_none(),
         ));
     }
     let mut moves = Vec::new();
-    if let Some(rule) = rrule_of(&task.repeat) {
+    if let Some(rule) = rrule {
         lines.push(rule);
         for (on, slot) in &task.moved {
             let [was, _] = when_lines(*on, task.time, task.end, "", "", false);
@@ -807,6 +920,9 @@ mod tests {
                     created_at: now,
                     updated_at: now,
                     repeat: Vec::new(),
+                    every: 1,
+                    monthly: false,
+                    until: None,
                     done_on: Vec::new(),
                     moved: BTreeMap::new(),
                     deleted: false,
@@ -846,6 +962,9 @@ mod tests {
             created_at: at,
             updated_at: at,
             repeat: Vec::new(),
+            every: 1,
+            monthly: false,
+            until: None,
             done_on: Vec::new(),
             moved: BTreeMap::new(),
             deleted: false,
@@ -942,24 +1061,159 @@ mod tests {
         assert_eq!(load_all(&chats).len(), 1);
     }
 
+    fn rule(days: &[u8], start: NaiveDate) -> Repeat<'_> {
+        Repeat {
+            days,
+            every: 1,
+            monthly: false,
+            until: None,
+            start: Some(start),
+        }
+    }
+
+    fn day(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
     #[test]
     fn a_repeating_task_falls_on_its_weekdays_from_its_start() {
-        let monday = NaiveDate::from_ymd_opt(2026, 10, 12).unwrap();
-        assert!(repeats_on(&[0, 2], Some(monday), monday));
+        let monday = day(2026, 10, 12);
+        let two = rule(&[0, 2], monday);
+        assert!(repeats_on(&two, monday));
+        assert!(!repeats_on(&two, monday.succ_opt().unwrap()));
         assert!(!repeats_on(
-            &[0, 2],
-            Some(monday),
-            monday.succ_opt().unwrap()
-        ));
-        assert!(!repeats_on(
-            &[0],
-            Some(monday),
+            &rule(&[0], monday),
             monday - chrono::Duration::days(7)
         ));
         assert_eq!(clean_repeat(&[9, 2, 0, 2]), vec![0, 2]);
         assert_eq!(
-            rrule_of(&[0, 4]).as_deref(),
-            Some("RRULE:FREQ=WEEKLY;BYDAY=MO,FR")
+            rrule_of(&rule(&[0, 4], monday), false).as_deref(),
+            Some("RRULE:FREQ=WEEKLY;BYDAY=MO,FR;WKST=MO")
+        );
+    }
+
+    #[test]
+    fn every_two_weeks_keeps_whole_weeks_from_the_start_week() {
+        let wednesday = day(2026, 11, 4);
+        let mut r = rule(&[0, 2], wednesday);
+        r.every = 2;
+        assert!(repeats_on(&r, wednesday));
+        assert!(!repeats_on(&r, day(2026, 11, 9)));
+        assert!(!repeats_on(&r, day(2026, 11, 11)));
+        assert!(repeats_on(&r, day(2026, 11, 16)));
+        assert!(repeats_on(&r, day(2026, 11, 18)));
+        assert!(!repeats_on(&r, day(2026, 11, 2)));
+    }
+
+    #[test]
+    fn monthly_repeats_keep_the_day_and_skip_months_without_it() {
+        let mut r = rule(&[], day(2026, 1, 31));
+        r.monthly = true;
+        assert!(r.repeats());
+        assert!(repeats_on(&r, day(2026, 1, 31)));
+        assert!(repeats_on(&r, day(2026, 3, 31)));
+        assert!(!repeats_on(&r, day(2026, 2, 28)));
+        assert!(!repeats_on(&r, day(2026, 4, 30)));
+        assert!(repeats_on(&r, day(2026, 5, 31)));
+        assert!(!repeats_on(&r, day(2026, 3, 30)));
+        r.every = 2;
+        assert!(repeats_on(&r, day(2026, 3, 31)));
+        assert!(repeats_on(&r, day(2026, 7, 31)));
+        assert!(!repeats_on(&r, day(2026, 8, 31)));
+        assert!(!repeats_on(&r, day(2026, 1, 30)));
+        assert_eq!(
+            rrule_of(&r, false).as_deref(),
+            Some("RRULE:FREQ=MONTHLY;INTERVAL=2;BYMONTHDAY=31")
+        );
+    }
+
+    #[test]
+    fn moves_and_done_days_follow_the_occurrences_of_an_every_other_week_task() {
+        let monday = day(2026, 11, 2);
+        let mut task = plain("task-0016", "Gym", Utc::now());
+        task.repeat = vec![0];
+        (task.date, task.every) = (Some(monday), 2);
+        let slot = |date| Slot {
+            date,
+            time: None,
+            end: None,
+        };
+        task.moved.insert(day(2026, 11, 9), slot(day(2026, 11, 10)));
+        task.moved
+            .insert(day(2026, 11, 16), slot(day(2026, 11, 17)));
+        task.done_on = vec![day(2026, 11, 16)];
+        assert_eq!(
+            occurs_on(&task.rule(), &task.moved, day(2026, 11, 10)),
+            None
+        );
+        assert_eq!(
+            occurs_on(&task.rule(), &task.moved, day(2026, 11, 17)),
+            Some(day(2026, 11, 16))
+        );
+        assert_eq!(
+            occurs_on(&task.rule(), &task.moved, day(2026, 11, 16)),
+            None
+        );
+        assert_eq!(
+            occurs_on(&task.rule(), &task.moved, day(2026, 11, 30)),
+            Some(day(2026, 11, 30))
+        );
+        assert!(task.done_on.contains(&day(2026, 11, 16)));
+    }
+
+    #[test]
+    fn nothing_repeats_after_its_until_day() {
+        let monday = day(2026, 11, 2);
+        let mut r = rule(&[0], monday);
+        r.until = Some(day(2026, 11, 16));
+        assert!(repeats_on(&r, day(2026, 11, 16)));
+        assert!(!repeats_on(&r, day(2026, 11, 23)));
+        assert_eq!(
+            rrule_of(&r, false).as_deref(),
+            Some("RRULE:FREQ=WEEKLY;BYDAY=MO;WKST=MO;UNTIL=20261116")
+        );
+    }
+
+    #[test]
+    fn a_task_that_does_not_repeat_every_week_is_written_and_read_like_an_old_one() {
+        let task = plain("task-0010", "Plain", Utc::now());
+        let text = serde_json::to_string(&task).unwrap();
+        for key in ["every", "monthly", "until"] {
+            assert!(!text.contains(key), "{text}");
+        }
+        let old = r#"{"id":"task-0010","title":"Plain","created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-01T00:00:00Z","repeat":[0]}"#;
+        let back: Task = serde_json::from_str(old).unwrap();
+        assert_eq!((back.every, back.monthly, back.until), (1, false, None));
+        assert_eq!(
+            serde_json::from_str::<Task>(&serde_json::to_string(&back).unwrap()).unwrap(),
+            back
+        );
+        let mut rich = back.clone();
+        (rich.every, rich.monthly, rich.until) = (3, true, Some(day(2026, 12, 19)));
+        let kept: Task = serde_json::from_str(&serde_json::to_string(&rich).unwrap()).unwrap();
+        assert_eq!(kept, rich);
+    }
+
+    #[test]
+    fn calendar_files_carry_the_interval_the_month_day_and_the_last_day() {
+        let monday = day(2026, 11, 2);
+        let mut task = plain("task-0015", "Gym", Utc::now());
+        task.repeat = vec![0, 2];
+        (task.date, task.every, task.until) = (Some(monday), 2, Some(day(2026, 12, 19)));
+        let ics = ics_of(&standalone(&task, None), Utc::now());
+        assert!(
+            ics.contains("RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;WKST=MO;UNTIL=20261219\r\n"),
+            "{ics}"
+        );
+        task.time = NaiveTime::from_hms_opt(9, 0, 0);
+        let ics = ics_of(&standalone(&task, None), Utc::now());
+        assert!(ics.contains("UNTIL=20261219T235959\r\n"), "{ics}");
+        task.repeat.clear();
+        (task.monthly, task.every, task.date) = (true, 1, Some(day(2026, 11, 15)));
+        let ics = ics_of(&standalone(&task, None), Utc::now());
+        assert!(
+            ics.contains("RRULE:FREQ=MONTHLY;BYMONTHDAY=15;UNTIL="),
+            "{ics}"
         );
     }
 
@@ -974,10 +1228,7 @@ mod tests {
         task.date = Some(monday);
         task.time = NaiveTime::from_hms_opt(9, 0, 0);
         let none = BTreeMap::new();
-        assert_eq!(
-            occurs_on(&task.repeat, task.date, &none, wednesday),
-            Some(wednesday)
-        );
+        assert_eq!(occurs_on(&task.rule(), &none, wednesday), Some(wednesday));
         move_occurrence(
             &mut task,
             wednesday,
@@ -987,18 +1238,12 @@ mod tests {
                 end: None,
             },
         );
+        assert_eq!(occurs_on(&task.rule(), &task.moved, wednesday), None);
         assert_eq!(
-            occurs_on(&task.repeat, task.date, &task.moved, wednesday),
-            None
-        );
-        assert_eq!(
-            occurs_on(&task.repeat, task.date, &task.moved, thursday),
+            occurs_on(&task.rule(), &task.moved, thursday),
             Some(wednesday)
         );
-        assert_eq!(
-            occurs_on(&task.repeat, task.date, &task.moved, monday),
-            Some(monday)
-        );
+        assert_eq!(occurs_on(&task.rule(), &task.moved, monday), Some(monday));
         let (time, end) = (task.time, task.end);
         move_occurrence(
             &mut task,

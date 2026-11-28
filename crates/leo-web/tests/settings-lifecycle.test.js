@@ -102,7 +102,7 @@ test('the calendar card guides each provider and checks the address before savin
   const listeners = {};
   const nodes = {};
   const field = (extra = {}) => ({ value: '', attrs: {}, setAttribute(k, v) { this.attrs[k] = v; }, ...extra });
-  const context = { app: { addEventListener() {} }, document: { addEventListener: (type, fn) => (listeners[type] = [...(listeners[type] || []), fn]) }, window: {}, ICON: new Proxy({}, { get: () => '' }), esc: text => String(text), $: sel => nodes[sel] || null, segmented: ({ current, choices, field: f }) => `<seg ${f} ${current}>${choices.map(c => c[1]).join('|')}</seg>`, state: {} };
+  const context = { app: { addEventListener() {} }, document: { addEventListener: (type, fn) => (listeners[type] = [...(listeners[type] || []), fn]) }, window: {}, ICON: new Proxy({}, { get: () => '' }), esc: text => String(text), $: sel => nodes[sel] || null, segmented: ({ current, choices, field: f }) => `<seg ${f} ${current}>${choices.map(c => c[1]).join('|')}</seg>`, calSecondZone: () => '', calWorkHours: () => ({ days: [0, 1], from: '09:00', to: '17:00' }), repeatBubbles: () => '', settingsSwitch: () => '', state: {} };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/settings.js'), 'utf8'), context);
   const firstLink = { google: 'https://calendar.google.com/calendar/r/settings', outlook: 'https://outlook.live.com/calendar/0/options/calendar/SharedCalendars', apple: 'https://www.icloud.com/calendar' };
@@ -143,6 +143,24 @@ test('the calendar card guides each provider and checks the address before savin
     return context.addCalendar();
   }).then(() => assert.equal(nodes['#calendar-error'].innerHTML, generic));
 });
+test('the morning briefing shows its time, wishes and Make one now only when on, and says when no writing AI is chosen', () => {
+  const context = { app: { addEventListener() {} }, document: { addEventListener() {} }, window: {}, ICON: new Proxy({}, { get: () => '' }), esc: text => String(text), $: () => null, segmented: () => '', calSecondZone: () => '', calWorkHours: () => ({ days: [0, 1], from: '09:00', to: '17:00' }), repeatBubbles: () => '', settingsSwitch: (attrs, on) => `<switch ${attrs}${on ? ' checked' : ''}>`, state: {} };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/settings.js'), 'utf8'), context);
+  const off = context.calendarCard({ calendars: [] });
+  assert.ok(off.includes('<switch data-cal-briefing="on">'));
+  assert.ok(!off.includes('data-cal-briefing="at"') && !off.includes('briefing-now'));
+  const on = context.calendarCard({ calendars: [], briefing: { on: true, at: '07:30', wants: 'x'.repeat(2001) } });
+  assert.ok(on.includes('<switch data-cal-briefing="on" checked>'));
+  assert.ok(on.includes('type="time" data-cal-briefing="at" value="07:30"'));
+  assert.ok(on.includes('data-reads="2000"') && on.includes('data-read-hint role="status">Felix reads the first 2,000 characters'));
+  assert.ok(on.includes('data-action="briefing-now">Make one now'));
+  assert.ok(!on.includes('Choose a writing AI'));
+  context.state.settings = { writing: { state: 'not_chosen' } };
+  const none = context.calendarCard({ calendars: [], briefing: { on: true, at: '08:00', wants: '' } });
+  assert.ok(none.includes('Choose a writing AI in <a href="#/settings/writing">Settings → Writing AI</a> first.'));
+  assert.ok(none.includes('data-action="briefing-now" disabled'));
+});
 test('pasting into the calendar link connects it once, and typing never does', () => {
   const listeners = {};
   const nodes = {};
@@ -164,7 +182,7 @@ test('pasting into the calendar link connects it once, and typing never does', (
 test('the calendar card offers to record when an event starts, on by default once connected', async () => {
   const listeners = {};
   const sent = [];
-  const context = { app: { addEventListener() {} }, document: { addEventListener: (type, fn) => (listeners[type] = [...(listeners[type] || []), fn]) }, window: {}, ICON: new Proxy({}, { get: () => '' }), esc: text => String(text), segmented: () => '', settingsSwitch: (attrs, on) => `<input ${attrs}${on ? ' checked' : ''}>`, rel: () => 'today', api: async (url, options) => { sent.push([url, options]); return { offer: options.body.offer }; }, state: {} };
+  const context = { app: { addEventListener() {} }, document: { addEventListener: (type, fn) => (listeners[type] = [...(listeners[type] || []), fn]) }, window: {}, ICON: new Proxy({}, { get: () => '' }), esc: text => String(text), segmented: () => '', calSecondZone: () => '', calWorkHours: () => ({ days: [0, 1], from: '09:00', to: '17:00' }), repeatBubbles: () => '', settingsSwitch: (attrs, on) => `<input ${attrs}${on ? ' checked' : ''}>`, rel: () => 'today', api: async (url, options) => { sent.push([url, options]); return { offer: options.body.offer }; }, state: {} };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/settings.js'), 'utf8'), context);
   const row = /<label class="set-row" data-find="calendar-offer"><span class="grow">Offer to record when an event starts<span class="set-desc">[^<]*<\/span><\/span><input data-cal-offer( checked)?><\/label>/;
@@ -177,6 +195,12 @@ test('the calendar card offers to record when an event starts, on by default onc
   await Promise.all(listeners.change.map((fn) => fn({ target: box })));
   assert.deepEqual(JSON.parse(JSON.stringify(sent)), [['/api/calendar', { method: 'PATCH', body: { offer: false } }]]);
   assert.equal(context.state.calendar.offer, false);
+  assert.match(context.calendarCard({ calendars: [] }), /data-cal-tasks checked/);
+  assert.match(context.calendarCard({ calendars: [] }), /Remind me/);
+  sent.length = 0;
+  await Promise.all(listeners.change.map((fn) => fn({ target: { checked: false, matches: (at) => at === '[data-cal-tasks]' } })));
+  await Promise.all(listeners.change.map((fn) => fn({ target: { value: '10', matches: (at) => at === '[data-cal-lead]' } })));
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [['/api/calendar', { method: 'PATCH', body: { tasks_remind: false } }], ['/api/calendar', { method: 'PATCH', body: { lead: 10 } }]]);
 });
 
 test('a missing coding app names the desktop app it comes with, on a Mac only', () => {
@@ -408,4 +432,16 @@ test('the Note width row says what is stored and keeps its Reset reachable', () 
   assert.equal(stored.width, 'wide');
   assert.match(desc.textContent, /^The default\./);
   assert.equal(button.attrs['aria-disabled'], 'true');
+});
+
+test('the calendar card offers a second time zone and working hours', () => {
+  const context = { app: { addEventListener() {} }, document: { addEventListener() {} }, window: {}, ICON: new Proxy({}, { get: () => '' }), esc: text => String(text), segmented: () => '', calSecondZone: () => 'Europe/London', calWorkHours: () => ({ days: [0, 1], from: '08:30', to: '16:00' }), repeatBubbles: (days, label) => `<days ${days} ${label}>`, settingsSwitch: () => '', state: {} };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/settings.js'), 'utf8'), context);
+  const html = context.calendarCard({ calendars: [] });
+  assert.match(html, /<option value="Europe\/London" selected>Europe\/London<\/option>/);
+  assert.match(html, /<option value="">None<\/option>/);
+  assert.match(html, /<days 0,1 Working days>/);
+  assert.match(html, /data-work-time="from"[^>]*value="08:30"/);
+  assert.match(html, /data-work-time="to"[^>]*value="16:00"/);
 });

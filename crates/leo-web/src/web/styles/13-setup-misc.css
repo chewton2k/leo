@@ -124,6 +124,9 @@
 .rec-check .btn { flex: none; margin: 0; text-decoration: none; }
 .rec-card .set-note { margin: 0 0 10px; }
 .rec-event-note { margin: -2px 4px 0; }
+.last-time { margin: 0 4px; }
+.last-time p { margin: 0 0 4px; }
+.last-time a { color: var(--accent); }
 .rec-recover-item { display: flex; align-items: center; gap: 8px; }
 .rec-recover-item .rec-recover-row { flex: 1; min-width: 0; }
 .rec-recover-row { display: flex; align-items: center; gap: 12px; padding: 12px 0 4px; color: var(--text); }
@@ -268,9 +271,10 @@ body.files-over main::after, body[data-note-drop] main::before, body[data-note-d
   display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: 18px;
   background: color-mix(in srgb, var(--accent-soft) 70%, transparent); color: var(--accent); font-weight: 650; font-size: var(--fs-lg);
 }
-body[data-note-drop] main::before { content: "Open here"; right: calc(var(--right) + (100% - var(--side) - var(--right)) / 2 + 8px); }
-body[data-note-drop] main::after { content: "Open beside"; left: calc(var(--side) + (100% - var(--side) - var(--right)) / 2 + 8px); }
-body[data-note-drop="here"] main::after, body[data-note-drop="beside"] main::before { opacity: .45; }
+body[data-note-drop] main::before, body[data-note-drop] main::after { box-sizing: border-box; top: var(--bar-height); bottom: calc(var(--bottom) + 8px); border: 1px dashed var(--line); border-radius: var(--r-panel); background: color-mix(in srgb, var(--page) 70%, transparent); color: var(--faint); font-weight: 500; font-size: var(--fs-base); }
+body[data-note-drop] main::before { content: "Open here"; left: calc(var(--side) + 8px); right: auto; width: calc(var(--drop-x) - var(--side) - 12px); }
+body[data-note-drop] main::after { content: "Open beside"; left: calc(var(--drop-x) + 4px); right: calc(var(--right) + 8px); }
+body[data-note-drop="here"] main::before, body[data-note-drop="beside"] main::after { border: 1px solid var(--accent); background: color-mix(in srgb, var(--raised) 94%, transparent); color: var(--text); }
 .chat.drop-here::after {
   content: "Drop to give it to Felix"; position: absolute; inset: 10px; z-index: 8; pointer-events: none;
   display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: var(--r-panel);

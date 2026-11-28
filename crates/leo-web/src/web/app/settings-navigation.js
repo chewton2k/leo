@@ -55,6 +55,11 @@ const SETTINGS_INDEX = [
   { section: 'felix', id: 'felix-gap', label: 'Time between reads', keywords: 'felix margin often seconds minutes 3 min wait cooldown' },
   { section: 'felix', id: 'felix-cap', label: 'Reads a day', keywords: 'felix margin often daily limit cap budget' },
   { section: 'calendar', id: 'calendar-connect', label: 'Connect a calendar', keywords: 'google ical ics outlook apple link secret address meetings classes' },
+  { section: 'calendar', id: 'calendar-remind', label: 'Remind me', keywords: 'calendar reminder lead time minutes before notification event start' },
+  { section: 'calendar', id: 'calendar-task-remind', label: 'Remind me about tasks with a time', keywords: 'calendar tasks reminder due notification' },
+  { section: 'calendar', id: 'calendar-zone', label: 'Second time zone', keywords: 'calendar time zone timezone world clock london abroad' },
+  { section: 'calendar', id: 'calendar-work-hours', label: 'Working hours', keywords: 'calendar find a time free slots availability work days nine to five' },
+  { section: 'calendar', id: 'calendar-briefing', label: 'Morning briefing', keywords: 'briefing morning daily summary felix meetings tasks today' },
   { section: 'keeping', id: 'keeping-trash', label: 'Keep the trash', keywords: 'deleted notes days retention delete' },
   { section: 'keeping', id: 'keeping-chat', label: 'Keep chats with Felix', keywords: 'conversations days retention delete' },
   { section: 'keeping', id: 'keeping-upload', label: 'Keep uploaded files', keywords: 'originals documents pdf days retention delete' },
@@ -280,11 +285,11 @@ function settingsSwitch(attrs, on, label = '') {
 function segmented({ label, choices, current, field = '', action = '', key = '' }) {
   const options = choices.map(([value, text, icon = '', hint = '']) => {
     const on = String(value) === String(current);
-    const what = action ? ` data-action="${action}" data-${key}="${esc(value)}" aria-pressed="${on}"` : ` data-action="segment-pick" data-value="${esc(value)}" role="radio" aria-checked="${on}" tabindex="${on ? 0 : -1}"`;
+    const what = action ? ` data-action="${action}" data-${key}="${esc(String(value))}" aria-pressed="${on}"` : ` data-action="segment-pick" data-value="${esc(String(value))}" role="radio" aria-checked="${on}" tabindex="${on ? 0 : -1}"`;
     return `<button type="button" class="segment${on ? ' on' : ''}"${what} title="${esc(hint || text)}">${icon}<span>${esc(text)}</span></button>`;
   }).join('');
   const index = Math.max(0, choices.findIndex(([value]) => String(value) === String(current)));
-  const hidden = field ? `<input type="hidden" ${field} value="${esc(current ?? '')}">` : '';
+  const hidden = field ? `<input type="hidden" ${field} value="${esc(String(current ?? ''))}">` : '';
   return `<div class="segmented" role="${action ? 'group' : 'radiogroup'}" aria-label="${esc(label)}" style="--count:${choices.length};--at:${index}">${hidden}<span class="segment-pill" aria-hidden="true"></span>${options}</div>`;
 }
 // Move the highlight to whichever option is on. `from` lets a redraw slide from where it was.

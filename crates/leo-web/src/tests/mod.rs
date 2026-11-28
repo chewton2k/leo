@@ -1,6 +1,7 @@
 mod audit_bench;
 mod auth;
 mod boards;
+mod briefing;
 mod calendar;
 mod combine;
 mod combine_originals;

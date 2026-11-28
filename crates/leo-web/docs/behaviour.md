@@ -661,10 +661,10 @@ outside clicks dismiss the heading list without swallowing the destination click
 The heading disclosure opens on mouse hover without taking focus, stays open across its summary and menu, and closes on leaving both. Click, keyboard and touch disclosure and outside dismissal remain available. Felix draws only when the user asks to see, draw or visualize something (2026-11-14, the user's call, replacing the 2026-11-09 complexity threshold): one ```svg (320 wide, theme colour tokens): one picture, split into 2 to 5 `data-step` groups only when it unfolds in order (a process, derivation or cycle; 2026-11-15, the user's call), never Mermaid and never text characters. Margin reads never draw; margin replies and asks draw on request (Visualize). The after-reply drawing pass (`drawing::drawn`) runs only when the user's message asks for a drawing (`drawing::asks_to_see`) and keeps only one clean ```svg block (`drawing::picked`); a root without `fill` defaults to `var(--text)`, so unpainted text and shapes follow the theme. User-written ```mermaid in notes and old replies still renders strictly, and SVG stays an inert image. `BASE` stays under 4,500 bytes.
 
 
-- Split view (2026-11-26, the user's call): drag a note from the explorer onto the right third of
-  the note ("Open beside") or choose Open beside in its menu, and it opens as a second full note on
+- Split view (2026-11-26, the user's call): drag a note from the explorer onto the right part of
+  the note ("Open beside", right of where the panes meet or where beside will open) or choose Open beside in its menu, and it opens as a second full note on
   the right, with its own margin notes, outline, width bars (in a pane 900 px or wider) and scroll.
-  Dragging onto the left or centre ("Open here") replaces the note under the pointer. The bar between
+  Dragging onto the left part ("Open here") replaces the note under the pointer. The bar between
   the notes drags to resize them (remembered; double-click for half and half; arrow keys when
   focused). Clicking or typing in a note makes it the active one: Felix talks about it, the window
   title names it, a soft shade falls on it from the divider and the other note's header row goes
@@ -885,7 +885,7 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
 - Change tools: edit_note / create_note (cards; Apply POSTs
   `/api/notes/{id}/suggestion`, 409 unless `find` is there exactly once),
   and the organizing tools in `routes/organize.rs`: add_task (`repeat`:
-  `mon | wed`), update_task (`on` = which day of a repeating task),
+  `mon | wed | monthly`, `every`, `until`), update_task (`every`, `until`; `on` = which day of a repeating task),
   delete_task, move_note, make_folder, move_folder, delete_note,
   rename_note, rename_folder (`new_name`), pin_note, restore_note,
   restore_folder (trashed notes from that folder and its subfolders),
@@ -1443,6 +1443,18 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
   (times and ETag / Last-Modified in leo.db); `ics::read_from` expands repeats, EXDATE and
   moved instances, all-day items are dates. GET `/api/schedule?from&to&live`
   (≤43 days); the page refreshes every 2.5 min while visible.
+  An event you declined is drawn muted with a faint title and an outline, never struck through, is never offered for
+  recording and has no Record button; one the feed shows as free has a dashed edge, and
+  its peek says "You declined", "Tentative" or "Shown as free" (2026-11-27, the user's call).
+An event whose location or description holds a meeting link (Zoom, Meet, Teams, Webex, Whereby, else the
+first https link) has a Join button before Record in its peek and "Join meeting" in its menu (not when
+declined). Two busy items that overlap (events not declined, free or all-day, and tasks with a time) each
+get two short pencil strokes in the tile's top-right corner, and the peek says "Overlaps Standup 10:00 – 10:30 AM"
+(two named, then "and N more"). With a second time zone chosen in Settings → Calendar, an event's and a timed
+task's peek show the same span there under When ("6:00 – 7:00 PM London"), nothing when it matches. "Find a
+time" in the Calendar header lists free slots in the working hours set in Settings → Calendar (default
+Mon–Fri 9:00–5:00) over the next five working days; a slot you pick is circled in pencil, and Copy puts the
+picked times on the clipboard (2026-11-27, the user's call).
   Pasting a link that passes `calendarAddressError` into Settings → Calendar connects it at once
   (`addCalendar`, one request while Connect is checking). A Google share link (`?cid=`) is refused as
   before, with a link to that calendar's own settings page where its secret address is
@@ -1451,10 +1463,10 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
 - Offer to record (2026-11-09, item L1): `calendar::offer_to_record`, a 60 s
   background task (stops with the engine; only when `Powers.app_settings` is
   set) over the cached expansions, never fetching. A timed event is offered once
-  when start−2 min ≤ now < start+10 min (UTC instants) and no recording is live
+  when start−lead ≤ now < start+10 min (UTC instants; lead is 2 min unless Settings → Calendar's "Remind me" says 0, 5, 10 or 15) and no recording is live
   (`record::live`); leo.db `calendar_prompted(uid, start)` dedupes (rows older
   than 2 days pruned) and `AppApi::event_starting(EventStarting {uid, title,
-  start, online})` (default no-op) tells the app. Settings → Calendar's switch "Offer to
+  start, online, lead})` (default no-op) tells the app. Settings → Calendar's switch "Offer to
   record when an event starts" is `offer` in calendars.json (absent = on; PATCH
   `/api/calendar {offer}`). `#/record?event=<uid>&kind=call|microphone` preselects that kind and
   event (`preselect` in recording.js; the meeting wording is filled only for
@@ -1462,6 +1474,29 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
   location or description. The 60 s tick first refreshes a stale cached feed
   (`catch_up`, under the same `Busy` guard as the routes), so a leo left
   running offers current meetings.
+- Prep from last time (2026-11-27, the user's call): a recording made for a calendar event
+  gives its note `event:` front matter (the event's series, shared by every repeat of it).
+  Choosing that event on Record, and opening it in the calendar, show "Last time": the
+  newest earlier note of the series as a link, with up to 8 of its unchecked tasks drawn as
+  read-only boxes (the peek says "N open"). Nothing shows when there is no earlier note.
+- Task reminders (2026-11-27): "Remind me about tasks with a time" (`tasks_remind` in
+  calendars.json, absent = on; PATCH `/api/calendar {tasks_remind}`, with `lead`) makes the
+  same tick call `AppApi::notify(Reminder {title, body, route})` once per not-done timed task
+  occurrence from start−lead to start+10 min ("Due at 3:00 PM", route
+  `#/calendar?day=<day>`, which selects that day). It works with no calendar linked and with
+  the offer off, and is not held while recording.
+- Morning briefing (2026-11-27, the user's call): Settings → Calendar's "Morning briefing"
+  (off by default) has Felix write today's briefing with the chosen writing AI at the set time
+  (08:00 unless changed), or later that morning if leo was closed (up to 3 hours after), once a
+  day: meetings first with what was left open last time, then tasks for today and Earlier,
+  then free stretches, shaped by "What do you want in your briefing?" (the first 2,000
+  characters are read). A failed try is retried once 10 minutes later. Titles, tasks and open
+  items go to the writing AI, which may be a cloud one. With no writing AI chosen nothing is
+  tried and Settings says "Choose a writing AI in Settings → Writing AI first.". When it is
+  ready, a notification "Your briefing is ready" opens Home, where a Briefing card above the
+  Today rows shows it, folded to six lines with Show all; while Felix writes it the card says
+  "Felix is writing your briefing". "Make one now" writes one at any time, one at a time. Only
+  today's briefing is kept (leo.db `briefing`).
 
 - Standalone tasks are files: `<notes>/.leo/tasks/<id>.json`
   (`tasks::tasks_dir`), one JSON line each, written atomically. The reader
@@ -1483,6 +1518,15 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
   dropped; absent when empty, so old files are unchanged). PATCH
   `{occurrence, date, time, end}` writes it (a move back to the series slot
   removes it); `on` stays the original date, so done days follow the move.
+  Richer repeats (2026-11-27): the task peek's Repeat row adds Weekly | Monthly,
+  Every 1-4 (weeks or months) and Until (empty = forever). Weekly counts whole
+  Monday-weeks from the start week divisible by `every`; monthly keeps the day
+  of `date` and skips months without it; nothing falls after `until`; a moved
+  day counts only if its original day was an occurrence. The .ics RRULE carries
+  INTERVAL, BYMONTHDAY, WKST=MO and UNTIL (a floating local `YYYYMMDDT235959` for a timed task, a
+  date for an untimed one); the Google link's `recur` is the same but UTC for a timed task. PATCH and POST
+  accept `every` (1-12), `monthly` and `until` (on or after the first day; null
+  clears); Felix's add_task takes `every`, `until` and a `repeat` that accepts "monthly"; update_task takes `every` and `until` only.
   `tasks::occurs_on` (Felix's list_schedule) and `schedule.occurrences` apply
   it; the .ics adds EXDATE plus a RECURRENCE-ID event per move; the Google
   link carries the weekly rule only. Felix's `on` still means done only.
@@ -1522,7 +1566,7 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
   all-day cell (New task on that date and the same rows), a task wherever it shows (grid, All day row,
   month, tray: Open, Mark done or Mark not done, Delete task with its Undo) and an event (Details,
   and, for a timed event, Record this event until it has ended). Clicking anywhere on an item but its checkbox opens a side peek in the tray's place
-  (`#cal-side.peek`, 340 px): title, done, date/start/end with a This one /
+  (`#cal-side.peek`, the tray's 320 px column, so the calendar never moves): title, done, date/start/end with a This one /
   Every time scope for repeats, repeat days, type, a description that autosaves
   600 ms after typing and on blur, note, Google, .ics, Delete; events are
   read-only. A click outside the peek closes it as Escape does, and a click on another item switches it

@@ -27,6 +27,20 @@ pub struct Event {
     pub end_date: Option<NaiveDate>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub zone_unknown: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub free: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reply: String,
+}
+
+impl Event {
+    pub fn busy(&self) -> bool {
+        !self.all_day && !self.free && self.reply != "declined"
+    }
+
+    pub fn series(&self) -> &str {
+        self.id.rsplit_once('@').map_or(&self.id, |(uid, _)| uid)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -53,6 +67,8 @@ struct Raw {
     instead_of_day: Option<NaiveDate>,
     cancelled: bool,
     zone_unknown: bool,
+    free: bool,
+    reply: String,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -152,6 +168,7 @@ impl Parser {
             "SUMMARY" => raw.summary = unescaped(value),
             "DESCRIPTION" => raw.description = unescaped(value),
             "LOCATION" => raw.location = unescaped(value),
+            "TRANSP" => raw.free = value.trim().eq_ignore_ascii_case("TRANSPARENT"),
             "STATUS" => raw.cancelled = value.trim().eq_ignore_ascii_case("CANCELLED"),
             "DTSTART" => {
                 raw.start = when(params, value);
@@ -174,6 +191,22 @@ impl Parser {
                 }
             }
             "ATTENDEE" => {
+                let mail = value.trim();
+                if self.name.as_deref().is_some_and(|me| {
+                    me.contains('@')
+                        && !me.contains(' ')
+                        && mail
+                            .get(..7)
+                            .is_some_and(|p| p.eq_ignore_ascii_case("mailto:"))
+                        && mail
+                            .get(7..)
+                            .is_some_and(|m| m.trim().eq_ignore_ascii_case(me))
+                }) {
+                    raw.reply = param(params, "PARTSTAT")
+                        .map(str::to_ascii_lowercase)
+                        .filter(|p| ["declined", "tentative", "accepted"].contains(&p.as_str()))
+                        .unwrap_or_default();
+                }
                 if raw.attendees.len() < 100 {
                     if let Some(who) = person(params, value) {
                         if !declined(params) {
@@ -297,7 +330,7 @@ fn when(params: &str, value: &str) -> Option<When> {
     Some(When::At(local_to_utc(t, zone)?, zone))
 }
 
-fn local_to_utc(t: NaiveDateTime, zone: Option<chrono_tz::Tz>) -> Option<DateTime<Utc>> {
+pub(crate) fn local_to_utc(t: NaiveDateTime, zone: Option<chrono_tz::Tz>) -> Option<DateTime<Utc>> {
     let pick = |r: LocalResult<DateTime<Utc>>| match r {
         LocalResult::Single(x) | LocalResult::Ambiguous(x, _) => Some(x),
         LocalResult::None => None,
@@ -679,6 +712,8 @@ fn event_of(raw: &Raw, start: DateTime<Utc>, end: DateTime<Utc>) -> Event {
         date: None,
         end_date: None,
         zone_unknown: raw.zone_unknown,
+        free: raw.free,
+        reply: raw.reply.clone(),
     }
 }
 
@@ -782,6 +817,69 @@ END:VCALENDAR\r
             cal.events[1].end - cal.events[1].start,
             Duration::minutes(30)
         );
+    }
+
+    fn feed(name: &str, extra: &str) -> String {
+        format!(
+            "BEGIN:VCALENDAR\r\n{name}BEGIN:VEVENT\r\nUID:e\r\nDTSTART:20261101T150000Z\r\nSUMMARY:Sync\r\n{extra}END:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
+    }
+
+    fn first(text: &str) -> Event {
+        read(text, at("2026-11-01T00:00:00Z"), at("2026-11-02T00:00:00Z"))
+            .events
+            .remove(0)
+    }
+
+    #[test]
+    fn a_series_is_the_uid_before_the_last_at_sign() {
+        let mut event = first(&feed("", ""));
+        assert_eq!(event.series(), "e");
+        event.id = "abc@example.com@1793000000".into();
+        assert_eq!(event.series(), "abc@example.com");
+        event.id = "plain".into();
+        assert_eq!(event.series(), "plain");
+    }
+
+    #[test]
+    fn transparent_events_are_free_and_your_own_reply_is_read_from_the_feed() {
+        let me = "X-WR-CALNAME:Me@Example.com\r\n";
+        let plain = first(&feed(me, ""));
+        assert!(plain.busy() && !plain.free && plain.reply.is_empty());
+        let free = first(&feed(me, "TRANSP:TRANSPARENT\r\n"));
+        assert!(free.free && !free.busy());
+        assert!(first(&feed(me, "TRANSP:OPAQUE\r\n")).busy());
+        let declined = first(&feed(
+            me,
+            "ATTENDEE;CN=Bob;PARTSTAT=ACCEPTED:mailto:bob@example.com\r\nATTENDEE;PARTSTAT=DECLINED:MAILTO:me@example.com\r\n",
+        ));
+        assert_eq!(declined.reply, "declined");
+        assert!(!declined.busy());
+        let tentative = first(&feed(
+            me,
+            "ATTENDEE;PARTSTAT=TENTATIVE:mailto:me@example.com\r\n",
+        ));
+        assert_eq!(tentative.reply, "tentative");
+        assert!(tentative.busy());
+        let waiting = first(&feed(
+            me,
+            "ATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:me@example.com\r\n",
+        ));
+        assert_eq!(waiting.reply, "");
+    }
+
+    #[test]
+    fn your_reply_is_unknown_without_an_email_calendar_name_before_the_events() {
+        let other = "ATTENDEE;PARTSTAT=DECLINED:mailto:me@example.com\r\n";
+        assert_eq!(first(&feed("X-WR-CALNAME:CS 130\r\n", other)).reply, "");
+        assert_eq!(first(&feed("", other)).reply, "");
+        let late = format!(
+            "{}X-WR-CALNAME:me@example.com\r\n",
+            feed("", other).replace("END:VCALENDAR\r\n", "")
+        );
+        assert_eq!(first(&late).reply, "");
+        let json = serde_json::to_string(&first(&feed("", ""))).unwrap();
+        assert!(!json.contains("free") && !json.contains("reply"));
     }
 
     #[test]
@@ -1398,5 +1496,15 @@ END:VCALENDAR\r
         .unwrap()
         .events
         .len()
+    }
+
+    #[test]
+    fn a_time_inside_a_spring_forward_gap_moves_to_the_next_valid_hour() {
+        let gap = NaiveDate::from_ymd_opt(2026, 3, 8)
+            .unwrap()
+            .and_hms_opt(2, 30, 0)
+            .unwrap();
+        let zone = Some(chrono_tz::America::New_York);
+        assert_eq!(local_to_utc(gap, zone), Some(at("2026-03-08T07:30:00Z")));
     }
 }

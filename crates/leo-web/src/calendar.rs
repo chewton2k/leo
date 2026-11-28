@@ -11,7 +11,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, Local, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::ics::{self, Event};
@@ -27,7 +27,8 @@ const LIVE_MINUTES: i64 = 2;
 const KEPT_EXPANSIONS: usize = 12;
 const MOST_DAYS_SHOWN: i64 = 43;
 const MOST_REACH_DAYS: i64 = 400;
-const OFFER_BEFORE_MINUTES: i64 = 2;
+const DEFAULT_LEAD: u8 = 2;
+const LEADS: [u8; 5] = [0, 2, 5, 10, 15];
 const OFFER_AFTER_MINUTES: i64 = 10;
 const PROMPTED_KEPT_DAYS: i64 = 2;
 const OFFER_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
@@ -40,6 +41,7 @@ type Expansion = (String, Arc<Vec<Event>>);
 #[derive(Default)]
 pub(crate) struct Calendar {
     busy: Arc<AtomicBool>,
+    pub(crate) briefing: Arc<AtomicBool>,
     expanded: Mutex<VecDeque<Expansion>>,
     settings: Mutex<()>,
 }
@@ -53,7 +55,7 @@ struct Feed {
     problem: Option<String>,
 }
 
-fn db_for(notes: &Path) -> Arc<crate::db::Db> {
+pub(crate) fn db_for(notes: &Path) -> Arc<crate::db::Db> {
     crate::db::at(&crate::db::beside_of(notes, None).join(crate::db::FILE))
 }
 
@@ -343,6 +345,33 @@ struct Linking {
     calendars: Vec<Linked>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     offer: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lead: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tasks_remind: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    briefing: Option<crate::briefing::Briefing>,
+}
+
+impl Linking {
+    fn lead(&self) -> u8 {
+        self.lead
+            .filter(|l| LEADS.contains(l))
+            .unwrap_or(DEFAULT_LEAD)
+    }
+
+    fn keep_settings(&mut self, from: Linking) {
+        self.offer = from.offer;
+        self.lead = from.lead;
+        self.tasks_remind = from.tasks_remind;
+        self.briefing = from.briefing;
+    }
+}
+
+pub(crate) fn briefing_of(notes: &Path) -> crate::briefing::Briefing {
+    read::<Linking>(&settings_path(notes))
+        .briefing
+        .unwrap_or_default()
 }
 
 pub fn settings_path(notes: &Path) -> PathBuf {
@@ -545,16 +574,23 @@ fn calendars_json(notes: &Path, linking: &Linking) -> Vec<serde_json::Value> {
         .collect()
 }
 
+fn shown(event: &Event) -> serde_json::Value {
+    let mut value = serde_json::json!(event);
+    value["series"] = serde_json::json!(event.series());
+    value
+}
+
 fn status(notes: &Path, calendar: &Calendar, busy: bool, now: DateTime<Utc>) -> serde_json::Value {
     let linking: Linking = read(&settings_path(notes));
     let hour = DateTime::from_timestamp(now.timestamp().div_euclid(3600) * 3600, 0).unwrap_or(now);
     let from = hour - Duration::hours(LOOK_BACK_HOURS);
     let to = hour + Duration::days(LOOK_AHEAD_DAYS) + Duration::hours(1);
-    let events: Vec<Event> = calendar
+    let events: Vec<serde_json::Value> = calendar
         .events(notes, from, to)
         .into_iter()
         .map(|(_, _, e)| e)
         .filter(|e| !e.all_day && e.end >= now - Duration::minutes(30))
+        .map(|e| shown(&e))
         .collect();
     serde_json::json!({
         "connected": !linking.calendars.is_empty(),
@@ -563,7 +599,25 @@ fn status(notes: &Path, calendar: &Calendar, busy: bool, now: DateTime<Utc>) -> 
         "refreshing": busy,
         "events": events,
         "offer": linking.offer != Some(false),
+        "lead": linking.lead(),
+        "tasks_remind": linking.tasks_remind != Some(false),
+        "briefing": linking.briefing.unwrap_or_default(),
     })
+}
+
+fn prune(db: &crate::db::Db, now: DateTime<Utc>) {
+    let old = (now - Duration::days(PROMPTED_KEPT_DAYS)).to_rfc3339();
+    let _ = db.with(|c| c.execute("DELETE FROM calendar_prompted WHERE start < ?1", [old]));
+}
+
+fn first_time(db: &crate::db::Db, uid: &str, start: DateTime<Utc>) -> bool {
+    db.with(|c| {
+        c.execute(
+            "INSERT OR IGNORE INTO calendar_prompted (uid, start) VALUES (?1, ?2)",
+            [uid, &start.to_rfc3339()],
+        )
+    })
+    .is_ok_and(|added| added == 1)
 }
 
 fn starting(
@@ -577,28 +631,21 @@ fn starting(
         return Vec::new();
     }
     let db = db_for(notes);
-    let old = (now - Duration::days(PROMPTED_KEPT_DAYS)).to_rfc3339();
-    let _ = db.with(|c| c.execute("DELETE FROM calendar_prompted WHERE start < ?1", [old]));
+    prune(&db, now);
+    let lead = Duration::minutes(i64::from(linking.lead()));
     let hour = DateTime::from_timestamp(now.timestamp().div_euclid(3600) * 3600, 0).unwrap_or(now);
     calendar
         .events(notes, hour - Duration::hours(1), hour + Duration::hours(2))
         .into_iter()
         .map(|(_, _, e)| e)
         .filter(|e| {
-            !e.all_day
-                && e.start - Duration::minutes(OFFER_BEFORE_MINUTES) <= now
+            e.busy()
+                && e.start - lead <= now
                 && now < e.start + Duration::minutes(OFFER_AFTER_MINUTES)
         })
-        .filter(|e| {
-            db.with(|c| {
-                c.execute(
-                    "INSERT OR IGNORE INTO calendar_prompted (uid, start) VALUES (?1, ?2)",
-                    [&e.id, &e.start.to_rfc3339()],
-                )
-            })
-            .is_ok_and(|added| added == 1)
-        })
+        .filter(|e| first_time(&db, &e.id, e.start))
         .map(|e| crate::app_settings::EventStarting {
+            lead: linking.lead(),
             online: [&e.location, &e.context]
                 .iter()
                 .any(|text| text.contains("http://") || text.contains("https://")),
@@ -607,6 +654,60 @@ fn starting(
             start: e.start,
         })
         .collect()
+}
+
+pub(crate) fn on_day(
+    task: &crate::tasks::Listed,
+    day: chrono::NaiveDate,
+) -> Option<(Option<chrono::NaiveTime>, bool)> {
+    if task.repeats() {
+        let on = crate::tasks::occurs_on(&task.rule(), &task.moved, day)?;
+        let time = task.moved.get(&on).map_or(task.time, |slot| slot.time);
+        Some((time, task.done_on.contains(&on)))
+    } else {
+        (task.date == Some(day)).then_some((task.time, task.done))
+    }
+}
+
+fn due_tasks(
+    notes: &Path,
+    listed: &[crate::tasks::Listed],
+    now_local: NaiveDateTime,
+    now: DateTime<Utc>,
+) -> Vec<crate::app_settings::Reminder> {
+    let linking: Linking = read(&settings_path(notes));
+    if linking.tasks_remind == Some(false) {
+        return Vec::new();
+    }
+    let lead = Duration::minutes(i64::from(linking.lead()));
+    let db = db_for(notes);
+    prune(&db, now);
+    let today = now_local.date();
+    let mut out = Vec::new();
+    for task in listed {
+        for day in [today - Duration::days(1), today, today + Duration::days(1)] {
+            let Some((time, done)) = on_day(task, day) else {
+                continue;
+            };
+            let Some(time) = time.filter(|_| !done) else {
+                continue;
+            };
+            let Some(start) = ics::local_to_utc(day.and_time(time), None) else {
+                continue;
+            };
+            if start - lead <= now
+                && now < start + Duration::minutes(OFFER_AFTER_MINUTES)
+                && first_time(&db, &format!("task:{}", task.id), start)
+            {
+                out.push(crate::app_settings::Reminder {
+                    title: task.title.clone(),
+                    body: format!("Due at {}", time.format("%-I:%M %p")),
+                    route: format!("#/calendar?day={day}"),
+                });
+            }
+        }
+    }
+    out
 }
 
 fn offer(
@@ -642,6 +743,7 @@ pub(crate) async fn offer_to_record(state: AppState) {
     every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         every.tick().await;
+        let listed = crate::routes::tasks::listed_index(&state).await.ok();
         let notes = state.notes_dir.clone();
         let live = crate::record::live(&state.recording);
         let calendar = Arc::clone(&state.calendar);
@@ -652,9 +754,17 @@ pub(crate) async fn offer_to_record(state: AppState) {
             if let Some(access) = access {
                 catch_up(&notes, &calendar, access.as_ref(), now);
             }
-            offer(&notes, &calendar, api.as_ref(), live, now)
+            offer(&notes, &calendar, api.as_ref(), live, now);
+            if let Some(listed) = listed {
+                let local = now.with_timezone(&Local).naive_local();
+                for reminder in due_tasks(&notes, &listed, local, now) {
+                    api.notify(reminder);
+                }
+            }
         })
         .await;
+        let now = Utc::now();
+        crate::briefing::tick(&state, now.with_timezone(&Local).naive_local(), now).await;
     }
 }
 
@@ -667,10 +777,10 @@ fn stale(notes: &Path, now: DateTime<Utc>, minutes: i64) -> bool {
     })
 }
 
-struct Busy(Arc<AtomicBool>);
+pub(crate) struct Busy(Arc<AtomicBool>);
 
 impl Busy {
-    fn take(flag: &Arc<AtomicBool>) -> Option<Busy> {
+    pub(crate) fn take(flag: &Arc<AtomicBool>) -> Option<Busy> {
         (!flag.swap(true, Ordering::AcqRel)).then(|| Busy(Arc::clone(flag)))
     }
 }
@@ -711,6 +821,63 @@ pub(crate) async fn get(State(state): State<AppState>) -> Response {
             StatusCode::INTERNAL_SERVER_ERROR,
             "The calendars could not be read.",
         ),
+    }
+}
+
+#[derive(Deserialize)]
+pub(crate) struct Last {
+    event: String,
+    #[serde(default)]
+    not: Option<String>,
+}
+
+const LAST_OPEN_SHOWN: usize = 8;
+
+fn open_items(body: &str) -> Vec<&str> {
+    body.lines()
+        .filter_map(|line| {
+            let rest = line.trim_start();
+            let rest = rest.strip_prefix(['-', '*'])?.trim_start();
+            let text = rest.strip_prefix("[ ]")?;
+            let text = text.strip_prefix(char::is_whitespace)?.trim();
+            (!text.is_empty()).then_some(text)
+        })
+        .collect()
+}
+
+pub(crate) fn last_of(
+    notes: &[leo_core::notes::Note],
+    event: &str,
+    not: Option<&str>,
+) -> Option<serde_json::Value> {
+    notes
+        .iter()
+        .filter(|n| {
+            !event.is_empty()
+                && not != Some(n.id.as_str())
+                && n.extra.get("event").and_then(|v| v.as_str()) == Some(event)
+        })
+        .max_by_key(|n| n.updated_at)
+        .map(|n| {
+            let open = open_items(&n.body);
+            serde_json::json!({
+                "id": n.id,
+                "title": n.title,
+                "updated_at": n.updated_at,
+                "open": open.iter().take(LAST_OPEN_SHOWN).collect::<Vec<_>>(),
+                "open_total": open.len(),
+            })
+        })
+}
+
+pub(crate) async fn last(State(state): State<AppState>, Query(asked): Query<Last>) -> Response {
+    let found = state
+        .read_store(move |store| Ok(last_of(&store.notes, &asked.event, asked.not.as_deref())))
+        .await;
+    match found {
+        Ok(Some(value)) => Json(value).into_response(),
+        Ok(None) => StatusCode::NO_CONTENT.into_response(),
+        Err(code) => code.into_response(),
     }
 }
 
@@ -788,7 +955,7 @@ pub(crate) async fn add(State(state): State<AppState>, Json(body): Json<Add>) ->
                 added_at: now,
             });
             let _saving = shared.settings.lock().unwrap_or_else(|e| e.into_inner());
-            linking.offer = read::<Linking>(&settings_path(&notes)).offer;
+            linking.keep_settings(read(&settings_path(&notes)));
             leo_core::recording::write_json(&settings_path(&notes), &linking)
         });
         if let Err(e) = saved {
@@ -845,7 +1012,7 @@ pub(crate) async fn remove(
         access.delete(&account(&id))?;
         {
             let _saving = calendar.settings.lock().unwrap_or_else(|e| e.into_inner());
-            linking.offer = read::<Linking>(&settings_path(&notes)).offer;
+            linking.keep_settings(read(&settings_path(&notes)));
             leo_core::recording::write_json(&settings_path(&notes), &linking)?;
         }
         refresh_due(
@@ -906,17 +1073,40 @@ pub(crate) async fn refresh_now(State(state): State<AppState>) -> Response {
 
 #[derive(Deserialize)]
 pub(crate) struct Change {
-    offer: bool,
+    #[serde(default)]
+    offer: Option<bool>,
+    #[serde(default)]
+    lead: Option<u8>,
+    #[serde(default)]
+    tasks_remind: Option<bool>,
+    #[serde(default)]
+    briefing: Option<crate::briefing::Change>,
 }
 
 pub(crate) async fn change(State(state): State<AppState>, Json(body): Json<Change>) -> Response {
+    if body.lead.is_some_and(|lead| !LEADS.contains(&lead)) {
+        return error(StatusCode::BAD_REQUEST, "Choose 0, 2, 5, 10 or 15 minutes.");
+    }
+    if body
+        .briefing
+        .as_ref()
+        .and_then(|b| b.at.as_deref())
+        .is_some_and(|at| crate::briefing::time_of(at).is_none())
+    {
+        return error(StatusCode::BAD_REQUEST, "Choose a time like 08:00.");
+    }
     let notes = state.notes_dir.clone();
     let calendar = Arc::clone(&state.calendar);
     let busy = state.calendar.busy.load(Ordering::Acquire);
     let done = tokio::task::spawn_blocking(move || -> Result<serde_json::Value> {
         let _saving = calendar.settings.lock().unwrap_or_else(|e| e.into_inner());
         let mut linking: Linking = read(&settings_path(&notes));
-        linking.offer = Some(body.offer);
+        linking.offer = body.offer.or(linking.offer);
+        linking.lead = body.lead.or(linking.lead);
+        linking.tasks_remind = body.tasks_remind.or(linking.tasks_remind);
+        if let Some(change) = body.briefing {
+            linking.briefing = Some(linking.briefing.unwrap_or_default().changed(change));
+        }
         leo_core::recording::write_json(&settings_path(&notes), &linking)?;
         Ok(status(&notes, &calendar, busy, Utc::now()))
     })
@@ -1014,7 +1204,7 @@ pub(crate) async fn schedule(
                         .find(|t| t.id.starts_with(m))
                         .map(|t| t.id.clone())
                 });
-                let mut value = serde_json::json!(event);
+                let mut value = shown(&event);
                 value["id"] = serde_json::json!(format!("{feed}:{}", event.id));
                 value["feed"] = serde_json::json!(feed);
                 value["calendar"] = serde_json::json!(name);
@@ -1025,7 +1215,7 @@ pub(crate) async fn schedule(
         let page = listed.len().min(limit);
         let window: Vec<&crate::tasks::Listed> = listed[page..]
             .iter()
-            .filter(|t| !t.repeat.is_empty() || t.date.is_some_and(|d| d >= first && d <= last))
+            .filter(|t| t.repeats() || t.date.is_some_and(|d| d >= first && d <= last))
             .collect();
         serde_json::json!({
             "connected": !linking.calendars.is_empty(),
@@ -1136,6 +1326,9 @@ pub(crate) mod tests {
                 added_at: Utc::now(),
             }],
             offer,
+            lead: None,
+            tasks_remind: None,
+            briefing: None,
         };
         leo_core::recording::write_json(&settings_path(&notes), &linking).unwrap();
         db_for(&notes)
@@ -1297,6 +1490,31 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn a_declined_or_free_event_is_not_offered() {
+        let (_dir, notes) = linked(None);
+        let now = at("2026-10-30T16:00:00Z");
+        let seen = |line: &str| {
+            db_for(&notes)
+                .with(|c| c.execute("DELETE FROM calendar_prompted", []))
+                .unwrap();
+            let text = MEETINGS
+                .replace(
+                    "BEGIN:VCALENDAR\n",
+                    "BEGIN:VCALENDAR\nX-WR-CALNAME:me@example.com\n",
+                )
+                .replace(
+                    "SUMMARY:Design sync",
+                    &format!("SUMMARY:Design sync\n{line}"),
+                );
+            keep_bytes(&notes, "work", text.as_bytes()).unwrap();
+            starting(&notes, &Calendar::default(), false, now).len()
+        };
+        assert_eq!(seen("ATTENDEE;PARTSTAT=TENTATIVE:mailto:me@example.com"), 1);
+        assert_eq!(seen("ATTENDEE;PARTSTAT=DECLINED:mailto:me@example.com"), 0);
+        assert_eq!(seen("TRANSP:TRANSPARENT"), 0);
+    }
+
     fn asked(notes: &Path, live: bool, now: DateTime<Utc>) -> Vec<(String, DateTime<Utc>)> {
         let api = Asked::default();
         offer(notes, &Calendar::default(), &api, live, now);
@@ -1334,6 +1552,143 @@ pub(crate) mod tests {
         let (_dir, notes) = linked(None);
         assert!(asked(&notes, false, at("2026-10-30T16:10:00Z")).is_empty());
         assert_eq!(asked(&notes, false, at("2026-10-30T16:09:59Z")).len(), 1);
+    }
+
+    fn remind(notes: &Path, lead: Option<u8>, tasks_remind: Option<bool>) {
+        let mut linking: Linking = read(&settings_path(notes));
+        linking.lead = lead;
+        linking.tasks_remind = tasks_remind;
+        leo_core::recording::write_json(&settings_path(notes), &linking).unwrap();
+    }
+
+    #[test]
+    fn a_longer_lead_offers_an_event_that_much_earlier() {
+        let (_dir, notes) = linked(None);
+        remind(&notes, Some(10), None);
+        assert!(asked(&notes, false, at("2026-10-30T15:49:59Z")).is_empty());
+        assert_eq!(asked(&notes, false, at("2026-10-30T15:50:00Z")).len(), 1);
+        remind(&notes, Some(0), None);
+        assert!(asked(&notes, false, at("2026-10-31T15:59:59Z")).is_empty());
+        assert_eq!(asked(&notes, false, at("2026-10-31T16:00:00Z")).len(), 1);
+    }
+
+    fn bare() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let notes = dir.path().join("notes");
+        std::fs::create_dir_all(&notes).unwrap();
+        (dir, notes)
+    }
+
+    fn task(extra: serde_json::Value) -> crate::tasks::Listed {
+        let mut value = serde_json::json!({
+            "id": "t1",
+            "title": "Hand in essay",
+            "date": "2026-12-02",
+            "time": "15:00:00",
+            "created_at": "2026-11-01T00:00:00Z",
+            "updated_at": "2026-11-01T00:00:00Z",
+        });
+        value
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        crate::tasks::standalone(&serde_json::from_value(value).unwrap(), None)
+    }
+
+    fn due(notes: &Path, tasks: &[crate::tasks::Listed], local: &str) -> Vec<String> {
+        let local = NaiveDateTime::parse_from_str(local, "%Y-%m-%dT%H:%M:%S").unwrap();
+        let now = ics::local_to_utc(local, None).unwrap();
+        due_tasks(notes, tasks, local, now)
+            .into_iter()
+            .map(|r| format!("{}|{}|{}", r.title, r.body, r.route))
+            .collect()
+    }
+
+    #[test]
+    fn a_timed_task_is_announced_once_inside_its_window() {
+        let (_dir, notes) = bare();
+        let tasks = [task(serde_json::json!({}))];
+        assert!(due(&notes, &tasks, "2026-12-02T14:57:59").is_empty());
+        assert_eq!(
+            due(&notes, &tasks, "2026-12-02T14:58:00"),
+            ["Hand in essay|Due at 3:00 PM|#/calendar?day=2026-12-02"]
+        );
+        assert!(due(&notes, &tasks, "2026-12-02T15:01:00").is_empty());
+        let (_dir, late) = bare();
+        assert!(due(&late, &tasks, "2026-12-02T15:10:00").is_empty());
+        assert_eq!(due(&late, &tasks, "2026-12-02T15:09:59").len(), 1);
+    }
+
+    #[test]
+    fn task_reminders_follow_the_lead_and_ignore_calendars_and_the_offer_switch() {
+        let (_dir, notes) = linked(Some(false));
+        let tasks = [task(serde_json::json!({}))];
+        remind(&notes, Some(15), None);
+        assert!(due(&notes, &tasks, "2026-12-02T14:44:59").is_empty());
+        assert_eq!(due(&notes, &tasks, "2026-12-02T14:45:00").len(), 1);
+        assert!(asked(&notes, false, at("2026-10-30T16:00:00Z")).is_empty());
+    }
+
+    #[test]
+    fn a_done_untimed_or_unrelated_task_is_not_announced() {
+        let (_dir, notes) = bare();
+        let tasks = [
+            task(serde_json::json!({"done": true})),
+            task(serde_json::json!({"id": "t2", "time": null})),
+            task(serde_json::json!({"id": "t3", "date": "2026-12-03"})),
+        ];
+        assert!(due(&notes, &tasks, "2026-12-02T15:00:00").is_empty());
+    }
+
+    #[test]
+    fn a_repeating_task_is_announced_on_its_weeks_and_not_once_done() {
+        let (_dir, notes) = bare();
+        let tasks = [task(
+            serde_json::json!({"repeat": [2], "every": 2, "done_on": ["2026-12-16"]}),
+        )];
+        assert_eq!(due(&notes, &tasks, "2026-12-02T15:00:00").len(), 1);
+        assert!(due(&notes, &tasks, "2026-12-09T15:00:00").is_empty());
+        assert!(due(&notes, &tasks, "2026-12-16T15:00:00").is_empty());
+        assert_eq!(due(&notes, &tasks, "2026-12-30T15:00:00").len(), 1);
+        let moved = [task(
+            serde_json::json!({"repeat": [2], "moved": {"2026-12-02": {"date": "2026-12-03", "time": "09:00:00"}}}),
+        )];
+        assert!(due(&notes, &moved, "2026-12-02T15:00:00").is_empty());
+        assert_eq!(
+            due(&notes, &moved, "2026-12-03T09:00:00"),
+            ["Hand in essay|Due at 9:00 AM|#/calendar?day=2026-12-03"]
+        );
+    }
+
+    #[test]
+    fn turning_task_reminders_off_silences_tasks_only() {
+        let (_dir, notes) = linked(None);
+        remind(&notes, None, Some(false));
+        let tasks = [task(serde_json::json!({}))];
+        assert!(due(&notes, &tasks, "2026-12-02T15:00:00").is_empty());
+        assert_eq!(asked(&notes, false, at("2026-10-30T16:00:00Z")).len(), 1);
+    }
+
+    #[test]
+    fn saving_the_calendar_list_keeps_the_reminder_choices() {
+        let (_dir, notes) = linked(Some(false));
+        remind(&notes, Some(5), Some(false));
+        let mut linking: Linking = read(&settings_path(&notes));
+        let briefing = crate::briefing::Briefing {
+            on: true,
+            at: "07:30".into(),
+            wants: "Weather first".into(),
+        };
+        linking.briefing = Some(briefing.clone());
+        leo_core::recording::write_json(&settings_path(&notes), &linking).unwrap();
+        let mut next: Linking = Linking::default();
+        next.keep_settings(read(&settings_path(&notes)));
+        assert_eq!(
+            (next.offer, next.lead, next.tasks_remind),
+            (Some(false), Some(5), Some(false))
+        );
+        assert_eq!(next.briefing, Some(briefing));
+        assert_eq!(Linking::default().lead(), 2);
     }
 
     #[test]
@@ -1556,6 +1911,9 @@ pub(crate) mod tests {
                 })
                 .collect(),
             offer: None,
+            lead: None,
+            tasks_remind: None,
+            briefing: None,
         };
         leo_core::recording::write_json(&settings_path(&notes), &linking).unwrap();
         let access = Hanging {

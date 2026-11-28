@@ -124,7 +124,7 @@
     });
     if (preferred !== null && !enabled()) apply(preferred);
     fit();
-    return { fit, stop };
+    return { fit, stop, preferred: () => preferred };
   }
 
   root.leoPaneResize = { create, stretched, bounceBack };

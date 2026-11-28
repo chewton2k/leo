@@ -23,23 +23,34 @@ pub fn listen(app: &AppHandle) {
                 .and_then(|shown| shown.extra().get(name))
                 .and_then(|value| value.as_str())
         };
-        if let (Some(uid), Some(kind), "tap") = (extra("uid"), extra("kind"), performed.action_id())
-        {
-            open(&handle, &format!("{kind}:{uid}"));
+        if performed.action_id() != "tap" {
+            return;
+        }
+        if let Some(route) = extra("route") {
+            open(&handle, "go", route);
+        } else if let (Some(uid), Some(kind)) = (extra("uid"), extra("kind")) {
+            open(&handle, "event", &format!("{kind}:{uid}"));
         }
     });
 }
 
 pub fn starting(app: &AppHandle, event: leo_web::app_settings::EventStarting) {
     let kind = if event.online { "call" } else { "microphone" };
-    let title = format!("{} is starting", event.title);
+    let early = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .is_ok_and(|now| (now.as_secs() as i64) < event.start.timestamp());
+    let title = if event.lead > 0 && early {
+        format!("{} starts in {} min", event.title, event.lead)
+    } else {
+        format!("{} is starting", event.title)
+    };
     #[cfg(target_os = "macos")]
     {
         let app = app.clone();
         let page = format!("{kind}:{}", event.uid);
         let until =
             UNIX_EPOCH + Duration::from_secs(event.start.timestamp().max(0) as u64) + OFFER_FOR;
-        std::thread::spawn(move || post(&app, title, &page, until));
+        std::thread::spawn(move || post(&app, title, BODY.into(), ("event", page), until));
     }
     #[cfg(not(target_os = "macos"))]
     let _ = app
@@ -52,16 +63,42 @@ pub fn starting(app: &AppHandle, event: leo_web::app_settings::EventStarting) {
         .show();
 }
 
-fn open(app: &AppHandle, event: &str) {
+pub fn remind(app: &AppHandle, reminder: leo_web::app_settings::Reminder) {
+    #[cfg(target_os = "macos")]
+    {
+        let app = app.clone();
+        let until = std::time::SystemTime::now() + OFFER_FOR;
+        std::thread::spawn(move || {
+            post(
+                &app,
+                reminder.title,
+                reminder.body,
+                ("go", reminder.route),
+                until,
+            )
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = app
+        .notification()
+        .builder()
+        .title(reminder.title)
+        .body(reminder.body)
+        .extra("route", &reminder.route)
+        .show();
+}
+
+fn open(app: &AppHandle, what: &str, which: &str) {
     static CLICKS: AtomicU64 = AtomicU64::new(0);
     crate::show(app);
     let click = CLICKS.fetch_add(1, Ordering::Relaxed);
     let app = app.clone();
-    let event = serde_json::to_string(event).unwrap_or_default();
+    let what = serde_json::to_string(what).unwrap_or_default();
+    let which = serde_json::to_string(which).unwrap_or_default();
     let script = format!(
         "(() => {{ const done = window.__leoAsked = window.__leoAsked || {{}}; \
          if (done[{click}] || !window.leoFromApp) return; done[{click}] = true; \
-         window.leoFromApp('event', {event}); }})()"
+         window.leoFromApp({what}, {which}); }})()"
     );
     let _ = std::thread::Builder::new()
         .name("leo-event-page".into())
@@ -81,16 +118,20 @@ fn open(app: &AppHandle, event: &str) {
 const BODY: &str = "Click to open Record, ready to record it.";
 
 #[cfg(target_os = "macos")]
-fn post(app: &AppHandle, title: String, page: &str, until: std::time::SystemTime) {
+fn post(
+    app: &AppHandle,
+    title: String,
+    body: String,
+    click: (&str, String),
+    until: std::time::SystemTime,
+) {
     use mac_usernotifications::{block_on, blocking, Notification};
-    use std::sync::atomic::AtomicBool;
-    static ASKING: AtomicBool = AtomicBool::new(false);
-    if crate::permissions::notifications() == Some("denied") || ASKING.swap(true, Ordering::AcqRel)
-    {
-        return;
-    }
-    let allowed = matches!(blocking::request_auth(), Ok(true));
-    ASKING.store(false, Ordering::Release);
+    static ASKING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let allowed = {
+        let _asking = ASKING.lock().unwrap_or_else(|e| e.into_inner());
+        crate::permissions::notifications() != Some("denied")
+            && matches!(blocking::request_auth(), Ok(true))
+    };
     if !allowed {
         return;
     }
@@ -100,13 +141,13 @@ fn post(app: &AppHandle, title: String, page: &str, until: std::time::SystemTime
     let sent = block_on(
         Notification::new()
             .title(title)
-            .message(BODY)
+            .message(&body)
             .timeout(left)
             .send(),
     );
     if let Ok(shown) = sent {
         if block_on(shown.response()).is_ok_and(|response| response.is_default_action()) {
-            open(app, page);
+            open(app, click.0, &click.1);
         }
     }
 }

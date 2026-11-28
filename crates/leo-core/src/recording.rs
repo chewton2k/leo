@@ -16,6 +16,8 @@ pub struct Profile {
     pub wants: String,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub speakers: bool,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub event: String,
 }
 
 impl Profile {
@@ -24,6 +26,7 @@ impl Profile {
             context: self.context.trim().to_string(),
             wants: self.wants.trim().to_string(),
             speakers: self.speakers,
+            event: self.event.trim().to_string(),
         }
     }
 }
@@ -1444,6 +1447,15 @@ mod tests {
         let on: Profile = serde_json::from_str(r#"{"speakers":true}"#).unwrap();
         assert!(on.speakers && on.clone().checked().speakers);
         assert!(!serde_json::from_str::<Profile>("{}").unwrap().speakers);
+    }
+
+    #[test]
+    fn the_event_series_is_trimmed_and_absent_from_old_profiles() {
+        let old: Profile = serde_json::from_str(r#"{"context":"c"}"#).unwrap();
+        assert_eq!(old.event, "");
+        assert!(!serde_json::to_string(&old).unwrap().contains("event"));
+        let linked: Profile = serde_json::from_str(r#"{"event":" a@b "}"#).unwrap();
+        assert_eq!(linked.checked().event, "a@b");
     }
 
     #[test]

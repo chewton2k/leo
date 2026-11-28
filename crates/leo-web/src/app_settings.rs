@@ -17,12 +17,19 @@ pub struct EventStarting {
     pub title: String,
     pub start: chrono::DateTime<chrono::Utc>,
     pub online: bool,
+    pub lead: u8,
+}
+pub struct Reminder {
+    pub title: String,
+    pub body: String,
+    pub route: String,
 }
 pub trait AppApi: Send + Sync {
     fn view(&self) -> Result<Value>;
     fn change(&self, value: Value) -> Result<Value>;
     fn health(&self, notes: &Path, facts: leo_core::store::Facts, fresh: bool) -> Result<Value>;
     fn event_starting(&self, _event: EventStarting) {}
+    fn notify(&self, _reminder: Reminder) {}
 }
 async fn call(
     api: Option<Arc<dyn AppApi>>,

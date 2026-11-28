@@ -67,11 +67,21 @@
   }
 
   function repeats(task) {
-    return Array.isArray(task.repeat) && task.repeat.length > 0;
+    return (Array.isArray(task.repeat) && task.repeat.length > 0) || task.monthly === true;
   }
 
   function repeatsOn(task, key) {
-    return repeats(task) && task.repeat.includes(weekdayOf(key)) && (!task.date || key >= task.date);
+    if (!repeats(task) || (task.until && key > task.until) || (task.date && key < task.date)) return false;
+    const every = Math.max(1, task.every || 1);
+    if (task.monthly) {
+      if (!task.date) return false;
+      const [y, m, d] = key.split('-').map(Number);
+      const [sy, sm, sd] = task.date.split('-').map(Number);
+      return d === sd && ((y - sy) * 12 + m - sm) % every === 0;
+    }
+    if (!task.repeat.includes(weekdayOf(key))) return false;
+    const monday = (k) => fromKey(dayKey(addDays(fromKey(k), -weekdayOf(k))));
+    return !task.date || Math.round((monday(key) - monday(task.date)) / 604800000) % every === 0;
   }
 
   function occurrence(task, key, slot = null) {
@@ -154,6 +164,46 @@
     return out;
   }
 
+  function overlaps(items, key) {
+    const timed = items.filter(busy);
+    const spans = timed.map((item) => spanOn(item, key));
+    const cols = dayColumns(spans);
+    return new Map(timed.flatMap((item, i) => (cols[i].cols > 1 ? [[item, timed.filter((other, j) => j !== i && spans[j].start < spans[i].end && spans[i].start < spans[j].end)]] : [])));
+  }
+
+  function freeSlots({ busy: taken, days, hours, minutes, step = 30, now }) {
+    const spans = taken.map((b) => [new Date(b.start).getTime(), new Date(b.end).getTime()]);
+    const close = minutesOf(hours.to);
+    const at = (key, m) => {
+      const d = fromKey(key);
+      d.setHours(0, m, 0, 0);
+      return d;
+    };
+    return days.filter((key) => hours.days.includes(weekdayOf(key))).map((day) => {
+      const slots = [];
+      for (let m = Math.ceil(minutesOf(hours.from) / step) * step; m + minutes <= close; m += step) {
+        const start = at(day, m);
+        const end = at(day, m + minutes);
+        if (start >= now && !spans.some(([a, b]) => a < end && start < b)) slots.push({ start, end });
+      }
+      return { day, slots };
+    });
+  }
+
+  const MEETING_HOSTS = ['zoom.us', 'meet.google.com', 'teams.microsoft.com', 'teams.live.com', 'webex.com', 'whereby.com'];
+
+  function meetingLink(event) {
+    const host = (url) => {
+      try {
+        return new URL(url).hostname.toLowerCase();
+      } catch (e) {
+        return '';
+      }
+    };
+    const urls = (`${event.location || ''}\n${event.context || ''}`.match(/https:\/\/[^\s<>"']+/gi) || []).map((url) => url.replace(/&amp;/g, '&').replace(/[.,;:!?)\]]+$/, '')).filter(host);
+    return urls.find((url) => MEETING_HOSTS.some((h) => host(url) === h || host(url).endsWith(`.${h}`))) || urls[0] || '';
+  }
+
   function lanes(spans) {
     const order = spans.map((s, i) => i).sort((a, b) => spans[a].a - spans[b].a || spans[b].b - spans[a].b);
     const last = [];
@@ -176,14 +226,28 @@
     return occurrences(task, from, to).find((o) => !o.done) || null;
   }
 
-  function repeatLabel(repeat, locale) {
-    const days = [...new Set(repeat || [])].filter((d) => d >= 0 && d < 7).sort((a, b) => a - b);
-    if (!days.length) return '';
-    if (days.length === 7) return 'Every day';
-    if (days.join() === '0,1,2,3,4') return 'Every weekday';
-    if (days.join() === '5,6') return 'Every weekend';
+  function ordinal(n) {
+    const end = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th';
+    return `${n}${end}`;
+  }
+
+  function repeatLabel(task, locale) {
+    if (!repeats(task)) return '';
+    const days = [...new Set(task.repeat || [])].filter((d) => d >= 0 && d < 7).sort((a, b) => a - b);
+    const every = Math.max(1, task.every || 1);
     const name = (d) => new Date(2024, 0, 1 + d).toLocaleDateString(locale || undefined, { weekday: 'short' });
-    return `Every ${days.map(name).join(', ')}`;
+    let text;
+    if (task.monthly) {
+      const day = task.date ? ` on the ${ordinal(Number(task.date.slice(8)))}` : '';
+      text = every > 1 ? `Every ${every} months${day}` : `Monthly${day}`;
+    } else if (every > 1) text = `Every ${every} weeks on ${days.map(name).join(', ')}`;
+    else if (days.length === 7) text = 'Every day';
+    else if (days.join() === '0,1,2,3,4') text = 'Every weekday';
+    else if (days.join() === '5,6') text = 'Every weekend';
+    else text = `Every ${days.map(name).join(', ')}`;
+    if (!task.until) return text;
+    const [y, m, d] = task.until.split('-').map(Number);
+    return `${text} until ${new Date(y, m - 1, d).toLocaleDateString(locale || undefined, { month: 'short', day: 'numeric' })}`;
   }
 
   function plan(tasks, events, today, range) {
@@ -267,13 +331,25 @@
   function firstDay(task) {
     if (!repeats(task)) return task.date || null;
     const start = task.date || dayKey(new Date());
-    const found = occurrences({ ...task, date: start }, start, dayKey(addDays(fromKey(start), 7)));
+    const found = occurrences({ ...task, date: start }, start, dayKey(addDays(fromKey(start), 7 * Math.max(1, task.every || 1))));
     return found.length ? found[0].date : start;
   }
 
-  function rrule(repeat) {
-    const days = [...new Set(repeat || [])].filter((d) => d >= 0 && d < 7).sort((a, b) => a - b);
-    return days.length ? `RRULE:FREQ=WEEKLY;BYDAY=${days.map((d) => BYDAY[d]).join(',')}` : '';
+  function rrule(task) {
+    const days = [...new Set(task.repeat || [])].filter((d) => d >= 0 && d < 7).sort((a, b) => a - b);
+    const every = Math.max(1, task.every || 1) > 1 ? `;INTERVAL=${task.every}` : '';
+    let rule;
+    if (task.monthly) {
+      if (!task.date) return '';
+      rule = `FREQ=MONTHLY${every};BYMONTHDAY=${Number(task.date.slice(8))}`;
+    } else if (days.length) rule = `FREQ=WEEKLY${every};BYDAY=${days.map((d) => BYDAY[d]).join(',')};WKST=MO`;
+    else return '';
+    if (task.until) {
+      const [y, m, d] = task.until.split('-').map(Number);
+      const last = task.time ? new Date(y, m - 1, d, 23, 59, 59).toISOString().replace(/[-:]|\.\d+/g, '') : task.until.replace(/-/g, '');
+      rule += `;UNTIL=${last}`;
+    }
+    return `RRULE:${rule}`;
   }
 
   function googleLink(task, zone) {
@@ -293,7 +369,7 @@
     const from = task.note && task.note.title ? ` · ${task.note.title}` : '';
     const params = new URLSearchParams({ action: 'TEMPLATE', text: title, dates, details: `${task.description ? `${task.description}\n\n` : ''}From leo${from} · leo-task:${String(task.id).slice(0, 12)}` });
     if (zone) params.set('ctz', zone);
-    if (repeats(task)) params.set('recur', rrule(task.repeat));
+    if (repeats(task)) params.set('recur', rrule(task));
     return `https://calendar.google.com/calendar/render?${params.toString()}`;
   }
 
@@ -619,7 +695,9 @@
     return ['Nothing scheduled today. Next is ', title(next.title), `, ${when}`];
   }
 
-  const api = { homeDay, dateline, minutesOf, timeOf, snap, daysOf, spanOn, dayColumns, lanes, shiftRepeat, quickParse, quickRank, richText, eventDetails, dayKey, fromKey, addDays, weekStart, monthGrid, weekOf, eventDays, plan, quickDates, weekdayOf, repeats, repeatsOn, occurrences, nextOpen, repeatLabel, rrule, googleLink, googleDay, timeLabel, dayWord, dayName, tally, nextWeekday };
+  const busy = (item) => (item.type === 'event' ? !item.event.all_day && !item.event.free && item.event.reply !== 'declined' : !!item.task.time && !item.task.done);
+
+  const api = { busy, overlaps, freeSlots, meetingLink, homeDay, dateline, minutesOf, timeOf, snap, daysOf, spanOn, dayColumns, lanes, shiftRepeat, quickParse, quickRank, richText, eventDetails, dayKey, fromKey, addDays, weekStart, monthGrid, weekOf, eventDays, plan, quickDates, weekdayOf, repeats, repeatsOn, occurrences, nextOpen, repeatLabel, rrule, googleLink, googleDay, timeLabel, dayWord, dayName, tally, nextWeekday };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoSchedule = api;
 })(typeof window !== 'undefined' ? window : globalThis);

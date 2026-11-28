@@ -416,7 +416,7 @@
     return 'under $0.0001';
   }
 
-  const USAGE_KINDS = { answer: 'Answers', tool_continuation: 'After tool reads', retry: 'Recovery attempts', study_grading: 'Study grading checks', summary: 'Chat memory', other_writing: 'Other writing · graph and notes', quick_review: 'Quick checks', margin_read: 'Reading along', connections: 'Note connections', combine: 'Combining notes', margin: 'Margin replies', recording: 'Recording notes', import: 'Imported files', pictures: 'Reading pictures', dictation: 'Dictation' };
+  const USAGE_KINDS = { answer: 'Answers', tool_continuation: 'After tool reads', retry: 'Recovery attempts', study_grading: 'Study grading checks', summary: 'Chat memory', other_writing: 'Other writing · graph and notes', quick_review: 'Quick checks', margin_read: 'Reading along', connections: 'Note connections', combine: 'Combining notes', margin: 'Margin replies', recording: 'Recording notes', import: 'Imported files', pictures: 'Reading pictures', dictation: 'Dictation', briefing: 'Morning briefings' };
 
   function usageCount(value) {
     const n = Number(value);

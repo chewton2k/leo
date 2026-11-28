@@ -261,7 +261,7 @@
   }
 
   function create(deps) {
-    const { api, esc, toast, go, noteHash, felix, icons, noteReady, encodePicture, choiceCards, syncChoiceCards, bytes } = deps;
+    const { api, esc, toast, go, noteHash, felix, icons, noteReady, encodePicture, choiceCards, syncChoiceCards, bytes, lastTime, lastTimeHtml } = deps;
     const folderOptions = deps.folderOptions || (() => '<option value="">Top level</option>');
     const s = {
       view: null,
@@ -350,6 +350,7 @@
       const made = await api('/api/record', { method: 'POST', body: { source, directory, title, profile } });
       s.view = { id: made.id, source, title, directory, state: 'starting', secs: 0, step: 'Starting', steps: null, transcript: '', warnings: [], points: [], points_total: 0, note: null, error: null };
       s.liveEvent = event ? { id: made.id, event } : null;
+      s.last = null;
       s.tab = 'points';
       s.earlier = [];
       s.wantsDraft = null;
@@ -547,6 +548,7 @@
           <input id="rec-title" class="rec-title" placeholder="Untitled recording" aria-label="Title (optional)" autocomplete="off" spellcheck="true">
           <div class="rec-chips">${event}${folder}</div>
           ${picked ? '<p class="hint rec-event-note">The AI gets this event’s description, place and who was invited.</p>' : ''}
+          <div id="rec-last">${picked && s.last && s.last.series === picked.series && s.last.data ? lastTimeHtml(s.last.data) : ''}</div>
         </div></header>
         <section class="set-card rec-card">
           ${kindChoices(kind)}
@@ -677,6 +679,21 @@
       if (title && (!title.value.trim() || (before && title.value === before.title))) title.value = e ? e.title : '';
       if (wants && e && fill && !wants.value.trim()) wants.value = MEETING_WANTS;
       else if (wants && !e && wants.value === MEETING_WANTS) wants.value = '';
+    }
+
+    function wantLast() {
+      const events = (s.calendar && s.calendar.events) || [];
+      const series = (s.event !== null && events[s.event] && events[s.event].series) || '';
+      if (s.last && s.last.series === series) return;
+      const mine = { series, data: null };
+      s.last = mine;
+      if (!series) return;
+      lastTime(series).then((data) => {
+        if (s.last !== mine) return;
+        mine.data = data;
+        const slot = s.container && s.container.querySelector('#rec-last');
+        if (slot) slot.innerHTML = lastTimeHtml(data);
+      });
     }
 
     function pickKind(box, fill) {
@@ -936,6 +953,7 @@
       };
       if (paused && motion) motion.iconSwap(box, paint, '.rec-pause svg');
       else paint();
+      if (page === 'idle') wantLast();
       if (moved && !flowing) motion?.cascade(box, 'settling');
       if (page === 'live' || page === 'writing') {
         syncTabs(box);
@@ -1149,7 +1167,7 @@
           const dir=box.querySelector('#rec-dir').value;
           const events = (s.calendar && s.calendar.events) || [];
           const picked = s.event !== null ? events[s.event] : null;
-          await start(source, dir, box.querySelector('#rec-title').value.trim(), { context: picked ? picked.context : '', wants: box.querySelector('#rec-wants').value.trim(), speakers: speakersOn() && speakersReady() }, picked);
+          await start(source, dir, box.querySelector('#rec-title').value.trim(), { context: picked ? picked.context : '', ...(picked && picked.series ? { event: picked.series } : {}), wants: box.querySelector('#rec-wants').value.trim(), speakers: speakersOn() && speakersReady() }, picked);
         } finally {
           if (button && button.isConnected) button.disabled = false;
         }
