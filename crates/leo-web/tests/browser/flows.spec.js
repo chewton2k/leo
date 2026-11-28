@@ -7102,14 +7102,15 @@ test.describe('round 2 redesign', () => {
   });
 
   for (const reduce of [false, true]) {
-    test(`the calendar and card panels ${reduce ? 'open and close at once under Reduce motion' : 'slide in and out'}`, async ({ page }) => {
+    test(`the calendar peek ${reduce ? 'and the card panel open and close at once under Reduce motion' : 'fades in place and the card panel slides in and out'}`, async ({ page }) => {
       if (reduce) await page.emulateMedia({ reducedMotion: 'reduce' });
+      await page.setViewportSize({ width: 1440, height: 900 });
       const count = () => {
         if (window.leoSlid) return;
         const animate = Element.prototype.animate;
         window.leoSlid = {};
         Element.prototype.animate = function (...args) {
-          if (this.id) window.leoSlid[this.id] = (window.leoSlid[this.id] || 0) + 1;
+          for (const key of [this.id, this.parentElement?.id && `${this.parentElement.id}>`]) if (key) window.leoSlid[key] = (window.leoSlid[key] || 0) + 1;
           return animate.apply(this, args);
         };
       };
@@ -7125,11 +7126,13 @@ test.describe('round 2 redesign', () => {
       await page.evaluate(count);
       await page.locator('.cal-tray-row .cal-open', { hasText: `Panel task ${tag}` }).click();
       await expect(page.locator('#cal-side .cal-peek-title')).toBeVisible();
-      expect(await slid('cal-side'), 'the peek slides in').toBe(reduce ? 0 : 1);
+      const opened = await slid('cal-side>');
+      expect(opened > 0, 'the peek fades in').toBe(!reduce);
       await page.keyboard.press('Escape');
       await expect(page.locator('#cal-side.peek')).toHaveCount(0);
       await expect(page.locator('#cal-side .cal-mini')).toBeVisible();
-      expect(await slid('cal-side'), 'and slides out before it closes').toBe(reduce ? 0 : 2);
+      expect(await slid('cal-side>') > opened, 'and the tray fades back in').toBe(!reduce);
+      expect(await slid('cal-side'), 'the column itself never moves').toBe(0);
       const board = await (await page.request.post('/api/boards', { data: { name: `Panels ${tag}` } })).json();
       const column = board.columns[0].id;
       expect((await page.request.post(`/api/boards/${board.id}/cards`, { data: { title: `Card ${tag}`, column } })).ok()).toBe(true);

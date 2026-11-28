@@ -71,6 +71,29 @@ test('a note dropped on the right half opens beside with its own width marks and
   await expect(page.locator('#beside .margin-layer')).toHaveCount(1);
   await expect(page.locator('#app .margin-layer')).toHaveCount(1);
   await expect(page.locator('#app #title')).toHaveText(a.title);
+  expect(await page.evaluate(() => getComputedStyle(document.documentElement).overscrollBehaviorY), 'the window never rubber-bands').toBe('none');
+
+  const divider = await page.locator('#beside').evaluate((el) => Math.round(el.getBoundingClientRect().left));
+  const near = await drag(c, () => divider - 6);
+  const seen = await page.evaluate(([transfer, x]) => {
+    document.querySelector('#app').dispatchEvent(new DragEvent('dragover', { dataTransfer: transfer, clientX: x, clientY: 400, bubbles: true, cancelable: true }));
+    const zones = ['::before', '::after'].map((p) => {
+      const box = getComputedStyle(document.querySelector('#app'), p);
+      return { left: parseFloat(box.left), width: parseFloat(box.width) };
+    });
+    return { zone: document.body.dataset.noteDrop, x: document.body.style.getPropertyValue('--drop-x'), zones };
+  }, [near.transfer, divider - 6]);
+  expect(seen.zone).toBe('here');
+  expect(Math.abs(parseFloat(seen.x) - divider)).toBeLessThanOrEqual(1);
+  const { zones } = seen;
+  const here = await page.locator('#app').boundingBox();
+  const beside = await page.locator('#beside').boundingBox();
+  expect(Math.abs(zones[0].left - (here.x + 8)), 'Open here sits on the left pane').toBeLessThanOrEqual(1);
+  expect(Math.abs(zones[0].left + zones[0].width - (divider - 4))).toBeLessThanOrEqual(1);
+  expect(Math.abs(zones[1].left - (divider + 4)), 'Open beside starts at the divider').toBeLessThanOrEqual(1);
+  expect(Math.abs(zones[1].left + zones[1].width - (beside.x + beside.width - 8)), 'and ends at the right pane').toBeLessThanOrEqual(1);
+  await drag(c, () => divider + 6);
+  await expect(page.locator('body')).toHaveAttribute('data-note-drop', 'beside');
 
   const left = await drag(c, (box) => box.x + 80);
   await expect(page.locator('body')).toHaveAttribute('data-note-drop', 'here');

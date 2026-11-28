@@ -8,7 +8,7 @@ function fixture({document = {}, ...extra} = {}) {
   const listeners = {};
   const context = {side: {root: ''}, folderLabel: value => value, felix:{NOTE_DRAG:'application/x-leo-note'},clearTimeout(){},document:{
     addEventListener(type, fn) { listeners[type] = fn; }, querySelectorAll:() => [],
-    body:{dataset:{},classList:{remove(){},add(){},toggle(){}}}, ...document
+    body:{dataset:{},style:{setProperty(){}, removeProperty(){}, getPropertyValue:() => ''},classList:{remove(){},add(){},toggle(){}}}, ...document
   }, ...extra};
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/drag.js'), 'utf8'), context);
@@ -64,7 +64,7 @@ test('moving a folder reloads the pane whose own note was inside it, and leaves 
   const main = {note:{id:'main', directory:'Other'}, key:'m'};
   const side = {el:{}, s:{note:{id:'side', directory:'Course/Week'}, key:'s'}};
   const context = {side:{root:'', target:null}, state:{view:'note', dir:'Other', main}, app:{}, marginPage:null, felix:{NOTE_DRAG:'application/x-leo-note'}, clearTimeout(){},
-    document:{addEventListener(){}, querySelectorAll:() => [], body:{dataset:{}, classList:{remove(){},add(){},toggle(){}}}},
+    document:{addEventListener(){}, querySelectorAll:() => [], body:{dataset:{}, style:{setProperty(){}, removeProperty(){}, getPropertyValue:() => ''}, classList:{remove(){},add(){},toggle(){}}}},
     saving:{get:() => undefined}, moveOpenFolders(){}, showNote:async (id, {pane}) => shown.push([id, pane === side]), loadSideFolders:async () => {}, showLatest:async () => shown.push('latest')};
   vm.createContext(context);
   vm.runInContext(require('./page-source').paneHelpers(), context);
@@ -83,7 +83,7 @@ test('dropping a folder saves the pane whose note is inside it, judged by that p
   const main = {note:{id:'main', directory:'Other'}, key:'m'};
   const side = {el:{}, s:{note:{id:'side', directory:'Course/Week'}, key:'s'}};
   const context = {side:{root:'', target:null}, state:{view:'note', dir:'Other', main, session:main}, app:{}, marginPage:null, felix:{NOTE_DRAG:'application/x-leo-note'}, clearTimeout(){},
-    document:{addEventListener(){}, querySelectorAll:() => [], body:{dataset:{}, classList:{remove(){},add(){},toggle(){}}}},
+    document:{addEventListener(){}, querySelectorAll:() => [], body:{dataset:{}, style:{setProperty(){}, removeProperty(){}, getPropertyValue:() => ''}, classList:{remove(){},add(){},toggle(){}}}},
     saving:{get:() => undefined}, moveOpenFolders(){}, showNote:async () => {}, loadSideFolders:async () => {}, showLatest:async () => {}, folderLabel:(dir) => dir, toast(){},
     ready:async (s = context.state.session) => { readied.push(s.note.id); return s; }, api:async () => ({path:'Archive/Course'})};
   vm.createContext(context);

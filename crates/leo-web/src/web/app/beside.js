@@ -8,6 +8,15 @@ function besideRoom() {
   return document.documentElement.clientWidth - (parseFloat(body.paddingLeft) || 0) - (parseFloat(body.paddingRight) || 0);
 }
 
+function besideLimits() {
+  return [SIDE_PAGE_ROOM, Math.max(SIDE_PAGE_ROOM, besideRoom() - SIDE_PAGE_ROOM)];
+}
+
+function besideWidth() {
+  const [min, max] = besideLimits();
+  return Math.min(max, Math.max(min, besideResize.preferred() ?? Math.round(besideRoom() / 2)));
+}
+
 const besideGrip = document.createElement('div');
 besideGrip.className = 'pane-resize beside-resize';
 besideGrip.tabIndex = 0;
@@ -23,7 +32,7 @@ const besideResize = window.leoPaneResize.create({
   key: 'leo-beside-width',
   docked: 'right',
   measure: () => besidePane.el.getBoundingClientRect().width,
-  limits: () => [SIDE_PAGE_ROOM, Math.max(SIDE_PAGE_ROOM, besideRoom() - SIDE_PAGE_ROOM)],
+  limits: besideLimits,
   apply: (width) => document.body.style.setProperty('--beside-w', `${width ?? Math.round(besideRoom() / 2)}px`),
   enabled: () => document.body.classList.contains('split'),
   onChange: () => window.dispatchEvent(new Event('resize')),

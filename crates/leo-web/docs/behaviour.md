@@ -661,10 +661,10 @@ outside clicks dismiss the heading list without swallowing the destination click
 The heading disclosure opens on mouse hover without taking focus, stays open across its summary and menu, and closes on leaving both. Click, keyboard and touch disclosure and outside dismissal remain available. Felix draws only when the user asks to see, draw or visualize something (2026-11-14, the user's call, replacing the 2026-11-09 complexity threshold): one ```svg (320 wide, theme colour tokens): one picture, split into 2 to 5 `data-step` groups only when it unfolds in order (a process, derivation or cycle; 2026-11-15, the user's call), never Mermaid and never text characters. Margin reads never draw; margin replies and asks draw on request (Visualize). The after-reply drawing pass (`drawing::drawn`) runs only when the user's message asks for a drawing (`drawing::asks_to_see`) and keeps only one clean ```svg block (`drawing::picked`); a root without `fill` defaults to `var(--text)`, so unpainted text and shapes follow the theme. User-written ```mermaid in notes and old replies still renders strictly, and SVG stays an inert image. `BASE` stays under 4,500 bytes.
 
 
-- Split view (2026-11-26, the user's call): drag a note from the explorer onto the right third of
-  the note ("Open beside") or choose Open beside in its menu, and it opens as a second full note on
+- Split view (2026-11-26, the user's call): drag a note from the explorer onto the right part of
+  the note ("Open beside", right of where the panes meet or where beside will open) or choose Open beside in its menu, and it opens as a second full note on
   the right, with its own margin notes, outline, width bars (in a pane 900 px or wider) and scroll.
-  Dragging onto the left or centre ("Open here") replaces the note under the pointer. The bar between
+  Dragging onto the left part ("Open here") replaces the note under the pointer. The bar between
   the notes drags to resize them (remembered; double-click for half and half; arrow keys when
   focused). Clicking or typing in a note makes it the active one: Felix talks about it, the window
   title names it, a soft shade falls on it from the divider and the other note's header row goes
@@ -1566,7 +1566,7 @@ picked times on the clipboard (2026-11-27, the user's call).
   all-day cell (New task on that date and the same rows), a task wherever it shows (grid, All day row,
   month, tray: Open, Mark done or Mark not done, Delete task with its Undo) and an event (Details,
   and, for a timed event, Record this event until it has ended). Clicking anywhere on an item but its checkbox opens a side peek in the tray's place
-  (`#cal-side.peek`, 340 px): title, done, date/start/end with a This one /
+  (`#cal-side.peek`, the tray's 320 px column, so the calendar never moves): title, done, date/start/end with a This one /
   Every time scope for repeats, repeat days, type, a description that autosaves
   600 ms after typing and on blur, note, Google, .ics, Delete; events are
   read-only. A click outside the peek closes it as Escape does, and a click on another item switches it
