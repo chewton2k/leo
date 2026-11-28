@@ -308,6 +308,8 @@ const CAL_RINGS = [
   'M7.5 4.3L9.2 3.5 10.9 3 12.8 2.8 14.6 2.9 16.4 3.4 18 4.2 19.5 5.2 20.7 6.5 21.6 7.9 22.4 9.3 22.9 10.9 23.1 12.5 23.1 14.1 22.9 15.8 22.4 17.4 21.6 18.9 20.5 20.3 19.2 21.5 17.6 22.5 15.8 23.1 13.9 23.5 12 23.4 10.2 23 8.4 22.3 6.9 21.4 5.6 20.2 4.5 18.8 3.6 17.3 3 15.8 2.7 14.1 2.6 12.4 2.7 10.8 3.1 9.1 3.9 7.5 4.9 6 6.2 4.7 7.7 3.6 9.4 2.8 11.3 2.4 13.3 2.3',
 ];
 
+const CAL_OVERLAP_MARK = `<svg class="cal-overlap-mark" viewBox="0 0 10 14" aria-hidden="true">${KANBAN_STROKES.slice(0, 2).join('')}</svg>`;
+
 function calRing(key, still = false) {
   if (!still) cal.ringAt ??= performance.now();
   const ago = still ? CAL_RING_MS : performance.now() - cal.ringAt;
@@ -320,15 +322,16 @@ function calCheck(task) {
   return `<input type="checkbox" class="cal-check" data-action="task-done" data-id="${esc(task.id)}"${on} aria-label="Done: ${esc(task.title)}"${task.done ? ` checked${tickWrite(task.id, task.on)}` : ''}>`;
 }
 
-function calChip(item, day, { style = '', sub = '', extra = '', tall = false, inline = false } = {}) {
+function calChip(item, day, { style = '', sub = '', extra = '', tall = false, inline = false, over = false } = {}) {
   const task = item.type === 'task' ? item.task : null;
   const kind = task ? 'task' : 'event';
   const done = task && task.done ? ' done' : '';
   const mark = task ? '' : item.event.reply === 'declined' ? ' declined' : item.event.free ? ' free' : '';
   const peeked = cal.peek && cal.peek.id === (task ? task.id : item.event.id) && (!task || !task.on || cal.peek.on === task.on) ? ' peeked' : '';
-  return `<div class="cal-item ${kind}${done}${mark}${peeked}${tall ? ' tall' : ''}${inline ? ' inline' : ''}" ${calAttrs(item, day)} style="--tone: var(${calTone(item)});${style}">
+  const name = `${calLabel(item)}${sub ? ` · ${sub}` : ''}`;
+  return `<div class="cal-item ${kind}${done}${mark}${over ? ' overlap' : ''}${peeked}${tall ? ' tall' : ''}${inline ? ' inline' : ''}" ${calAttrs(item, day)} style="--tone: var(${calTone(item)});${style}">
     ${task ? calCheck(task) : ''}
-    <button type="button" class="cal-open" data-action="cal-open" ${task ? `data-kind="task" data-id="${esc(task.id)}"${task.on ? ` data-on="${esc(task.on)}"` : ''}` : `data-kind="event" data-id="${esc(item.event.id)}"`} title="${esc(calLabel(item))}${sub ? ` · ${esc(sub)}` : ''}"><span class="cal-title">${esc(calLabel(item))}</span>${sub ? `<span class="cal-sub">${esc(sub)}</span>` : ''}</button>${extra}
+    <button type="button" class="cal-open" data-action="cal-open" ${task ? `data-kind="task" data-id="${esc(task.id)}"${task.on ? ` data-on="${esc(task.on)}"` : ''}` : `data-kind="event" data-id="${esc(item.event.id)}"`} title="${esc(name)}"${over ? ` aria-label="${esc(name)}, overlaps another item"` : ''}><span class="cal-title">${esc(calLabel(item))}</span>${sub ? `<span class="cal-sub">${esc(sub)}</span>` : ''}</button>${extra}${over ? CAL_OVERLAP_MARK : ''}
   </div>`;
 }
 
@@ -397,6 +400,7 @@ function calColumn(key, plan, today, room = Infinity) {
   const floor = (item) => 1440 - (item.type === 'task' && !item.task.end ? CAL_DUE_MIN : Math.ceil(20 / CAL_HOUR_PX * 60));
   const placed = spans.map((s, i) => ({ start: Math.min(s.start, floor(items[i])), end: s.end }));
   const cols = S.dayColumns(placed);
+  const crowded = S.overlaps(items, key);
   const more = new Map();
   items.forEach((item, i) => {
     if (cols[i].col < room) return;
@@ -419,7 +423,7 @@ function calColumn(key, plan, today, room = Infinity) {
     const sub = length <= 30 && !task ? '' : task && !task.end ? `Due ${calTime(start)}` : calRange(start, item.type === 'event' ? end : S.minutesOf(task.end));
     const grip = task && task.source === 'leo' && calMovable(task) ? '<span class="cal-grip" data-drag="resize" aria-hidden="true"></span>' : '';
     const rest = more.get(i) ? `<button type="button" class="cal-stack-more" data-action="cal-pick" data-day="${key}" data-to="day" style="top: ${top + 2}px; z-index: ${room + 2};" aria-label="${more.get(i)} more at this time, open the day">+${more.get(i)}</button>` : '';
-    return calChip(item, key, { style: ` top: ${top}px; height: ${height}px; left: calc(${area} * ${left / 100} + 2px); width: calc(${area} * ${width / 100} - 5px); z-index: ${col + 1};`, sub, extra: grip, tall: end - start >= 90, inline: Boolean(task) && length < 60 }) + rest;
+    return calChip(item, key, { style: ` top: ${top}px; height: ${height}px; left: calc(${area} * ${left / 100} + 2px); width: calc(${area} * ${width / 100} - 5px); z-index: ${col + 1};`, sub, extra: grip, tall: end - start >= 90, inline: Boolean(task) && length < 60, over: crowded.has(item) }) + rest;
   }).join('');
   let now = '';
   if (key === today) {
@@ -1191,14 +1195,28 @@ function eventDetailsHtml(event) {
   const where = event.location || about.place;
   const linked = (text) => (/^https?:\/\/\S+$/i.test(text) ? `<a href="${esc(text)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>` : esc(text));
   const status = event.reply === 'declined' ? 'You declined' : event.reply === 'tentative' ? 'Tentative' : event.free ? 'Shown as free' : '';
+  const over = event.all_day ? '' : calOverlapLine((i) => i.type === 'event' && i.event.id === event.id, S.dayKey(new Date(event.start)));
   return `<div class="set-row"><span class="set-label">When</span><span class="set-value">${esc(when)}</span></div>
     ${status ? `<div class="set-row"><span class="set-label">Status</span><span class="set-value">${status}</span></div>` : ''}
+    ${over ? `<p class="hint">${esc(over)}</p>` : ''}
     ${where ? `<div class="set-row"><span class="set-label">Where</span><span class="set-value sched-wrap">${linked(where)}</span></div>` : ''}
     <div class="set-row"><span class="set-label">Calendar</span><span class="set-value">${esc(event.calendar || 'Google')}</span></div>
     ${about.organiser ? `<div class="set-row"><span class="set-label">Organiser</span><span class="set-value sched-wrap">${esc(about.organiser)}</span></div>` : ''}
     ${about.invited.length ? `<div class="set-row"><span class="set-label">Invited</span><span class="set-value sched-people">${about.invited.map((p) => `<span class="chip">${esc(p)}</span>`).join('')}</span></div>` : ''}
     ${about.description ? `<div class="sched-about prose">${S.richText(about.description)}</div>` : ''}
     ${event.zone_unknown ? '<p class="set-note warn">This event names a time zone leo does not know, so its time may be off.</p>' : ''}`;
+}
+
+function calOverlapLine(match, key) {
+  const items = ((calPlan([key]).byDay.get(key) || {}).timed || []).filter(calShown);
+  const self = items.find(match);
+  const others = (self && S.overlaps(items, key).get(self)) || [];
+  if (!others.length) return '';
+  const named = others.slice(0, 2).map((other) => {
+    const { start, end } = S.spanOn(other, key);
+    return `${calLabel(other)} ${other.type === 'task' && !other.task.end ? calTime(start) : calRange(start, end)}`;
+  });
+  return `Overlaps ${named.join(', ')}${others.length > 2 ? ` and ${others.length - 2} more` : ''}`;
 }
 
 function calEventSoon(event) {

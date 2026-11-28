@@ -15,7 +15,6 @@ const KANBAN_ICON = {
   pencil: svg('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>'),
   priority: svg('<path d="M4 18.5L7 5.5"/><path d="M10.5 18.5l3-13"/><path d="M17 18.5l3-13"/>'),
 };
-const KANBAN_STROKES = ['<path d="M2.2 11.6 Q3.1 7.4 4.3 3.1"/>', '<path d="M6.1 11.8 Q7.2 7.6 8.2 3.3"/>', '<path d="M10.1 11.5 Q11.1 7.2 12.3 3.2"/>'];
 const KANBAN_TONES = [
   [/\b(done|complete|completed|finished|shipped|closed)\b/i, 'done'],
   [/\b(in progress|doing|working|review|reviewing|testing|started)\b/i, 'doing'],

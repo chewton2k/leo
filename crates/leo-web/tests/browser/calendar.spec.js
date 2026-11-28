@@ -1285,6 +1285,33 @@ test('an event with a meeting link shows Join with that link, in its peek and it
   });
 });
 
+test('two overlapping busy items are both marked and the peek names the other, while free and declined ones do not count', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    await page.evaluate(() => {
+      const at = (h, m = 0) => new Date(2026, 10, 3, h, m).toISOString();
+      window.db.events.push(
+        { id: 'e-stand', title: 'Standup', start: at(8), end: at(8, 30), all_day: false, calendar: 'Work', context: '' },
+        { id: 'e-sync', title: 'Sync', start: at(8, 15), end: at(9), all_day: false, calendar: 'Work', context: '' },
+        { id: 'e-lunch', title: 'Lunch', start: at(15), end: at(16), all_day: false, calendar: 'Work', context: '' },
+        { id: 'e-focus', title: 'Focus block', start: at(15), end: at(16), all_day: false, calendar: 'Work', context: '', free: true },
+        { id: 'e-skip', title: 'Skipped call', start: at(15), end: at(16), all_day: false, calendar: 'Work', context: '', reply: 'declined' }
+      );
+    });
+    await page.evaluate(() => loadSchedule());
+    const stand = page.locator('.cal-item[data-id="e-stand"]');
+    await expect(stand).toHaveClass(/overlap/);
+    await expect(page.locator('.cal-item[data-id="e-sync"]')).toHaveClass(/overlap/);
+    for (const id of ['e-lunch', 'e-focus', 'e-skip']) await expect(page.locator(`.cal-item[data-id="${id}"]`)).not.toHaveClass(/overlap/);
+    await expect(stand.locator('.cal-overlap-mark')).toHaveAttribute('aria-hidden', 'true');
+    await expect(stand.locator('.cal-open')).toHaveAttribute('aria-label', /, overlaps another item$/);
+    await stand.click();
+    await expect(page.locator('#cal-side.peek')).toContainText(/Overlaps Sync 8:15\s*–\s*9:00\s*AM/);
+    await page.locator('.cal-item[data-id="e-lunch"]').click();
+    await expect(page.locator('#cal-side.peek .cal-peek-title')).toHaveText('Lunch');
+    await expect(page.locator('#cal-side.peek')).not.toContainText('Overlaps');
+  }, { view: 'day' });
+});
+
 test('a declined event is drawn muted and says so in its peek, and a free one is dashed', async ({ browser }) => {
   await calendarFixture(browser, async page => {
     await page.evaluate(() => {
