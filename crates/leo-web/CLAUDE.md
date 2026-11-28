@@ -1265,7 +1265,24 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   `Event.reply` (`declined`, `tentative`, `accepted`; an unknown owner leaves it empty,
   never guessed). `Event::busy()` (not all-day, not free, not declined) gates
   `calendar::starting`; `schedule.busy(item)` is its page twin. Declined events are
-  drawn muted and get no Record button; free ones get a dashed edge.
+  drawn muted (a faint title and an outline, never struck through: items only dim) and get no
+  Record button; free ones get a dashed edge.
+- Day tools (2026-11-27, the user's call; all page-side, no Rust): `schedule.meetingLink(event)`
+  (first https URL in location then description on zoom.us, meet.google.com, teams.microsoft.com,
+  teams.live.com, webex.com or whereby.com, else the first https URL) gives a Join link-button
+  before Record in the event peek (`target="_blank"`, opened by the desktop like every link) and
+  "Join meeting" in the right-click menu, never on a declined event. `schedule.overlaps(items, key)`
+  (busy items only, from `dayColumns`) marks tiles `.overlap` with two pencil strokes in ink at 55%
+  (`KANBAN_STROKES`, now in core.js, shared with the board priority marks) and names up to two
+  others in the peek ("Overlaps Sync 8:15 – 9:00 AM and 1 more"). `leo-second-zone` (localStorage,
+  Settings → Calendar) adds the same span in that zone under When in event and timed-task peeks
+  (`calZoneLine`; nothing when None or the offset matches). `leo-work-hours` (`{days, from, to}`,
+  Mon = 0, default Mon–Fri 09:00–17:00) feeds Find a time (`findTimeSheet`, header button): the
+  next 5 working days, `schedule.freeSlots` on a 30-minute grid from the next step, minus busy
+  events and timed tasks, 15/30/45/60 minutes; a picked slot is circled with `calRing`'s drawing
+  (stretched to the chip) and Copy writes "Tue, Dec 2: 2:00 – 2:30 PM, …", with the second zone
+  appended per slot when set. Pencil marks only where a person would mark the page: the overlap
+  strokes and the circled slot; Join, chips and controls stay crisp.
 - Prep from last time (2026-11-27, the user's call): events carry `series` (`Event::series()`,
   the id before its last `@`) in `/api/calendar` and `/api/schedule`. The Record page sends it
   as `profile.event`; `record::run` writes it as front matter `event:` on a note a recording
