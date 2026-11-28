@@ -567,7 +567,10 @@ test('a folded heading counts its tasks apart from its lines and keeps the count
     const page = await context.newPage();
     await page.goto(url + '/?body=' + encodeURIComponent('## Tasks\n\n- [ ] Milk\n- [x] Eggs\n- [ ] Bread\n\nSome text\n\n### Sub\n\n- [ ] Deep\n\n## Only tasks\n\n- [x] Done\n\n## Plain\n\nWords\n\n## Tricky\n\n- [ ] compare [x] and [y]\n\n```\n- [x] in code\n```\n\n## Open\n\n- [ ] Later'));
     const heads = page.locator('#doc :is(h2, h3)');
-    for (const name of ['Tasks', 'Only tasks', 'Plain', 'Tricky']) await heads.filter({ hasText: new RegExp('^' + name + '$') }).locator('.fold-btn').click({ force: true });
+    for (const name of ['Tasks', 'Only tasks', 'Plain', 'Tricky']) {
+      await heads.filter({ hasText: new RegExp('^' + name + '$') }).locator('.fold-btn').click({ force: true });
+      await expect(page.locator('#doc .blk-leaving')).toHaveCount(0);
+    }
     await expect(heads.filter({ hasText: /^Tasks$/ })).toHaveAttribute('data-fold-said', '2 lines · 1 of 4 tasks done');
     await expect(heads.filter({ hasText: /^Only tasks$/ })).toHaveAttribute('data-fold-said', '1 of 1 task done');
     await expect(heads.filter({ hasText: 'Plain' })).toHaveAttribute('data-fold-said', '1 line');
