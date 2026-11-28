@@ -345,11 +345,11 @@ const CAL_RINGS = [
 
 const CAL_OVERLAP_MARK = `<svg class="cal-overlap-mark" viewBox="0 0 10 14" aria-hidden="true">${KANBAN_STROKES.slice(0, 2).join('')}</svg>`;
 
-function calRing(key, still = false) {
+function calRing(key, still = false, fit = false) {
   if (!still) cal.ringAt ??= performance.now();
   const ago = still ? CAL_RING_MS : performance.now() - cal.ringAt;
   const draw = ago < CAL_RING_MS ? ` class="inking" style="animation-delay: ${-Math.round(ago)}ms"` : '';
-  return `<svg class="cal-ring" viewBox="0 0 26 26" aria-hidden="true"><path pathLength="1"${draw} d="${CAL_RINGS[S.fromKey(key).getDate() % CAL_RINGS.length]}"/></svg>`;
+  return `<svg class="cal-ring" viewBox="0 0 26 26"${fit ? ' preserveAspectRatio="none"' : ''} aria-hidden="true"><path pathLength="1"${draw} d="${CAL_RINGS[S.fromKey(key).getDate() % CAL_RINGS.length]}"/></svg>`;
 }
 
 function calCheck(task) {
@@ -388,6 +388,7 @@ function calHead(days) {
     </div>
     <div class="cal-status" role="status">${calStatus()}</div>
     <div class="cal-views">${segmented({ label: 'View', action: 'cal-view', key: 'view', current: cal.view, choices: CAL_VIEWS.map(([v, label]) => [v, label, '', `${label} (${label[0]})`]) })}</div>
+    <button type="button" class="btn sm cal-new" data-action="cal-find">${ICON.search}<span>Find a time</span></button>
     <button type="button" class="btn sm cal-new" data-action="task-new" data-day="${esc(cal.selected)}">${ICON.plus}<span>New task</span></button>
   </header>`;
 }
@@ -1287,17 +1288,17 @@ function calSlot(task, on) {
   return { day, slot: day ? (task.moved || {})[day] || { date: day, time: task.time, end: task.end } : task };
 }
 
-function calMoment(date, time) {
-  const at = S.fromKey(date);
-  at.setHours(0, S.minutesOf(time), 0, 0);
+function calAt(key, minutes) {
+  const at = S.fromKey(key);
+  at.setHours(0, minutes, 0, 0);
   return at;
 }
 
 function calTaskLines(task, on) {
   const { day, slot } = calSlot(task, on);
   if (!slot.date || !slot.time) return '';
-  const start = calMoment(slot.date, slot.time);
-  const zone = calZoneLine(start, slot.end ? calMoment(slot.date, slot.end) : start);
+  const start = calAt(slot.date, S.minutesOf(slot.time));
+  const zone = calZoneLine(start, slot.end ? calAt(slot.date, S.minutesOf(slot.end)) : start);
   const over = calOverlapLine((i) => i.type === 'task' && i.task.id === task.id && (i.task.on || '') === (day || ''), slot.date);
   return `${zone ? `<p class="hint">${esc(zone)}</p>` : ''}${over ? `<p class="hint">${esc(over)}</p>` : ''}`;
 }
@@ -1567,6 +1568,116 @@ async function saveDate(task, pick, confirm) {
     if (pick.date) cal.selected = pick.date;
     await loadSchedule(seq);
   }
+}
+
+const FIND_DAYS = 5;
+const FIND_REACH = 42;
+
+function findLabel(day) {
+  return S.fromKey(day).toLocaleDateString(calLocale(), { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function findRange(slot) {
+  const minutes = (at) => at.getHours() * 60 + at.getMinutes();
+  return calRange(minutes(slot.start), minutes(slot.end));
+}
+
+function findWorkLabel(hours) {
+  const name = (d) => new Date(2024, 0, 1 + d).toLocaleDateString(calLocale(), { weekday: 'short' });
+  const last = hours.days[hours.days.length - 1];
+  const run = hours.days.length > 1 && last - hours.days[0] === hours.days.length - 1;
+  return `${run ? `${name(hours.days[0])}–${name(last)}` : hours.days.map(name).join(', ')} ${S.timeLabel(hours.from, calLocale())}–${S.timeLabel(hours.to, calLocale())}`;
+}
+
+function findBusy(data, days) {
+  const plan = S.plan([...(data.tasks || []), ...(data.window || [])], data.events || [], S.dayKey(new Date()), { from: days[0], to: days[days.length - 1] });
+  return days.flatMap((key) => ((plan.byDay.get(key) || {}).timed || []).filter(S.busy).map((item) => {
+    const { start, end } = S.spanOn(item, key);
+    return { start: calAt(key, start), end: calAt(key, end) };
+  }));
+}
+
+function findDayHtml({ day, slots }, picked) {
+  const chips = slots.map((slot) => {
+    const on = picked.has(slot.start.getTime());
+    return `<button type="button" class="slot-chip" data-at="${slot.start.getTime()}" aria-pressed="${on}">${esc(findRange(slot))}${on ? calRing(day, true, true) : ''}</button>`;
+  }).join('');
+  return `<section class="find-day"><div class="source-label">${esc(findLabel(day))}</div>${chips ? `<div class="find-slots">${chips}</div>` : '<p class="hint">No free time</p>'}</section>`;
+}
+
+function findCopyText(slots) {
+  const byDay = new Map();
+  for (const slot of slots) {
+    const day = S.dayKey(slot.start);
+    byDay.set(day, [...(byDay.get(day) || []), slot]);
+  }
+  return [...byDay].map(([day, list]) => `${findLabel(day)}: ${list.map((slot) => {
+    const zone = calZoneLine(slot.start, slot.end);
+    return `${findRange(slot)}${zone ? ` (${zone})` : ''}`;
+  }).join(', ')}`).join('\n');
+}
+
+async function findTimeSheet() {
+  const hours = calWorkHours();
+  const days = [];
+  for (let i = 0; i < FIND_REACH && days.length < FIND_DAYS; i++) {
+    const key = S.dayKey(S.addDays(new Date(), i));
+    if (hours.days.includes(S.weekdayOf(key))) days.push(key);
+  }
+  const box = sheet(`<h3>Find a time</h3>
+    <p class="hint">${esc(findWorkLabel(hours))} · next ${days.length} working days</p>
+    <div class="set-row">${segmented({ label: 'Length', field: 'id="find-minutes"', current: 30, choices: [[15, '15 min'], [30, '30 min'], [45, '45 min'], [60, '1 h']] })}</div>
+    <div class="find-days" id="find-days">Looking at your calendar…</div>
+    <div class="buttons"><span class="hint grow" id="find-count" role="status"></span><button type="button" class="btn primary" id="find-copy" disabled>Copy 0 times</button></div>`);
+  const picked = new Set();
+  let found = [];
+  let busy = null;
+  const count = () => {
+    $('#find-count', box).textContent = `${picked.size} picked`;
+    const copy = $('#find-copy', box);
+    copy.textContent = `Copy ${picked.size} ${picked.size === 1 ? 'time' : 'times'}`;
+    copy.disabled = !picked.size;
+  };
+  const paint = () => {
+    picked.clear();
+    found = S.freeSlots({ busy, days, hours, minutes: Number($('#find-minutes', box).value), now: new Date() });
+    $('#find-days', box).innerHTML = found.map((day) => findDayHtml(day, picked)).join('');
+    count();
+  };
+  box.addEventListener('change', (e) => {
+    if (e.target.id === 'find-minutes' && busy) paint();
+  });
+  box.addEventListener('click', (e) => {
+    const chip = e.target.closest('.slot-chip');
+    if (!chip) return;
+    const at = Number(chip.dataset.at);
+    const on = !picked.has(at);
+    if (on) picked.add(at);
+    else picked.delete(at);
+    chip.setAttribute('aria-pressed', String(on));
+    chip.querySelector('.cal-ring')?.remove();
+    if (on) chip.insertAdjacentHTML('beforeend', calRing(S.dayKey(new Date(at)), true, true));
+    count();
+  });
+  $('#find-copy', box).addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(findCopyText(found.flatMap((day) => day.slots).filter((slot) => picked.has(slot.start.getTime()))));
+      toast('Copied');
+    } catch (e) {
+      toast(`Could not copy: ${e.message || 'the clipboard is not available.'}`, { bad: true });
+    }
+  });
+  let data;
+  try {
+    data = await api(`/api/schedule?from=${enc(S.fromKey(days[0]).toISOString())}&to=${enc(S.addDays(S.fromKey(days[days.length - 1]), 1).toISOString())}&limit=${TASKS_PAGE}`);
+  } catch (e) {
+    if (e instanceof Locked) throw e;
+    if (box.isConnected) $('#find-days', box).textContent = 'leo could not read your calendar. Close this and try again.';
+    return;
+  }
+  if (!box.isConnected) return;
+  busy = findBusy(data, days);
+  paint();
 }
 
 function newTaskSheet(day = null) {

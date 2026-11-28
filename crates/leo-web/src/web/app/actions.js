@@ -65,6 +65,7 @@ const actions = {
   'cal-prev': () => calStep(-1),
   'cal-next': () => calStep(1),
   'cal-today': () => calToday(),
+  'cal-find': () => findTimeSheet(),
   'cal-view': (el) => calSetView(el.dataset.view),
   'cal-mini': (el) => {
     const at = S.fromKey(cal.selected);

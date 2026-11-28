@@ -85,7 +85,7 @@ async function calendarFixture(browser, run, { width = 1360, height = 900, view 
     ${read('app/popup-menu.js')}
     ${read('app/settings-navigation.js')}
     ${page}
-    const actions={${calActions}'task-delete':el=>deleteTask(el.dataset.id),'task-new':el=>newTaskSheet(el.dataset.day||null),close:()=>closeSheet()};
+    const actions={${calActions}'segment-pick':el=>pickSegment(el),'task-delete':el=>deleteTask(el.dataset.id),'task-new':el=>newTaskSheet(el.dataset.day||null),close:()=>closeSheet()};
     document.addEventListener('click',e=>{const el=e.target.closest('[data-action]');if(!el||!actions[el.dataset.action])return;e.preventDefault();Promise.resolve(actions[el.dataset.action](el)).catch(fail);});
     document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('.scrim'))closeSheet();});
     window.errors=[];window.db=db;
@@ -1333,6 +1333,48 @@ test('with a second time zone chosen the peeks of an event and a timed task show
     await expect(peek.locator('#cal-peek-extra')).toBeEmpty();
     await open('e-lecture', 'CS 241 lecture');
     await expect(peek.locator('.cal-zone')).toHaveCount(0);
+  }, { zone: 'America/Los_Angeles' });
+});
+
+test('Find a time lists the free slots of the next working days, circles the picked ones and copies them', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    await page.evaluate(() => {
+      window.copied = [];
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText: async text => { window.copied.push(text); } }, configurable: true });
+      window.db.events.push({ id: 'e-full', title: 'Offsite', start: new Date(2026, 10, 4, 9).toISOString(), end: new Date(2026, 10, 4, 17).toISOString(), all_day: false, calendar: 'Work', context: '' });
+    });
+    await page.evaluate(() => loadSchedule());
+    await page.getByRole('button', { name: 'Find a time' }).click();
+    const sheet = page.locator('.sheet');
+    await expect(sheet).toContainText('Mon–Fri');
+    const days = sheet.locator('.find-day');
+    await expect(days).toHaveCount(5);
+    await expect(days.nth(0).locator('.source-label')).toHaveText('Tue, Nov 3');
+    const chips = days.nth(0).locator('.slot-chip');
+    expect(await chips.allTextContents().then(all => all.map(t => t.replace(/\s+/g, ' ')))).toEqual(['12:00 – 12:30 PM', '12:30 – 1:00 PM', '2:00 – 2:30 PM', '2:30 – 3:00 PM', '3:00 – 3:30 PM', '3:30 – 4:00 PM', '4:00 – 4:30 PM', '4:30 – 5:00 PM']);
+    await expect(days.nth(1)).toContainText('No free time');
+    await expect(days.nth(4).locator('.source-label')).toHaveText('Mon, Nov 9');
+    await expect(sheet.locator('#find-copy')).toBeDisabled();
+    await chips.nth(0).click();
+    await chips.nth(2).click();
+    await expect(chips.nth(0)).toHaveAttribute('aria-pressed', 'true');
+    await expect(chips.nth(0).locator('.cal-ring')).toHaveCount(1);
+    await expect(chips.nth(1)).toHaveAttribute('aria-pressed', 'false');
+    await expect(sheet.locator('#find-count')).toHaveText('2 picked');
+    await sheet.locator('#find-copy').click();
+    await expect(page.locator('.toast')).toContainText('Copied');
+    expect(await page.evaluate(() => window.copied.map(t => t.replace(/\s+/g, ' ')))).toEqual(['Tue, Nov 3: 12:00 – 12:30 PM, 2:00 – 2:30 PM']);
+    await page.evaluate(() => localStorage.setItem('leo-second-zone', 'Europe/London'));
+    await sheet.locator('#find-copy').click();
+    expect(await page.evaluate(() => window.copied.at(-1).replace(/\s+/g, ' '))).toBe('Tue, Nov 3: 12:00 – 12:30 PM (8:00 – 8:30 PM London), 2:00 – 2:30 PM (10:00 – 10:30 PM London)');
+    await chips.nth(0).click();
+    await expect(chips.nth(0).locator('.cal-ring')).toHaveCount(0);
+    await expect(sheet.locator('#find-count')).toHaveText('1 picked');
+    await sheet.getByRole('radio', { name: '1 h' }).click();
+    await expect(sheet.locator('#find-count')).toHaveText('0 picked');
+    await expect(days.nth(0).locator('.slot-chip').first()).toHaveText(/^12\s*–\s*1\s*PM$/);
+    await page.keyboard.press('Escape');
+    await expect(sheet).toHaveCount(0);
   }, { zone: 'America/Los_Angeles' });
 });
 
