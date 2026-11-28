@@ -1179,12 +1179,12 @@ test('a click outside keeps the card panel and its text when the save fails', as
     await page.locator('[data-card="cread00001"]').click();
     await page.locator('#kanban-card-description').click();
     await page.keyboard.type('Keep me');
-    await page.evaluate(() => { window.rearm = setInterval(() => { if (!window.failNext) window.failNext = 'Leo could not save the card.'; }, 1); });
+    await page.evaluate(() => Object.defineProperty(window, 'failNext', { configurable: true, get: () => 'Leo could not save the card.', set() {} }));
     await page.mouse.click(5, 5);
     await expect(page.locator('#kanban-card-problem')).toHaveText('Leo could not save the card.');
     await expect(panel).toBeVisible();
     await expect(page.locator('#kanban-card-description')).toHaveText('Keep me');
-    await page.evaluate(() => { clearInterval(window.rearm); window.failNext = null; });
+    await page.evaluate(() => { delete window.failNext; window.failNext = null; });
     await page.mouse.click(5, 5);
     await expect(panel).toBeHidden();
     expect(await page.evaluate(() => window.db.cards.find(c => c.id === 'cread00001').description)).toBe('Keep me');
