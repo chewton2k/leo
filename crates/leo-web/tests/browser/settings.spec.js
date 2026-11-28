@@ -246,6 +246,8 @@ test('Settings sections keep drafts and selections across redraws in both themes
     ${read('app/settings-navigation.js')}
     ${read('app/select-menu.js')}
     ${read('app/sheets.js').slice(read('app/sheets.js').indexOf('function trapSheetFocus('), read('app/sheets.js').indexOf('const SWIPE_CLOSE'))}
+    ${read('app/calendar.js').slice(read('app/calendar.js').indexOf('function calLocale('), read('app/calendar.js').indexOf('function monthOf('))}
+    ${read('app/calendar.js').slice(read('app/calendar.js').indexOf('function repeatBubbles('), read('app/calendar.js').indexOf('function repeatHint('))}
     ${read('app/settings.js')}
     ${read('app/keeping.js')}
     ${read('app/dictation.js')}

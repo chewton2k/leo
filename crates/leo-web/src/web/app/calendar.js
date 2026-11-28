@@ -343,7 +343,7 @@ const CAL_RINGS = [
   'M7.5 4.3L9.2 3.5 10.9 3 12.8 2.8 14.6 2.9 16.4 3.4 18 4.2 19.5 5.2 20.7 6.5 21.6 7.9 22.4 9.3 22.9 10.9 23.1 12.5 23.1 14.1 22.9 15.8 22.4 17.4 21.6 18.9 20.5 20.3 19.2 21.5 17.6 22.5 15.8 23.1 13.9 23.5 12 23.4 10.2 23 8.4 22.3 6.9 21.4 5.6 20.2 4.5 18.8 3.6 17.3 3 15.8 2.7 14.1 2.6 12.4 2.7 10.8 3.1 9.1 3.9 7.5 4.9 6 6.2 4.7 7.7 3.6 9.4 2.8 11.3 2.4 13.3 2.3',
 ];
 
-const CAL_OVERLAP_MARK = `<svg class="cal-overlap-mark" viewBox="0 0 10 14" aria-hidden="true">${KANBAN_STROKES.slice(0, 2).join('')}</svg>`;
+const calOverlapMark = () => `<svg class="cal-overlap-mark" viewBox="0 0 10 14" aria-hidden="true">${KANBAN_STROKES.slice(0, 2).join('')}</svg>`;
 
 function calRing(key, still = false, fit = false) {
   if (!still) cal.ringAt ??= performance.now();
@@ -366,7 +366,7 @@ function calChip(item, day, { style = '', sub = '', extra = '', tall = false, in
   const name = `${calLabel(item)}${sub ? ` · ${sub}` : ''}`;
   return `<div class="cal-item ${kind}${done}${mark}${over ? ' overlap' : ''}${peeked}${tall ? ' tall' : ''}${inline ? ' inline' : ''}" ${calAttrs(item, day)} style="--tone: var(${calTone(item)});${style}">
     ${task ? calCheck(task) : ''}
-    <button type="button" class="cal-open" data-action="cal-open" ${task ? `data-kind="task" data-id="${esc(task.id)}"${task.on ? ` data-on="${esc(task.on)}"` : ''}` : `data-kind="event" data-id="${esc(item.event.id)}"`} title="${esc(name)}"${over ? ` aria-label="${esc(name)}, overlaps another item"` : ''}><span class="cal-title">${esc(calLabel(item))}</span>${sub ? `<span class="cal-sub">${esc(sub)}</span>` : ''}</button>${extra}${over ? CAL_OVERLAP_MARK : ''}
+    <button type="button" class="cal-open" data-action="cal-open" ${task ? `data-kind="task" data-id="${esc(task.id)}"${task.on ? ` data-on="${esc(task.on)}"` : ''}` : `data-kind="event" data-id="${esc(item.event.id)}"`} title="${esc(name)}"${over ? ` aria-label="${esc(name)}, overlaps another item"` : ''}><span class="cal-title">${esc(calLabel(item))}</span>${sub ? `<span class="cal-sub">${esc(sub)}</span>` : ''}</button>${extra}${over ? calOverlapMark() : ''}
   </div>`;
 }
 
@@ -898,8 +898,8 @@ function calBodies(base, task, next, scope) {
     const repeat = S.shiftRepeat(base.repeat, shift);
     const until = base.until ? S.dayKey(S.addDays(S.fromKey(base.until), shift)) : null;
     return {
-      body: { date: start, time: next.time, end: next.end, repeat, until },
-      undo: { date: base.date, time: calHM(base.time), end: calHM(base.end), repeat: base.repeat, until: base.until || null },
+      body: { date: start, time: next.time, end: next.end, repeat, ...(until && { until }) },
+      undo: { date: base.date, time: calHM(base.time), end: calHM(base.end), repeat: base.repeat, ...(base.until && { until: base.until }) },
       local: (t) => Object.assign(t, { date: start, time: next.time, end: next.end, repeat, until }),
     };
   }

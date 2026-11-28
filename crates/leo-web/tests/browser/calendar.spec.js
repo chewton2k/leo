@@ -4,7 +4,12 @@ const http = require('node:http');
 const path = require('node:path');
 const { pageCss, paneHelpers } = require('../page-source');
 
-const at = (d, h, m = 0) => new Date(2026, 10, d, h, m).toISOString();
+const stamp = (zone, d, h, m = 0) => {
+  if (!zone) return new Date(2026, 10, d, h, m).toISOString();
+  const guess = Date.UTC(2026, 10, d, h, m);
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' }).formatToParts(guess).map(x => [x.type, Number(x.value)]));
+  return new Date(2 * guess - Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute)).toISOString();
+};
 
 // The Calendar page with its real CSS, icons, sheets, schedule.js and calendar.js over an
 // in-memory API that behaves like routes/tasks.rs (occurrence moves included). A fixed
@@ -13,6 +18,7 @@ async function calendarFixture(browser, run, { width = 1360, height = 900, view 
   const web = path.resolve(__dirname, '../../src/web');
   const read = name => fs.readFileSync(path.join(web, name), 'utf8');
   const css = pageCss();
+  const at = (d, h, m = 0) => stamp(zone, d, h, m);
   const core = read('app/core.js');
   const icons = core.slice(core.indexOf('const svg ='), core.indexOf('const recorder ='));
   const sheets = read('app/sheets.js');
@@ -64,6 +70,7 @@ async function calendarFixture(browser, run, { width = 1360, height = 900, view 
       if(url.startsWith('/api/schedule')&&window.failSchedule){window.failSchedule=false;throw new Error('offline');}
       if(url.startsWith('/api/schedule'))return {connected:true,calendars:[{id:'c1',name:'School'}],synced:new Date().toISOString(),refreshing:false,events:structuredClone(db.events),tasks:structuredClone(db.tasks),window:[],total:db.tasks.length};
       if(url==='/api/calendar/refresh')return null;
+      if(url.startsWith('/api/calendar/last'))return null;
       if(url==='/api/tasks'&&method==='POST'){const t={id:'task-made'+(++made),source:'leo',title:body.title,description:'',kind:body.kind||'other',done:false,date:body.date||null,time:hms(body.time),end:body.time?hms(body.end):null,note:null,found:true,promoted:false};db.tasks.push(t);return structuredClone(t);}
       if((m=url.match(/^\\/api\\/tasks\\/([^/]+)$/))){
         const t=db.tasks.find(x=>x.id===m[1]);
@@ -80,6 +87,7 @@ async function calendarFixture(browser, run, { width = 1360, height = 900, view 
       throw new Error('No fake for '+method+' '+url);
     }
     ${core.slice(core.indexOf('const MOTION_MS'), core.indexOf('function stillMotion'))}
+    ${core.slice(core.indexOf('async function lastTime('), core.indexOf('const asideHash'))}
     ${core.slice(core.indexOf('const moving'), core.indexOf('function rel('))}
     ${read('app/motion.js')}
     ${read('app/popup-menu.js')}
@@ -102,7 +110,7 @@ async function calendarFixture(browser, run, { width = 1360, height = 900, view 
   const context = await browser.newContext({ viewport: { width, height }, locale: 'en-US', timezoneId: zone });
   try {
     const tab = await context.newPage();
-    await tab.clock.install({ time: new Date(2026, 10, 3, 11, 40) });
+    await tab.clock.install({ time: new Date(at(3, 11, 40)) });
     const errors = [];
     tab.on('pageerror', error => errors.push(error.message));
     await tab.goto('http://127.0.0.1:' + server.address().port + '/');
@@ -1306,6 +1314,8 @@ test('an event with a meeting link shows Join with that link, in its peek and it
 
 test('two overlapping busy items are both marked and the peek names the other, while free and declined ones do not count', async ({ browser }) => {
   await calendarFixture(browser, async page => {
+    await page.locator('[data-action="cal-view"][data-view="day"]').click();
+    await settled(page);
     await page.evaluate(() => {
       const at = (h, m = 0) => new Date(2026, 10, 3, h, m).toISOString();
       window.db.events.push(
@@ -1328,7 +1338,7 @@ test('two overlapping busy items are both marked and the peek names the other, w
     await page.locator('.cal-item[data-id="e-lunch"]').click();
     await expect(page.locator('#cal-side.peek .cal-peek-title')).toHaveText('Lunch');
     await expect(page.locator('#cal-side.peek')).not.toContainText('Overlaps');
-  }, { view: 'day' });
+  });
 });
 
 test('with a second time zone chosen the peeks of an event and a timed task show the span there, and nothing when it matches', async ({ browser }) => {
