@@ -480,7 +480,7 @@ textarea.set-input { width: 100%; resize: vertical; line-height: 1.5; }
   .kanban-card.open { outline: 2px solid Highlight; outline-offset: -2px; }
   .settings-nav:has(.settings-nav-pill.placed) .settings-link.on { background: Highlight; color: HighlightText; }
   .segment-pill, .side-pill, .settings-nav-pill { display: none; }
-  .side-row:hover:not(.on), .side-folder:hover:not(.on), .settings-link:hover:not(.on) { outline: 1px solid Highlight; }
+  .side-row:hover:not(.on):where(:not(:is(.side-note-wrap, .side-folder) > .side-row)), :where(.side-note-wrap).hot > .side-row:not(.on), .side-folder.hot:not(.on), .settings-link:hover:not(.on) { outline: 1px solid Highlight; }
   .side-rail .side-row { border: 1px solid transparent; }
   .side-rail .side-row.on { border-color: Highlight; }
   .switch { border: 1px solid CanvasText; }

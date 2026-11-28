@@ -167,6 +167,7 @@ function drawSide() {
   inkSettle((id) => box.querySelectorAll(`.side-tree .side-note[data-id="${CSS.escape(id)}"]`));
   applySideFilter(box.querySelector('.side-tree'));
   sideRoving(box.querySelector('.side-tree'));
+  hoverAgain();
   const pill = box.querySelector('.side-tree .side-pill');
   const owner = pillKey(pill);
   if (pill && owner !== side.pill && pillFrom && sideWide()) pillGlide(pillFrom, pill);
@@ -210,6 +211,27 @@ function revealNoteRow(tree) {
   if (at.top < view.top) tree.scrollTop -= Math.ceil(view.top - at.top);
   else if (at.bottom > view.bottom) tree.scrollTop += Math.ceil(at.bottom - view.bottom);
 }
+
+const HOVER_ROWS = '.side-note-wrap, .side-folder, .card[draggable="true"]';
+let hoverRow = null;
+let hoverPoint = null;
+function lightHover(row) {
+  if (row === hoverRow && row?.classList.contains('hot')) return;
+  hoverRow?.classList.remove('hot');
+  hoverRow = row;
+  row?.classList.add('hot');
+}
+function hoverFromPointer(e) {
+  if (e.pointerType === 'touch') return;
+  const at = e.type === 'pointerover' ? e.target : e.relatedTarget;
+  hoverPoint = at ? [e.clientX, e.clientY] : null;
+  lightHover(at?.closest?.(HOVER_ROWS) || null);
+}
+function hoverAgain() {
+  if (hoverRow) lightHover((hoverPoint && document.elementFromPoint(...hoverPoint)?.closest(HOVER_ROWS)) || null);
+}
+for (const type of ['pointerover', 'pointerout']) document.addEventListener(type, hoverFromPointer, { passive: true });
+document.addEventListener('scroll', hoverAgain, { capture: true, passive: true });
 
 function sideLeave() {
   return side.root ? sideRow('side-unfocus', ICON.close, folderLabel(side.root), { attrs: ` data-dir="${esc(side.root)}"`, aria: `${folderLabel(side.root)}: show all notes`, hint: `Showing only ${folderLabel(side.root)}. Click to show all notes` }) : '';
@@ -613,6 +635,7 @@ function drawFoldersSheet() {
     ${sideLeave()}<nav class="side-nav side-tree" aria-label="Folders" data-drop-dir="" tabindex="0">${folderTree(sideHere()) || '<p class="side-none">Folders you make show up here.</p>'}</nav>`);
   box.querySelector('.side-tree').scrollTop = scroll;
   sideRoving(box.querySelector('.side-tree'));
+  hoverAgain();
   revealNoteRow(box.querySelector('.side-tree'));
 }
 

@@ -415,7 +415,7 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   across one opens the text after it. Shift-click, a double-click beside a lone picture, a broken
   picture, one inside a link or bold and a heading line open the Markdown, and an edit that would
   change what a kept picture is (a code or maths span over it) reopens the line as Markdown.
-  Backspace or Delete on a framed picture removes it and leaves the caret in its place, or frames the picture beside it (`ed.removePicture`); a Backspace outside any text field is `preventDefault`ed in a window
+  An insert (a pasted or added picture) with a framed picture and no open line goes in right after that picture while the note has the focus, else under its block (`pasteUnder`, which frames the new picture so a batch keeps its order and never takes the focus), never at the note's end (2026-11-28). Backspace or Delete on a framed picture removes it and leaves the caret in its place, or frames the picture beside it (`ed.removePicture`); a Backspace outside any text field is `preventDefault`ed in a window
   listener (events.js) so WebKit never goes back a page (2026-11-22, the user's call).
 - Note page only (2026-11-15; `leoDoc.mount(..., { noteTools: true })` in showNote,
   passed to `md.render` as `noteTools`; board cards, chat, margin and previews render
@@ -513,7 +513,10 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   an empty workspace, legacy `#/f/<path>` selects the folder then replaces the
   hash with `#/`. Explorer actions capture their target before opening a menu
   or sheet; moving or trashing the open note's folder flushes its draft first.
-  Never two rows highlighted. Saved open folders (`leo-side-folders`) hold only
+  Never two rows highlighted. Note and folder rows and draggable note cards light from the pointer (`hot`, `HOVER_ROWS` in side.js:
+  `pointerover`/`pointerout`, mouse and pen only, found again under the last pointer position after a redraw or scroll), never CSS
+  `:hover`: the app's WebKit keeps `:hover` on every row a drag started from, measured in the app on 2026-11-28 (pointer events stay
+  right). Saved open folders (`leo-side-folders`) hold only
   folders the user opened; reveals (`side.revealed`) are never saved.
   Note rows edited less than 30 minutes ago carry a 4 px ink dot after the title
   (`.side-fresh`, `SIDE_FRESH_MS`; not when sorted by Last edited, which shows the

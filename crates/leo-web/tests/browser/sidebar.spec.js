@@ -237,6 +237,40 @@ test('folder chevrons are at least 24 px to press, and open notes line up under 
   });
 });
 
+test('explorer rows light from where the pointer is, not from a hover WebKit keeps after a drag', async ({ browser }) => {
+  await sidebarFixture(browser,async(context,url)=>{
+    const page = await context.newPage({viewport:{width:1280,height:800}});
+    await page.goto(url);
+    await page.locator('.side-tree .side-row[data-dir="Course"]').click();
+    const wrap = (id) => page.locator(`.side-note-wrap:has(.side-note[data-id="${id}"])`);
+    const lit = (id) => wrap(id).evaluate(el => ({ hot: el.classList.contains('hot'), bg: getComputedStyle(el.querySelector('.side-row')).backgroundColor, more: getComputedStyle(el.querySelector('.side-sub')).opacity }));
+    const dark = { hot: false, bg: 'rgba(0, 0, 0, 0)', more: '0' };
+    await expect(wrap('course-note')).toBeVisible();
+    await wrap('course-note').locator('.side-note').hover();
+    expect(await lit('course-note')).toEqual(expect.objectContaining({ hot: true, more: '1' }));
+    expect((await lit('course-note')).bg).not.toBe(dark.bg);
+    await page.evaluate(() => window.audit.draw());
+    expect((await lit('course-note')).hot, 'a redraw keeps the row under the pointer lit').toBe(true);
+    await wrap('escaped-note').locator('.side-note').dispatchEvent('pointerover');
+    expect(await lit('course-note'), 'the row the pointer is truly over but WebKit forgot is dark').toEqual(dark);
+    expect((await lit('escaped-note')).hot).toBe(true);
+    await page.mouse.move(900, 600);
+    await expect(page.locator('.side-tree .hot')).toHaveCount(0);
+    expect(await lit('escaped-note')).toEqual(dark);
+    const folder = page.locator('.side-folder:has(> .side-row[data-dir="Personal"])');
+    const folderLit = () => folder.evaluate(el => ({ hot: el.classList.contains('hot'), bg: getComputedStyle(el).backgroundColor, more: getComputedStyle(el.querySelector('.side-sub')).opacity }));
+    await folder.locator('.side-row').hover();
+    expect(await folderLit()).toEqual(expect.objectContaining({ hot: true, more: '1' }));
+    expect((await folderLit()).bg).not.toBe(dark.bg);
+    await page.evaluate(() => window.audit.draw());
+    expect((await folderLit()).hot, 'a redraw keeps the folder under the pointer lit').toBe(true);
+    await page.mouse.move(900, 600);
+    expect(await folderLit()).toEqual(dark);
+    await wrap('course-note').locator('.side-note').dispatchEvent('pointerover', { pointerType: 'touch' });
+    await expect(page.locator('.side-tree .hot'), 'a finger on a row does not light it').toHaveCount(0);
+  });
+});
+
 test('clicking parent folder labels toggles descendants without navigating or disturbing the draft', async ({ browser }) => {
   await sidebarFixture(browser,async(context,url)=>{
     const page = await context.newPage({viewport:{width:1280,height:800}});
