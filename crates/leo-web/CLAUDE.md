@@ -1711,7 +1711,8 @@ Config and data file paths use the same `leo_core::paths::own` names as uninstal
   Due today. Note headings fold (`doc.js` `applyFolds`: a `.fold-btn` inside the heading, the
   heading's `data-fold-said` drawn by `::after` so no text node reaches the caret or margin
   maths; folds per note in `leo-folds`, at most 40 notes; same-text headings fold apart; the note
-  file never changes; opening a line inside a fold unfolds it, and folding closes an open line first); margin notes
+  file never changes; opening a line inside a fold unfolds it, and folding closes an open line first; the folding
+  rows move as one curtain, `curtain`, one row at a time with min-height lifted, and leaving copies keep `.blk`); margin notes
   inside a fold are hidden with it and counted on the heading (`doc.foldedHeading`,
   `doc.foldNotes`, from `marginDraw`). A note made from a recording ends with Felix's three
   follow-ups (`.note-follow`, `NOTE_FOLLOW_ASKS`, each `chat.askNew`). The Calendar shows "Nothing

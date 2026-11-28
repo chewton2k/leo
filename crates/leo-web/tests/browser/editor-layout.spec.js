@@ -491,6 +491,34 @@ test('folding a heading hides every block type under it and unfolding restores e
   });
 });
 
+test('a folding section of tasks moves as one curtain: styled rows, never two clipped at once', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    await page.goto(url + '/?tools&fold=f&body=' + encodeURIComponent('### Folded\n\n- [ ] Open task\n- [x] Done task\n- [ ] Third task\n\n### Next\n\nAfter'));
+    const head = page.locator('#doc > .blk').first();
+    await head.hover();
+    for (const phase of ['fold', 'unfold']) {
+      await head.locator('.fold-btn').click();
+      await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+      await page.evaluate(() => document.getAnimations().forEach(a => a.pause()));
+      for (let t = 0; t <= 160; t += 10) {
+        const rows = await page.evaluate(t => {
+          document.getAnimations().forEach(a => { a.currentTime = t; });
+          return [...document.querySelectorAll('#doc .task-item')].filter(li => li.getClientRects().length).map(li => {
+            const blk = li.closest('.blk-line');
+            const high = blk.getBoundingClientRect().height;
+            return { styled: blk.classList.contains('blk'), clipped: high > 0.5 && high + 0.5 < li.getBoundingClientRect().height };
+          });
+        }, t);
+        expect(rows.every(r => r.styled), `${phase} at ${t}ms`).toBe(true);
+        expect(rows.filter(r => r.clipped).length, `${phase} at ${t}ms`).toBeLessThanOrEqual(1);
+      }
+      await page.evaluate(() => document.getAnimations().forEach(a => a.play()));
+      await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0);
+    }
+  });
+});
+
 test('a fold chevron sits level with its heading text, first heading or not', async ({ browser }) => {
   await editorFixture(browser, async (context, url) => {
     const page = await context.newPage();
