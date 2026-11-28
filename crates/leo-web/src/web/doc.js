@@ -1363,10 +1363,17 @@
       if (replaceSelection(source)) return;
       const at = framed && pictureAt(framed.img);
       if (!at) return insert(source);
+      pasteUnder(at, source);
+    }
+
+    function pasteUnder(at, text) {
       unframe();
-      lines.splice(at.start + at.length, 0, '', ...source.split('\n'));
+      const line = at.start + at.length + 1;
+      lines.splice(line - 1, 0, '', ...text.split('\n'));
       changed();
       draw();
+      const pics = container.querySelectorAll(`.blk[data-start="${line}"] img.note-img`);
+      if (pics.length) frame(pics[pics.length - 1]);
     }
 
     function onTextPaste(e) {
@@ -2430,7 +2437,8 @@
 
     function insert(text) {
       if (editing && editing.selectionText) stop();
-      if (!editing && framed && framed.img.isConnected) enterAfter(framed.img, '');
+      const at = !editing && framed && framed.img.isConnected ? pictureAt(framed.img) : null;
+      if (at && noteFocused()) enterAfter(framed.img, '');
       if (editing) {
         const { area } = editing;
         const before = lineValue().slice(0, editing.prefix.length + area.selectionStart);
@@ -2439,6 +2447,7 @@
         typeIn(`${lead}${text}${inline ? '' : '\n'}`);
         return;
       }
+      if (at) return pasteUnder(at, text);
       const last = lines[lines.length - 1];
       if (last.trim()) lines.push('');
       if (lines.length === 1 && !lines[0].trim()) lines = text.split('\n');

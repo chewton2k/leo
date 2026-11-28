@@ -475,7 +475,28 @@ test('a picture pasted right after another picture lands after it, never at the 
       expect(at(a), `${start} ${enter}: ${source}`).toBeLessThan(at(b));
       expect(at(b), `${start} ${enter}: ${source}`).toBeLessThan(at(c));
       expect(at(c), `${start} ${enter}: ${source}`).toBeLessThan(at('Middle'));
+      if (/^(-|1\.) /.test(start)) expect(source.split('\n')[0], 'the pictures stay in the item').toBe(start + a + b + c);
     }
+    await page.goto(url + '/?body=' + encodeURIComponent(`- item\n\nMiddle\n\nLast line`));
+    await page.locator('#doc .blk').first().click();
+    await page.keyboard.press('End');
+    await page.evaluate(src => doc.insert(src), a);
+    await expect(page.locator('.pic-frame')).toHaveCount(1);
+    await page.evaluate(() => { const box = document.createElement('input'); box.id = 'elsewhere'; document.body.append(box); box.focus(); });
+    await page.evaluate(src => doc.insert(src), b);
+    await page.evaluate(src => doc.insert(src), c);
+    await expect(page.locator('#elsewhere'), 'an insert while typing elsewhere never takes the focus').toBeFocused();
+    const away = await page.evaluate(() => doc.source());
+    expect(away.indexOf(b), away).toBeGreaterThan(away.indexOf(a));
+    expect(away.indexOf(c), away).toBeGreaterThan(away.indexOf(b));
+    expect(away.indexOf(c), away).toBeLessThan(away.indexOf('Middle'));
+    await page.goto(url + '/?body=' + encodeURIComponent(`Intro\n\n> ${a}\n> caption\n\nMiddle`));
+    await page.locator('#doc img.note-img').click();
+    await expect(page.locator('.pic-frame')).toHaveCount(1);
+    await page.evaluate(src => doc.insert(src), b);
+    const quoted = await page.evaluate(() => doc.source());
+    expect(quoted.indexOf(b), quoted).toBeGreaterThan(quoted.indexOf('caption'));
+    expect(quoted.indexOf(b), quoted).toBeLessThan(quoted.indexOf('Middle'));
     await page.goto(url + '/?body=' + encodeURIComponent(`Intro\n\n${a}\n\nMiddle`));
     await page.locator('#doc img.note-img').click();
     await expect(page.locator('.pic-frame')).toHaveCount(1);

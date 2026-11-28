@@ -257,10 +257,17 @@ test('explorer rows light from where the pointer is, not from a hover WebKit kee
     await page.mouse.move(900, 600);
     await expect(page.locator('.side-tree .hot')).toHaveCount(0);
     expect(await lit('escaped-note')).toEqual(dark);
-    await page.locator('.side-tree .side-row[data-dir="Personal"]').hover();
-    await expect(page.locator('.side-folder.hot')).toHaveCount(1);
+    const folder = page.locator('.side-folder:has(> .side-row[data-dir="Personal"])');
+    const folderLit = () => folder.evaluate(el => ({ hot: el.classList.contains('hot'), bg: getComputedStyle(el).backgroundColor, more: getComputedStyle(el.querySelector('.side-sub')).opacity }));
+    await folder.locator('.side-row').hover();
+    expect(await folderLit()).toEqual(expect.objectContaining({ hot: true, more: '1' }));
+    expect((await folderLit()).bg).not.toBe(dark.bg);
+    await page.evaluate(() => window.audit.draw());
+    expect((await folderLit()).hot, 'a redraw keeps the folder under the pointer lit').toBe(true);
     await page.mouse.move(900, 600);
-    await expect(page.locator('.side-folder.hot')).toHaveCount(0);
+    expect(await folderLit()).toEqual(dark);
+    await wrap('course-note').locator('.side-note').dispatchEvent('pointerover', { pointerType: 'touch' });
+    await expect(page.locator('.side-tree .hot'), 'a finger on a row does not light it').toHaveCount(0);
   });
 });
 

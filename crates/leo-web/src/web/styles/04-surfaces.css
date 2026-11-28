@@ -21,7 +21,7 @@
   background: var(--raised); border-radius: var(--radius); padding: 14px 16px;
   box-shadow: var(--shadow);
 }
-@media (hover: hover) { .card:hover { background: color-mix(in srgb, var(--text) 3%, var(--raised)); } }
+@media (hover: hover) { .card:hover:where(:not([draggable="true"])), .card[draggable="true"]:where(.hot) { background: color-mix(in srgb, var(--text) 3%, var(--raised)); } }
 .card-title { font-weight: 650; font-size: 16.5px; display: flex; align-items: center; gap: 4px; }
 .card-title > span { min-width: 0; overflow-wrap: anywhere; text-wrap: balance; }
 .pin-toggle {
