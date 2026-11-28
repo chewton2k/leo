@@ -458,6 +458,17 @@ test('a calendar, board or settings visit and back brings the same two notes bac
     await page.locator('#beside .pane-close').click();
     await expect(page.locator('body')).not.toHaveClass(/\bsplit\b/);
   }
+  const row = (note) => page.locator(`#side .side-note[data-id="${note.id}"]`);
+  await split(page, a, b);
+  await page.locator('#app #doc .blk').first().click();
+  await expect(row(a)).toHaveAttribute('aria-current', 'page');
+  await page.evaluate(() => { location.hash = '#/calendar'; });
+  await page.goBack();
+  await expect(page.locator('#beside #title')).toHaveText(b.title);
+  await expect(row(a), 'the left pane keeps focus when the pair comes back').toHaveAttribute('aria-current', 'page');
+  await expect(row(b)).toHaveClass(/\bopen\b/);
+  await page.locator('#beside .pane-close').click();
+  await expect(page.locator('body')).not.toHaveClass(/\bsplit\b/);
   await page.evaluate(() => { location.hash = '#/calendar'; });
   await page.goBack();
   await expect(page.locator('#app #title')).toHaveText(a.title);
