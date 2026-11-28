@@ -1283,7 +1283,7 @@ function calPeekEvent(side, id) {
   });
 }
 
-function calSlot(task, on) {
+function calTaskSlot(task, on) {
   const day = S.repeats(task) ? on || S.dayKey(new Date()) : null;
   return { day, slot: day ? (task.moved || {})[day] || { date: day, time: task.time, end: task.end } : task };
 }
@@ -1295,7 +1295,7 @@ function calAt(key, minutes) {
 }
 
 function calTaskLines(task, on) {
-  const { day, slot } = calSlot(task, on);
+  const { day, slot } = calTaskSlot(task, on);
   if (!slot.date || !slot.time) return '';
   const start = calAt(slot.date, S.minutesOf(slot.time));
   const zone = calZoneLine(start, slot.end ? calAt(slot.date, S.minutesOf(slot.end)) : start);
@@ -1307,7 +1307,7 @@ function calPeekTask(side, id, on) {
   const task = calFind(id);
   if (!task) return calClosePeek();
   const repeating = S.repeats(task);
-  const { day, slot } = calSlot(task, on);
+  const { day, slot } = calTaskSlot(task, on);
   const leo = task.source === 'leo';
   const doneNow = taskDoneOn(task, day);
   const dayName = day ? S.fromKey(day).toLocaleDateString(calLocale(), { weekday: 'short', month: 'short', day: 'numeric' }) : '';
