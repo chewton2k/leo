@@ -1032,7 +1032,7 @@ Felix (2026-10-19).
   with a preset question (`ASK_PRESETS`). It opens in the right margin beside the
   selection when the layout has one (`.ask-float.beside`), else above the selection (below
   its last word when there is no room above; 2026-11-21, the user's call); `marginDraw` places it
-  again whenever the margin layout changes, so a resize never leaves it beside a margin that is gone.
+  again whenever the margin layout changes, so a resize never leaves it beside a margin that is gone. A scroll hides it only when it moves the note's text (the page, a scroller around `#doc` or one inside it); the explorer, the margin or the other pane scrolling leaves it (2026-11-28).
   Ask Felix opens the margin draft without asking (`marginAskFirst`: Felix-blue box,
   Escape keeps a half-typed question per passage in `marginPage.drafted`); a passage
   that already has an open thread opens it instead (`marginSame`). Both margins puts

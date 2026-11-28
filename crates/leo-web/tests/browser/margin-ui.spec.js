@@ -323,6 +323,20 @@ test('the Felix bar opens in the margin beside a selection when there is room, a
   expect((await menu.boundingBox()).x).toBeLessThan(word.x + 400);
 });
 
+test('the Felix bar stays when the explorer scrolls and goes when the note scrolls', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Bar scroll', body: 'Intro line\n\nHeat flows from the hot side to the cold side.' } })).json();
+  const menu = page.getByRole('toolbar', { name: 'Felix and this passage' });
+  await page.goto(`/#/n/${note.id}`);
+  await expect(page.locator('#doc')).toBeVisible();
+  expect(await pickText(page, 'the hot side')).toBe(true);
+  await expect(menu).toBeVisible();
+  await page.locator('#side .side-tree').dispatchEvent('scroll');
+  await expect(menu).toBeVisible();
+  await page.evaluate(() => document.dispatchEvent(new Event('scroll')));
+  await expect(menu).toBeHidden();
+});
+
 test('Ask Felix opens a question box beside the passage, keeps a half-typed question and asks only when sent', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 });
   const note = await (await page.request.post('/api/notes', { data: { title: 'Ask first', body: 'Intro line\n\nHeat flows from the hot side to the cold side.\n\nLast line' } })).json();

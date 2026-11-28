@@ -6854,7 +6854,7 @@ test.describe('round 2 redesign', () => {
     await expect(heading(page, 'Knapsack').locator('.fold-btn')).toHaveAttribute('aria-expanded', 'true');
     await fold(page, 'Knapsack');
     await expect(page.locator('#doc .blk-folded table, #doc .blk-folded blockquote')).toHaveCount(2);
-    await expect(page.locator('#doc .blk table')).toBeHidden();
+    await expect(page.locator('#doc .blk:not(.blk-leaving) table')).toBeHidden();
     await expect(heading(page, 'Knapsack')).toHaveAttribute('data-fold-said', '5 lines');
     await expect(heading(page, 'Knapsack').locator('.fold-btn')).toHaveAttribute('aria-expanded', 'false');
     await expect(heading(page, 'To review'), 'the next section stays open').toBeVisible();
@@ -6873,7 +6873,7 @@ test.describe('round 2 redesign', () => {
     await expect(page.locator('#doc .editing')).toHaveCount(1);
     await fold(page, 'Key ideas');
     await expect(page.locator('#doc .editing')).toHaveCount(0);
-    await expect(page.locator('#doc .blk li', { hasText: 'Memoization' })).toBeHidden();
+    await expect(page.locator('#doc .blk:not(.blk-leaving) li', { hasText: 'Memoization' })).toBeHidden();
     expect((await (await page.request.get(`/api/notes/${note.id}`)).json()).body).toBe(LECTURE);
   });
 
@@ -6913,7 +6913,7 @@ test.describe('round 2 redesign', () => {
     await page.keyboard.type('Both reuse answers.');
     await fold(page, 'Knapsack');
     await expect(page.locator('#doc .editing')).toHaveCount(0);
-    await expect(page.locator('#doc .blk table'), 'Knapsack folded, not a heading above or below it').toBeHidden();
+    await expect(page.locator('#doc .blk:not(.blk-leaving) table'), 'Knapsack folded, not a heading above or below it').toBeHidden();
     await expect(heading(page, 'Knapsack').locator('.fold-btn')).toHaveAttribute('aria-expanded', 'false');
     await expect(page.locator('#doc .blk', { hasText: 'Both reuse answers.' })).toBeVisible();
     await expect(page.locator('#doc .blk li', { hasText: 'Redo problem 3' })).toBeVisible();
@@ -6933,7 +6933,7 @@ test.describe('round 2 redesign', () => {
     await page.goto(`/#/n/${note.id}`);
     await heading(page, 'Notes').first().hover();
     await heading(page, 'Notes').first().locator('.fold-btn').click();
-    await expect(page.locator('#doc .blk p', { hasText: 'First part.' })).toBeHidden();
+    await expect(page.locator('#doc .blk:not(.blk-leaving) p', { hasText: 'First part.' })).toBeHidden();
     await expect(page.locator('#doc .blk p', { hasText: 'Second part.' })).toBeVisible();
   });
 
