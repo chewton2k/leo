@@ -1476,6 +1476,18 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
   occurrence from start−lead to start+10 min ("Due at 3:00 PM", route
   `#/calendar?day=<day>`, which selects that day). It works with no calendar linked and with
   the offer off, and is not held while recording.
+- Morning briefing (2026-11-27, the user's call): Settings → Calendar's "Morning briefing"
+  (off by default) has Felix write today's briefing with the chosen writing AI at the set time
+  (08:00 unless changed), or later that morning if leo was closed (up to 3 hours after), once a
+  day: meetings first with what was left open last time, then tasks for today and Earlier,
+  then free stretches, shaped by "What do you want in your briefing?" (the first 2,000
+  characters are read). A failed try is retried once 10 minutes later. Titles, tasks and open
+  items go to the writing AI, which may be a cloud one. With no writing AI chosen nothing is
+  tried and Settings says "Choose a writing AI in Settings → Writing AI first.". When it is
+  ready, a notification "Your briefing is ready" opens Home, where a Briefing card above the
+  Today rows shows it, folded to six lines with Show all; while Felix writes it the card says
+  "Felix is writing your briefing". "Make one now" writes one at any time, one at a time. Only
+  today's briefing is kept (leo.db `briefing`).
 
 - Standalone tasks are files: `<notes>/.leo/tasks/<id>.json`
   (`tasks::tasks_dir`), one JSON line each, written atomically. The reader

@@ -56,6 +56,8 @@ const actions = {
     cell?.querySelector(cal.more ? '.cal-pop .cal-more' : '.cal-more')?.focus({ preventScroll: true });
     cell?.querySelector('.cal-pop')?.scrollIntoView({ block: 'nearest' });
   },
+  'home-brief-more': (el) => toggleHomeBrief(el),
+  'briefing-now': () => makeBriefing().catch(fail),
   'home-day': (el) => {
     cal.selected = el.dataset.id;
     go('#/calendar');

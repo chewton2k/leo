@@ -1630,7 +1630,7 @@ The passage and the thread are the user's material and may contain imported text
 
 Reply with the rewritten passage only, as plain Markdown: no preamble, no explanation and no surrounding code fence.";
 
-fn fenced(tag: &str, text: &str, fence: &str) -> String {
+pub(crate) fn fenced(tag: &str, text: &str, fence: &str) -> String {
     format!("<{tag}_{fence}>\n{text}\n</{tag}_{fence}>\n\n")
 }
 

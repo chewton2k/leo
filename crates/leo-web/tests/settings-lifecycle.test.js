@@ -143,6 +143,24 @@ test('the calendar card guides each provider and checks the address before savin
     return context.addCalendar();
   }).then(() => assert.equal(nodes['#calendar-error'].innerHTML, generic));
 });
+test('the morning briefing shows its time, wishes and Make one now only when on, and says when no writing AI is chosen', () => {
+  const context = { app: { addEventListener() {} }, document: { addEventListener() {} }, window: {}, ICON: new Proxy({}, { get: () => '' }), esc: text => String(text), $: () => null, segmented: () => '', settingsSwitch: (attrs, on) => `<switch ${attrs}${on ? ' checked' : ''}>`, state: {} };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/settings.js'), 'utf8'), context);
+  const off = context.calendarCard({ calendars: [] });
+  assert.ok(off.includes('<switch data-cal-briefing="on">'));
+  assert.ok(!off.includes('data-cal-briefing="at"') && !off.includes('briefing-now'));
+  const on = context.calendarCard({ calendars: [], briefing: { on: true, at: '07:30', wants: 'x'.repeat(2001) } });
+  assert.ok(on.includes('<switch data-cal-briefing="on" checked>'));
+  assert.ok(on.includes('type="time" data-cal-briefing="at" value="07:30"'));
+  assert.ok(on.includes('data-reads="2000"') && on.includes('data-read-hint role="status">Felix reads the first 2,000 characters'));
+  assert.ok(on.includes('data-action="briefing-now">Make one now'));
+  assert.ok(!on.includes('Choose a writing AI'));
+  context.state.settings = { writing: { state: 'not_chosen' } };
+  const none = context.calendarCard({ calendars: [], briefing: { on: true, at: '08:00', wants: '' } });
+  assert.ok(none.includes('Choose a writing AI in <a href="#/settings/writing">Settings → Writing AI</a> first.'));
+  assert.ok(none.includes('data-action="briefing-now" disabled'));
+});
 test('pasting into the calendar link connects it once, and typing never does', () => {
   const listeners = {};
   const nodes = {};

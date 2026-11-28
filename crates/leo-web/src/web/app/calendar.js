@@ -2066,6 +2066,44 @@ function homeTally(today) {
   return `<svg class="home-tally-marks" width="${width}" height="12" viewBox="0 0 ${width} 12" aria-hidden="true">${marks.map((m, i) => `<path${m.x ? ` transform="translate(${m.x} 0)"` : ''} d="${m.d}"${i === marks.length - 1 && ago < TICK_MS ? ` pathLength="1" class="inking" style="animation-delay: ${-Math.round(ago)}ms"` : ''}/>`).join('')}</svg>`;
 }
 
+const homeBrief = { seen: null, open: false, timer: 0 };
+const BRIEF_POLL_MS = 3000;
+const briefInked = (id) => (id === 'briefing' ? document.querySelectorAll('.home-brief-text') : []);
+
+async function loadHomeBrief() {
+  clearTimeout(homeBrief.timer);
+  if (!document.getElementById('home-brief')) return;
+  let data = null;
+  try { data = await api('/api/briefing'); } catch (e) { return; }
+  const box = document.getElementById('home-brief');
+  if (!box) return;
+  drawHomeBrief(box, data);
+  if (data?.writing) homeBrief.timer = setTimeout(loadHomeBrief, BRIEF_POLL_MS);
+}
+
+function drawHomeBrief(box, data) {
+  const text = data?.text || '';
+  const fresh = Boolean(text) && homeBrief.seen !== null && data.made_at !== homeBrief.seen;
+  homeBrief.seen = data?.made_at || '';
+  box.hidden = !text && !data?.writing;
+  if (box.hidden) { box.innerHTML = ''; return; }
+  const made = text && data.made_at ? new Date(data.made_at).toLocaleTimeString(calLocale(), { hour: 'numeric', minute: '2-digit' }) : '';
+  box.innerHTML = `<div class="source-label">Briefing${made ? `<span class="home-brief-at">${esc(made)}</span>` : ''}</div>${data.writing ? `<p class="felix-writing" role="status"><svg class="margin-drop" aria-hidden="true"><use href="#leo-mark"/></svg>Felix is writing your briefing</p>` : ''}${text ? `<div class="prose home-brief-text${homeBrief.open ? ' open' : ''}" id="home-brief-text">${md.render(text, { interactive: false })}</div><button type="button" class="btn plain sm" data-action="home-brief-more" aria-controls="home-brief-text" aria-expanded="${homeBrief.open}">${homeBrief.open ? 'Show less' : 'Show all'}</button>` : ''}`;
+  const body = box.querySelector('.home-brief-text');
+  const more = box.querySelector('[data-action="home-brief-more"]');
+  if (more) more.hidden = !homeBrief.open && body.scrollHeight <= body.clientHeight;
+  if (fresh) inkLand('briefing', true);
+  inkSettle(briefInked);
+}
+
+function toggleHomeBrief(el) {
+  homeBrief.open = !homeBrief.open;
+  const body = document.getElementById('home-brief-text');
+  body?.classList.toggle('open', homeBrief.open);
+  el.setAttribute('aria-expanded', String(homeBrief.open));
+  el.textContent = homeBrief.open ? 'Show less' : 'Show all';
+}
+
 const homeWeek = { events: null, load: 0, from: '', at: 0 };
 const HOME_WEEK_FRESH = 10 * 60000;
 

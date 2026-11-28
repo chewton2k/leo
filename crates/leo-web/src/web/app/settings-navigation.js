@@ -57,6 +57,7 @@ const SETTINGS_INDEX = [
   { section: 'calendar', id: 'calendar-connect', label: 'Connect a calendar', keywords: 'google ical ics outlook apple link secret address meetings classes' },
   { section: 'calendar', id: 'calendar-remind', label: 'Remind me', keywords: 'calendar reminder lead time minutes before notification event start' },
   { section: 'calendar', id: 'calendar-task-remind', label: 'Remind me about tasks with a time', keywords: 'calendar tasks reminder due notification' },
+  { section: 'calendar', id: 'calendar-briefing', label: 'Morning briefing', keywords: 'briefing morning daily summary felix meetings tasks today' },
   { section: 'keeping', id: 'keeping-trash', label: 'Keep the trash', keywords: 'deleted notes days retention delete' },
   { section: 'keeping', id: 'keeping-chat', label: 'Keep chats with Felix', keywords: 'conversations days retention delete' },
   { section: 'keeping', id: 'keeping-upload', label: 'Keep uploaded files', keywords: 'originals documents pdf days retention delete' },

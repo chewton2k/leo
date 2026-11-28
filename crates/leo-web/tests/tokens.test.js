@@ -82,7 +82,7 @@ test('the remapped tokens are plain hex or rgba, never color-mix, so Mermaid can
 });
 
 test('every model and kind colour on the Usage page stands out from its card in every theme', () => {
-  const names = [...Array(15)].map((_, i) => `--chart-${i + 6}`)
+  const names = [...Array(16)].map((_, i) => `--chart-${i + 6}`)
     .concat([1, 2, 3, 4, 5, 6, 7].map((n) => `--fam-openai-${n}`), [1, 2, 3, 4].map((n) => `--fam-claude-${n}`), [1, 2, 3].map((n) => `--fam-local-${n}`));
   for (const [name, rule] of Object.entries(themes)) {
     const t = tokens(rule);
@@ -217,6 +217,7 @@ test('Felix blue is one plain token per theme, readable on the page and ground, 
   const users = all.filter((r) => /var\(--felix\)/.test(r.body)).map((r) => r.selector).sort();
   assert.deepEqual(users, [
     '.chat-btn.working::after',
+    '.felix-writing',
     '.margin-ink path.pencil',
     '.margin-ink path.solid[data-id="draft"], .margin-ink path.tether[data-id="draft"]',
     '.margin-ink path.wash[data-id="draft"]',

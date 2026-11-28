@@ -1286,6 +1286,25 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   (uid `task:<id>`, start = its instant) through `AppApi::notify(Reminder {title, body, route})`
   with route `#/calendar?day=<day>`; it needs no linked calendar, ignores `offer` and fires
   while recording.
+- Morning briefing (2026-11-27, the user's call): `briefing {on, at "HH:MM" (default 08:00),
+  wants}` in calendars.json (off by default; PATCH `/api/calendar {briefing: {on?, at?, wants?}}`
+  merges per field, `at` validated, `wants` kept whole; `keep_settings` carries it). The 60 s
+  tick only decides (`briefing::tick`): due from `at` until `at`+3 h, today's leo.db
+  `briefing(day, text, tries, made_at)` row empty, under 2 tries, the second 10 min after the
+  first (`made_at` is the last try until text lands); it takes `Calendar.briefing` (the `Busy`
+  guard, also `writing` in GET), checks a writer (`Powers.briefing`, the toolless route with
+  `usage::Purpose::Briefing`; Settings' writing state `not_chosen` counts as none), claims the
+  row (other days deleted) and spawns the work: today's busy and all-day events, tasks today
+  and Earlier, `calendar::last_of` open items per series, the first 2,000 characters of `wants`,
+  each fenced with a per-call random suffix. Success stores the text and sends
+  `notify(Reminder {"Your briefing is ready", first line, "#/"})`. `GET /api/briefing` →
+  `{day, text, made_at, writing}` or 204; `POST` (Make one now) runs outside the window, resets
+  tries, 202, or 503 "Choose a writing AI in Settings → Writing AI first.". Home's `#home-brief`
+  sits above `#home-today` (`loadHomeBrief` once on mount, every 3 s only while writing;
+  `source-label` rule, `.prose` folded to 6 lines with Show all; `.felix-writing` with the
+  breathing `margin-drop`; a briefing made during the view settles from `--felix`
+  via `inkLand('briefing', true)`). Settings → Calendar: switch, time, wishes (`data-reads`),
+  Make one now.
 - Standalone tasks: `<notes>/.leo/tasks/<id>.json` (`tasks::tasks_dir`), one
   JSON line per save through `jsonline.rs` (one generic reader/writer for any
   `Line`: `DIR`, `id`, `stamp`; shared with boards and cards), written atomically; the newest `updated_at`

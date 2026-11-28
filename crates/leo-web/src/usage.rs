@@ -27,10 +27,11 @@ pub enum Purpose {
     Import,
     Pictures,
     Dictation,
+    Briefing,
 }
 
 impl Purpose {
-    pub const ALL: [Purpose; 15] = [
+    pub const ALL: [Purpose; 16] = [
         Purpose::Answer,
         Purpose::ToolContinuation,
         Purpose::Retry,
@@ -46,6 +47,7 @@ impl Purpose {
         Purpose::Import,
         Purpose::Pictures,
         Purpose::Dictation,
+        Purpose::Briefing,
     ];
 }
 
@@ -577,7 +579,7 @@ mod tests {
             match purpose {
                 Answer | ToolContinuation | Retry | StudyGrading | Summary | OtherWriting
                 | QuickReview | MarginRead | Connections | Combine | Margin | Recording
-                | Import | Pictures | Dictation => {}
+                | Import | Pictures | Dictation | Briefing => {}
             }
         }
         let page = include_str!("web/chat.js");

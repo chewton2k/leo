@@ -84,6 +84,64 @@ document.addEventListener('input', (e) => {
   showCalendarError('');
   if (e.inputType === 'insertFromPaste' && !$('[data-action="calendar-add"]')?.disabled) addCalendar().catch(fail);
 });
+const BRIEFING_READS = 2000;
+const briefingRun = { said: '' };
+
+document.addEventListener('change', async (e) => {
+  const field = e.target;
+  if (!field.matches?.('[data-cal-briefing]')) return;
+  const key = field.dataset.calBriefing;
+  const value = key === 'on' ? field.checked : field.value;
+  if (key === 'at' && !value) return;
+  try {
+    state.calendar = await api('/api/calendar', { method: 'PATCH', body: { briefing: { [key]: value } } });
+    if (key === 'on') drawSettings(state.settings);
+  } catch (error) {
+    if (key === 'on') field.checked = !field.checked;
+    fail(error);
+  }
+});
+
+function briefingSaid() {
+  return briefingRun.said === 'writing' ? '<span class="felix-writing"><svg class="margin-drop" aria-hidden="true"><use href="#leo-mark"/></svg>Felix is writing…</span>' : esc(briefingRun.said);
+}
+
+function paintBriefing() {
+  const said = $('#briefing-said');
+  if (said) said.innerHTML = briefingSaid();
+  const button = $('[data-action="briefing-now"]');
+  if (button) button.disabled = briefingRun.said === 'writing';
+}
+
+async function makeBriefing() {
+  briefingRun.said = 'writing';
+  paintBriefing();
+  try {
+    await api('/api/briefing', { method: 'POST' });
+    let data = { writing: true };
+    while (data?.writing && $('#briefing-said')) {
+      await new Promise((done) => setTimeout(done, BRIEF_POLL_MS));
+      data = await api('/api/briefing');
+    }
+    briefingRun.said = data?.writing ? '' : data?.text ? 'Ready on Home' : 'Felix could not write it. Try again in a moment.';
+  } catch (error) {
+    briefingRun.said = '';
+    throw error;
+  } finally {
+    paintBriefing();
+  }
+}
+
+function briefingRows(b) {
+  const noAi = state.settings?.writing?.state === 'not_chosen';
+  const long = Array.from(b.wants.trim()).length > BRIEFING_READS;
+  return `<label class="set-row" data-find="calendar-briefing"><span class="grow">Morning briefing<span class="set-desc">Felix writes a short briefing of your day with your writing AI. Your meetings and tasks go to it.</span></span>${settingsSwitch('data-cal-briefing="on"', b.on)}</label>
+    ${noAi ? '<p class="set-note warn">Choose a writing AI in <a href="#/settings/writing">Settings → Writing AI</a> first.</p>' : ''}
+    ${b.on ? `<label class="set-row" data-find="calendar-briefing-time"><span class="grow">Briefing time<span class="set-desc">Written then, or later that morning if leo was closed.</span></span><input class="set-input" type="time" data-cal-briefing="at" value="${esc(b.at)}" required></label>
+    <div class="set-row column" data-find="calendar-briefing-wants" data-read-field><label class="set-label" for="briefing-wants">What do you want in your briefing?</label><textarea id="briefing-wants" class="set-input" data-cal-briefing="wants" data-reads="${BRIEFING_READS}" rows="3" placeholder="For example: start with my first class, and list what is left from earlier">${esc(b.wants)}</textarea><p class="hint" data-read-hint role="status"${long ? '' : ' hidden'}>Felix reads the first ${BRIEFING_READS.toLocaleString('en')} characters of this.</p></div>
+    <div class="set-row" data-find="calendar-briefing-now"><span class="grow" id="briefing-said" role="status">${briefingSaid()}</span><button class="btn plain sm" data-action="briefing-now"${briefingRun.said === 'writing' || noAi ? ' disabled' : ''}>Make one now</button></div>` : ''}`;
+}
+
 document.addEventListener('change', async (e) => {
   const field = e.target;
   const key = field.matches?.('[data-cal-offer]') ? 'offer' : field.matches?.('[data-cal-tasks]') ? 'tasks_remind' : field.matches?.('[data-cal-lead]') ? 'lead' : '';
@@ -127,6 +185,7 @@ function calendarCard(cal) {
     ${count ? `<label class="set-row" data-find="calendar-offer"><span class="grow">Offer to record when an event starts<span class="set-desc">Ask whether to record when a connected calendar event begins.</span></span>${settingsSwitch('data-cal-offer', cal.offer !== false)}</label>` : ''}
     <div class="set-row" data-find="calendar-remind"><span class="grow">Remind me<span class="set-desc">How long before an event or a task with a time.</span></span>${segmented({ label: 'Remind me', field: 'data-cal-lead', current: cal.lead ?? 2, choices: [[0, 'At start'], [2, '2 min'], [5, '5 min'], [10, '10 min'], [15, '15 min']] })}</div>
     <label class="set-row" data-find="calendar-task-remind"><span class="grow">Remind me about tasks with a time<span class="set-desc">A notification when a task with a time is due, even with no calendar connected.</span></span>${settingsSwitch('data-cal-tasks', cal.tasks_remind !== false)}</label>
+    ${briefingRows({ on: false, at: '08:00', wants: '', ...cal.briefing })}
     ${adder}
   </section>`;
 }

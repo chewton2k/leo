@@ -1,5 +1,6 @@
 mod board_tools;
 mod boards;
+mod briefing;
 mod browse;
 pub mod calc;
 mod calendar;
@@ -202,6 +203,7 @@ pub struct Powers {
     pub writer: Option<Writer>,
     pub quick: Option<Writer>,
     pub toolless: Option<Writer>,
+    pub briefing: Option<Writer>,
     pub housekeeping: Option<Writer>,
     pub usage: Arc<usage::Usage>,
     pub chat: Option<Streamer>,

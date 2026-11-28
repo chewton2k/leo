@@ -85,6 +85,10 @@ pub(crate) fn router(state: AppState) -> Router {
         .route("/api/calendar/refresh", post(crate::calendar::refresh_now))
         .route("/api/calendar/last", get(crate::calendar::last))
         .route(
+            "/api/briefing",
+            get(crate::briefing::get).post(crate::briefing::make),
+        )
+        .route(
             "/api/calendar/{id}",
             axum::routing::delete(crate::calendar::remove),
         )

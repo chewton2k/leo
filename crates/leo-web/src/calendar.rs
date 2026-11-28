@@ -41,6 +41,7 @@ type Expansion = (String, Arc<Vec<Event>>);
 #[derive(Default)]
 pub(crate) struct Calendar {
     busy: Arc<AtomicBool>,
+    pub(crate) briefing: Arc<AtomicBool>,
     expanded: Mutex<VecDeque<Expansion>>,
     settings: Mutex<()>,
 }
@@ -54,7 +55,7 @@ struct Feed {
     problem: Option<String>,
 }
 
-fn db_for(notes: &Path) -> Arc<crate::db::Db> {
+pub(crate) fn db_for(notes: &Path) -> Arc<crate::db::Db> {
     crate::db::at(&crate::db::beside_of(notes, None).join(crate::db::FILE))
 }
 
@@ -348,6 +349,8 @@ struct Linking {
     lead: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     tasks_remind: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    briefing: Option<crate::briefing::Briefing>,
 }
 
 impl Linking {
@@ -361,7 +364,14 @@ impl Linking {
         self.offer = from.offer;
         self.lead = from.lead;
         self.tasks_remind = from.tasks_remind;
+        self.briefing = from.briefing;
     }
+}
+
+pub(crate) fn briefing_of(notes: &Path) -> crate::briefing::Briefing {
+    read::<Linking>(&settings_path(notes))
+        .briefing
+        .unwrap_or_default()
 }
 
 pub fn settings_path(notes: &Path) -> PathBuf {
@@ -591,6 +601,7 @@ fn status(notes: &Path, calendar: &Calendar, busy: bool, now: DateTime<Utc>) -> 
         "offer": linking.offer != Some(false),
         "lead": linking.lead(),
         "tasks_remind": linking.tasks_remind != Some(false),
+        "briefing": linking.briefing.unwrap_or_default(),
     })
 }
 
@@ -645,6 +656,19 @@ fn starting(
         .collect()
 }
 
+pub(crate) fn on_day(
+    task: &crate::tasks::Listed,
+    day: chrono::NaiveDate,
+) -> Option<(Option<chrono::NaiveTime>, bool)> {
+    if task.repeats() {
+        let on = crate::tasks::occurs_on(&task.rule(), &task.moved, day)?;
+        let time = task.moved.get(&on).map_or(task.time, |slot| slot.time);
+        Some((time, task.done_on.contains(&on)))
+    } else {
+        (task.date == Some(day)).then_some((task.time, task.done))
+    }
+}
+
 fn due_tasks(
     notes: &Path,
     listed: &[crate::tasks::Listed],
@@ -662,15 +686,7 @@ fn due_tasks(
     let mut out = Vec::new();
     for task in listed {
         for day in [today - Duration::days(1), today, today + Duration::days(1)] {
-            let (time, done) = if task.repeats() {
-                let Some(on) = crate::tasks::occurs_on(&task.rule(), &task.moved, day) else {
-                    continue;
-                };
-                let time = task.moved.get(&on).map_or(task.time, |slot| slot.time);
-                (time, task.done_on.contains(&on))
-            } else if task.date == Some(day) {
-                (task.time, task.done)
-            } else {
+            let Some((time, done)) = on_day(task, day) else {
                 continue;
             };
             let Some(time) = time.filter(|_| !done) else {
@@ -747,6 +763,8 @@ pub(crate) async fn offer_to_record(state: AppState) {
             }
         })
         .await;
+        let now = Utc::now();
+        crate::briefing::tick(&state, now.with_timezone(&Local).naive_local(), now).await;
     }
 }
 
@@ -759,10 +777,10 @@ fn stale(notes: &Path, now: DateTime<Utc>, minutes: i64) -> bool {
     })
 }
 
-struct Busy(Arc<AtomicBool>);
+pub(crate) struct Busy(Arc<AtomicBool>);
 
 impl Busy {
-    fn take(flag: &Arc<AtomicBool>) -> Option<Busy> {
+    pub(crate) fn take(flag: &Arc<AtomicBool>) -> Option<Busy> {
         (!flag.swap(true, Ordering::AcqRel)).then(|| Busy(Arc::clone(flag)))
     }
 }
@@ -827,29 +845,34 @@ fn open_items(body: &str) -> Vec<&str> {
         .collect()
 }
 
+pub(crate) fn last_of(
+    notes: &[leo_core::notes::Note],
+    event: &str,
+    not: Option<&str>,
+) -> Option<serde_json::Value> {
+    notes
+        .iter()
+        .filter(|n| {
+            !event.is_empty()
+                && not != Some(n.id.as_str())
+                && n.extra.get("event").and_then(|v| v.as_str()) == Some(event)
+        })
+        .max_by_key(|n| n.updated_at)
+        .map(|n| {
+            let open = open_items(&n.body);
+            serde_json::json!({
+                "id": n.id,
+                "title": n.title,
+                "updated_at": n.updated_at,
+                "open": open.iter().take(LAST_OPEN_SHOWN).collect::<Vec<_>>(),
+                "open_total": open.len(),
+            })
+        })
+}
+
 pub(crate) async fn last(State(state): State<AppState>, Query(asked): Query<Last>) -> Response {
     let found = state
-        .read_store(move |store| {
-            Ok(store
-                .notes
-                .iter()
-                .filter(|n| {
-                    !asked.event.is_empty()
-                        && asked.not.as_deref() != Some(n.id.as_str())
-                        && n.extra.get("event").and_then(|v| v.as_str()) == Some(&asked.event)
-                })
-                .max_by_key(|n| n.updated_at)
-                .map(|n| {
-                    let open = open_items(&n.body);
-                    serde_json::json!({
-                        "id": n.id,
-                        "title": n.title,
-                        "updated_at": n.updated_at,
-                        "open": open.iter().take(LAST_OPEN_SHOWN).collect::<Vec<_>>(),
-                        "open_total": open.len(),
-                    })
-                }))
-        })
+        .read_store(move |store| Ok(last_of(&store.notes, &asked.event, asked.not.as_deref())))
         .await;
     match found {
         Ok(Some(value)) => Json(value).into_response(),
@@ -1056,11 +1079,21 @@ pub(crate) struct Change {
     lead: Option<u8>,
     #[serde(default)]
     tasks_remind: Option<bool>,
+    #[serde(default)]
+    briefing: Option<crate::briefing::Change>,
 }
 
 pub(crate) async fn change(State(state): State<AppState>, Json(body): Json<Change>) -> Response {
     if body.lead.is_some_and(|lead| !LEADS.contains(&lead)) {
         return error(StatusCode::BAD_REQUEST, "Choose 0, 2, 5, 10 or 15 minutes.");
+    }
+    if body
+        .briefing
+        .as_ref()
+        .and_then(|b| b.at.as_deref())
+        .is_some_and(|at| crate::briefing::time_of(at).is_none())
+    {
+        return error(StatusCode::BAD_REQUEST, "Choose a time like 08:00.");
     }
     let notes = state.notes_dir.clone();
     let calendar = Arc::clone(&state.calendar);
@@ -1071,6 +1104,9 @@ pub(crate) async fn change(State(state): State<AppState>, Json(body): Json<Chang
         linking.offer = body.offer.or(linking.offer);
         linking.lead = body.lead.or(linking.lead);
         linking.tasks_remind = body.tasks_remind.or(linking.tasks_remind);
+        if let Some(change) = body.briefing {
+            linking.briefing = Some(linking.briefing.unwrap_or_default().changed(change));
+        }
         leo_core::recording::write_json(&settings_path(&notes), &linking)?;
         Ok(status(&notes, &calendar, busy, Utc::now()))
     })
@@ -1292,6 +1328,7 @@ pub(crate) mod tests {
             offer,
             lead: None,
             tasks_remind: None,
+            briefing: None,
         };
         leo_core::recording::write_json(&settings_path(&notes), &linking).unwrap();
         db_for(&notes)
@@ -1636,12 +1673,21 @@ pub(crate) mod tests {
     fn saving_the_calendar_list_keeps_the_reminder_choices() {
         let (_dir, notes) = linked(Some(false));
         remind(&notes, Some(5), Some(false));
+        let mut linking: Linking = read(&settings_path(&notes));
+        let briefing = crate::briefing::Briefing {
+            on: true,
+            at: "07:30".into(),
+            wants: "Weather first".into(),
+        };
+        linking.briefing = Some(briefing.clone());
+        leo_core::recording::write_json(&settings_path(&notes), &linking).unwrap();
         let mut next: Linking = Linking::default();
         next.keep_settings(read(&settings_path(&notes)));
         assert_eq!(
             (next.offer, next.lead, next.tasks_remind),
             (Some(false), Some(5), Some(false))
         );
+        assert_eq!(next.briefing, Some(briefing));
         assert_eq!(Linking::default().lead(), 2);
     }
 
@@ -1867,6 +1913,7 @@ pub(crate) mod tests {
             offer: None,
             lead: None,
             tasks_remind: None,
+            briefing: None,
         };
         leo_core::recording::write_json(&settings_path(&notes), &linking).unwrap();
         let access = Hanging {

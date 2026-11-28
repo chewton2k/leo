@@ -186,6 +186,16 @@ body.pane-resizing iframe, body.pane-resizing canvas { pointer-events: none; }
 .home-wd.past i { background: var(--faint); }
 @media (forced-colors: active) { .home-wd i { forced-color-adjust: none; background: CanvasText; } }
 .home-rule { margin: 20px 0 24px; }
+.home-brief { margin: 0 0 24px; }
+.home-brief .source-label { padding: 16px 8px 4px; }
+.home-brief-at { margin-left: 8px; font-weight: 400; color: var(--muted); }
+.home-brief-text { margin: 4px 8px 0; font-size: var(--fs-sm); line-height: 1.5; }
+.home-brief-text:not(.open) { max-height: 9em; overflow: hidden; }
+.home-brief-text > :first-child { margin-top: 0; }
+.home-brief .btn { margin: 4px 0 0; }
+.felix-writing { display: flex; align-items: center; gap: 8px; margin: 8px; font-size: var(--fs-sm); color: var(--felix); }
+.felix-writing .margin-drop { flex: none; width: 14px; height: 14px; margin: 0; color: inherit; }
+#briefing-said .felix-writing { margin: 0; }
 .home-today { margin: 0 0 24px; }
 .home-today .btn { margin: 0; }
 .home-today .tasks-group { display: flex; justify-content: space-between; margin: 16px 8px 4px; }

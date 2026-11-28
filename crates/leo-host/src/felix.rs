@@ -13,7 +13,7 @@ enum Route {
 fn route_of(purpose: leo_web::usage::Purpose) -> Route {
     use leo_web::usage::Purpose;
     match purpose {
-        Purpose::MarginRead => Route::Toolless,
+        Purpose::MarginRead | Purpose::Briefing => Route::Toolless,
         Purpose::Summary | Purpose::QuickReview => Route::Quick,
         Purpose::Answer
         | Purpose::ToolContinuation
@@ -251,14 +251,15 @@ mod route_tests {
     use leo_web::usage::Purpose;
 
     #[test]
-    fn only_a_margin_read_takes_the_toolless_path() {
+    fn only_a_margin_read_and_a_briefing_take_the_toolless_path() {
         assert_eq!(route_of(Purpose::MarginRead), Route::Toolless);
+        assert_eq!(route_of(Purpose::Briefing), Route::Toolless);
         assert_eq!(route_of(Purpose::QuickReview), Route::Quick);
         assert_eq!(route_of(Purpose::Summary), Route::Quick);
         for full in Purpose::ALL.into_iter().filter(|purpose| {
             !matches!(
                 purpose,
-                Purpose::MarginRead | Purpose::QuickReview | Purpose::Summary
+                Purpose::MarginRead | Purpose::Briefing | Purpose::QuickReview | Purpose::Summary
             )
         }) {
             assert_eq!(route_of(full), Route::Full, "{full:?}");
