@@ -651,8 +651,10 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   saved first; a failed save keeps it with Close anyway when the draft is kept). Closing the left
   pane promotes the right with its unsaved typing (`besideTake`, `replaceState`, the same session, so
   no conflict copy), as does opening `#/n/<right id>`. The hash names the left pane; Back and
-  Forward change only it; a note open in one pane is refused in the other; beside is not restored
-  after a restart. The drop boxes are fixed pseudo-elements: `main` never changes layout while a
+  Forward change only it; a note open in one pane is refused in the other; leaving for a page that
+  is not a note remembers the pair (`besideAway`) and coming back to the left note reopens the
+  right beside (`besideBack`); closing a pane by hand forgets it; beside is not restored after a
+  restart. The drop boxes are fixed pseudo-elements: `main` never changes layout while a
   note is dragged (a `position: relative` there relaid the whole note per zone change, the drag
   freeze), and `noteOver` writes body attributes only when they change. The explorer lights only the focused pane's note (`on`, pill, `aria-current`), the other is
   `open`. Split panes keep `--fold-room` on the left so heading fold chevrons are never

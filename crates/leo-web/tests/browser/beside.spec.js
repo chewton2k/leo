@@ -185,7 +185,7 @@ test('closing the left pane keeps the right note and its unsaved typing, with no
   expect(titles.filter((t) => /conflict from leo/.test(t))).toEqual([]);
 });
 
-test('the right pane × saves and returns to one note, and a page that is not a note closes the right pane', async ({ page }) => {
+test('the right pane × saves and returns to one note, and a page that is not a note saves and hides the right pane until the note comes back', async ({ page }) => {
   const [a, b] = await notes(page, 'Left.', 'Right.');
   await split(page, a, b);
   await typeIn(page, '#beside', ' saved on close');
@@ -205,7 +205,7 @@ test('the right pane × saves and returns to one note, and a page that is not a 
   expect((await (await page.request.get(`/api/notes/${b.id}`)).json()).body).toContain('kept on calendar');
   await page.goBack();
   await expect(page.locator('#app #title')).toHaveText(a.title);
-  await expect(page.locator('#beside')).toBeHidden();
+  await expect(page.locator('#beside #doc')).toContainText('kept on calendar');
 });
 
 test('Felix follows the last clicked pane, and an open chat keeps its messages', async ({ page }) => {
@@ -443,6 +443,25 @@ test('a heading’s fold chevron is whole and clickable in both panes', async ({
     await button.click();
     await expect(head).toHaveClass(/\bblk-closed\b/);
   }
+});
+
+test('a calendar, board or settings visit and back brings the same two notes back side by side', async ({ page }) => {
+  const [a, b] = await notes(page, 'Left keeps.', 'Right comes back.');
+  for (const away of ['#/calendar', '#/settings']) {
+    await split(page, a, b);
+    await page.evaluate((hash) => { location.hash = hash; }, away);
+    await expect(page.locator('body')).not.toHaveClass(/\bsplit\b/);
+    await page.goBack();
+    await expect(page.locator('#app #title')).toHaveText(a.title);
+    await expect(page.locator('#beside #title')).toHaveText(b.title);
+    await expect(page.locator('body')).toHaveClass(/\bsplit\b/);
+    await page.locator('#beside .pane-close').click();
+    await expect(page.locator('body')).not.toHaveClass(/\bsplit\b/);
+  }
+  await page.evaluate(() => { location.hash = '#/calendar'; });
+  await page.goBack();
+  await expect(page.locator('#app #title')).toHaveText(a.title);
+  await expect(page.locator('body'), 'a split closed by hand stays closed').not.toHaveClass(/\bsplit\b/);
 });
 
 test('hovering a note drag over the panes lays the page out once per zone, not on every pause', async ({ page }) => {

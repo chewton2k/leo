@@ -87,8 +87,19 @@ async function besideShut() {
   return true;
 }
 
-function besideLeave(hash) {
-  return NOTE_PAGE.test(hash || '') ? true : besideShut();
+let besideAway = null;
+async function besideLeave(hash) {
+  if (NOTE_PAGE.test(hash || '')) return true;
+  const away = panes[0].s?.note.id && besidePane.s?.note.id ? { left: panes[0].s.note.id, right: besidePane.s.note.id } : null;
+  const closed = await besideShut();
+  if (closed) besideAway = away;
+  return closed;
+}
+
+function besideBack(id) {
+  const away = besideAway;
+  besideAway = null;
+  if (away && away.left === id && !split() && panes[0].s?.note.id === id) besideOpen(away.right).catch(fail);
 }
 
 function besideTake(id) {
