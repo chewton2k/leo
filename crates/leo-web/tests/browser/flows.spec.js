@@ -7160,10 +7160,11 @@ test.describe('round 2 redesign', () => {
     const title = `Peek then new ${tagOf()}`;
     expect((await page.request.post('/api/tasks', { data: { title } })).ok()).toBe(true);
     await page.goto('/#/calendar');
-    await page.locator('.cal-tray-row .cal-open', { hasText: title }).click();
+    await page.locator('.cal-tray-row .cal-open', { hasText: title }).first().click();
     await expect(page.locator('#cal-side .cal-peek-title')).toBeVisible();
     const grid = await page.locator('#cal-scroll').boundingBox();
-    await page.mouse.click(grid.x + grid.width - 40, grid.y + grid.height / 2);
+    const empty = await page.locator('#cal-scroll .cal-col:not(:has(.cal-item)):not(:has(.cal-now))').first().boundingBox();
+    await page.mouse.click(empty.x + empty.width / 2, grid.y + grid.height / 2);
     await expect(page.locator('.cal-compose')).toBeVisible();
     await expect(page.locator('#cal-side .cal-peek-title'), 'the peek is gone while the new task is typed').toHaveCount(0);
     await expect(page.locator('#cal-side .cal-mini')).toBeVisible();
