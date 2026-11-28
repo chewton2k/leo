@@ -222,7 +222,7 @@ button.choice-pick:focus-visible,
   .set-card .choice-cards.providers .choice-pick { padding: 10px 6px 11px; }
   .choice-cards.providers .choice-title { padding: 0 3px; font-size: var(--fs-sm); white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: normal; word-break: normal; hyphens: none; line-height: 1.25; }
 }
-.choice-ring { position: absolute; z-index: 1; top: 0; bottom: 0; left: 0; width: calc((100% - (var(--count) - 1) * var(--gap)) / var(--count)); border-radius: var(--r-tile); box-shadow: 0 0 0 1.5px var(--text); pointer-events: none; transform: translateX(calc((100% + var(--gap)) * var(--at))); transition: transform var(--t-drawer) var(--ease-move); }
+.choice-ring { position: absolute; z-index: 1; grid-area: 1 / 1 / 2 / 2; inset: 0; border-radius: var(--r-tile); box-shadow: 0 0 0 1.5px var(--text); pointer-events: none; transform: translateX(calc((100% + var(--gap)) * var(--at))); transition: transform var(--t-drawer) var(--ease-move); }
 .choice-pick:where(button) { margin: 0; border: 0; font: inherit; text-align: left; color: inherit; }
 button.choice-pick .felix { cursor: inherit; }
 .appearance .set-row.column { gap: 10px; }

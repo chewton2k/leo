@@ -185,7 +185,7 @@ test('closing the left pane keeps the right note and its unsaved typing, with no
   expect(titles.filter((t) => /conflict from leo/.test(t))).toEqual([]);
 });
 
-test('the right pane × saves and returns to one note, and a page that is not a note closes the right pane', async ({ page }) => {
+test('the right pane × saves and returns to one note, and a page that is not a note saves and hides the right pane until the note comes back', async ({ page }) => {
   const [a, b] = await notes(page, 'Left.', 'Right.');
   await split(page, a, b);
   await typeIn(page, '#beside', ' saved on close');
@@ -205,7 +205,7 @@ test('the right pane × saves and returns to one note, and a page that is not a 
   expect((await (await page.request.get(`/api/notes/${b.id}`)).json()).body).toContain('kept on calendar');
   await page.goBack();
   await expect(page.locator('#app #title')).toHaveText(a.title);
-  await expect(page.locator('#beside')).toBeHidden();
+  await expect(page.locator('#beside #doc')).toContainText('kept on calendar');
 });
 
 test('Felix follows the last clicked pane, and an open chat keeps its messages', async ({ page }) => {
@@ -406,12 +406,96 @@ test('a wide window with a 1000px left pane and margin on the right shows cards 
   }
 });
 
-test('the explorer marks both open notes', async ({ page }) => {
+test('the explorer lights only the focused pane’s note and marks the other open, in both orders', async ({ page }) => {
   const [a, b, c] = await notes(page, 'One.', 'Two.', 'Three.');
   await split(page, a, b);
-  await expect(page.locator(`#side .side-note[data-id="${a.id}"]`)).toHaveAttribute('aria-current', 'page');
-  await expect(page.locator(`#side .side-note[data-id="${b.id}"]`)).toHaveAttribute('aria-current', 'page');
-  await expect(page.locator(`#side .side-note[data-id="${c.id}"]`)).not.toHaveAttribute('aria-current', /.*/);
+  const row = (note) => page.locator(`#side .side-note[data-id="${note.id}"]`);
+  const lit = async (on, open) => {
+    await expect(row(on)).toHaveAttribute('aria-current', 'page');
+    await expect(row(on)).toHaveClass(/\bon\b/);
+    await expect(row(on).locator('.side-pill')).toHaveCount(1);
+    await expect(row(open)).not.toHaveAttribute('aria-current', /.*/);
+    await expect(row(open)).toHaveClass(/\bopen\b/);
+    await expect(row(open).locator('.side-pill')).toHaveCount(0);
+    await expect(row(c)).not.toHaveClass(/\b(on|open)\b/);
+    await expect(page.locator('#side .side-tree .side-pill')).toHaveCount(1);
+  };
+  await lit(b, a);
+  await page.locator('#app #doc .blk').first().click();
+  await lit(a, b);
+  await page.locator('#beside #doc .blk').first().click();
+  await lit(b, a);
+});
+
+test('a heading’s fold chevron is whole and clickable in both panes', async ({ page }) => {
+  const [a, b] = await notes(page, '# Left head\n\nLeft words.', '# Right head\n\nRight words.');
+  await split(page, a, b);
+  for (const pane of ['#app', '#beside']) {
+    const head = page.locator(`${pane} #doc .blk-fold`).first();
+    await head.hover();
+    const button = head.locator('.fold-btn');
+    const box = await button.boundingBox();
+    const clip = await page.locator(pane).evaluate((el) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right }; });
+    expect(box.x, `${pane} chevron starts inside its pane`).toBeGreaterThanOrEqual(clip.left);
+    expect(box.x + box.width).toBeLessThanOrEqual(clip.right);
+    const hit = await page.evaluate(([x, y]) => Boolean(document.elementFromPoint(x, y)?.closest('.fold-btn')), [box.x + box.width / 2, box.y + box.height / 2]);
+    expect(hit, `${pane} chevron is the element under the pointer`).toBe(true);
+    await button.click();
+    await expect(head).toHaveClass(/\bblk-closed\b/);
+  }
+});
+
+test('a calendar, board or settings visit and back brings the same two notes back side by side', async ({ page }) => {
+  const [a, b] = await notes(page, 'Left keeps.', 'Right comes back.');
+  for (const away of ['#/calendar', '#/settings']) {
+    await split(page, a, b);
+    await page.evaluate((hash) => { location.hash = hash; }, away);
+    await expect(page.locator('body')).not.toHaveClass(/\bsplit\b/);
+    await page.goBack();
+    await expect(page.locator('#app #title')).toHaveText(a.title);
+    await expect(page.locator('#beside #title')).toHaveText(b.title);
+    await expect(page.locator('body')).toHaveClass(/\bsplit\b/);
+    await page.locator('#beside .pane-close').click();
+    await expect(page.locator('body')).not.toHaveClass(/\bsplit\b/);
+  }
+  const row = (note) => page.locator(`#side .side-note[data-id="${note.id}"]`);
+  await split(page, a, b);
+  await page.locator('#app #doc .blk').first().click();
+  await expect(row(a)).toHaveAttribute('aria-current', 'page');
+  await page.evaluate(() => { location.hash = '#/calendar'; });
+  await page.goBack();
+  await expect(page.locator('#beside #title')).toHaveText(b.title);
+  await expect(row(a), 'the left pane keeps focus when the pair comes back').toHaveAttribute('aria-current', 'page');
+  await expect(row(b)).toHaveClass(/\bopen\b/);
+  await page.locator('#beside .pane-close').click();
+  await expect(page.locator('body')).not.toHaveClass(/\bsplit\b/);
+  await page.evaluate(() => { location.hash = '#/calendar'; });
+  await page.goBack();
+  await expect(page.locator('#app #title')).toHaveText(a.title);
+  await expect(page.locator('body'), 'a split closed by hand stays closed').not.toHaveClass(/\bsplit\b/);
+});
+
+test('hovering a note drag over the panes lays the page out once per zone, not on every pause', async ({ page }) => {
+  const [a, b] = await notes(page, 'One.', 'Two.');
+  await open(page, a);
+  const rules = await page.evaluate((id) => {
+    const t = new DataTransfer();
+    document.querySelector(`#side .side-note[data-id="${id}"]`).dispatchEvent(new DragEvent('dragstart', { dataTransfer: t, bubbles: true, cancelable: true }));
+    const at = { dataTransfer: t, clientX: innerWidth - 300, clientY: 400, bubbles: true, cancelable: true };
+    const doc = document.querySelector('#app #doc');
+    doc.dispatchEvent(new DragEvent('dragover', at));
+    const main = getComputedStyle(document.querySelector('main')).position;
+    const writes = [];
+    new MutationObserver((m) => writes.push(...m.map((r) => r.attributeName))).observe(document.body, { attributes: true });
+    for (let i = 0; i < 20; i++) doc.dispatchEvent(new DragEvent('dragover', at));
+    return new Promise((done) => setTimeout(() => {
+      const seen = [...writes];
+      document.dispatchEvent(new DragEvent('dragend', { bubbles: true }));
+      done({ main, writes: seen });
+    }, 0));
+  }, b.id);
+  expect(rules.main, 'the drop boxes are fixed, so main keeps its layout').toBe('static');
+  expect(rules.writes, 'steady hovering writes nothing to the body').toEqual([]);
 });
 
 test('a right pane reloaded by Felix while focused stays the focused pane', async ({ page }) => {

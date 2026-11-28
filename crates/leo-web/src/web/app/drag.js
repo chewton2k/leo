@@ -102,8 +102,8 @@ function noteOver(over) {
     body.style.removeProperty('--drop-x');
     return;
   }
-  body.dataset.noteDrop = over.zone;
-  body.style.setProperty('--drop-x', `${over.mid}px`);
+  if (body.dataset.noteDrop !== over.zone) body.dataset.noteDrop = over.zone;
+  if (body.style.getPropertyValue('--drop-x') !== `${over.mid}px`) body.style.setProperty('--drop-x', `${over.mid}px`);
   dragging.zoneTimer = setTimeout(() => noteOver(null), 160);
 }
 

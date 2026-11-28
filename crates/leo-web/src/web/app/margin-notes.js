@@ -1278,7 +1278,8 @@ function marginPlaceAsMarks(boxes, page, origin, slots) {
       marginRedraw();
     });
   }
-  for (const { t, rects } of boxes) {
+  let source = null;
+  for (const { t, at, rects } of boxes) {
     const mark = marginMark(t);
     const replies = marginReplies(t);
     mark.toggleAttribute('data-more', replies > 0);
@@ -1291,7 +1292,8 @@ function marginPlaceAsMarks(boxes, page, origin, slots) {
     const end = marginPassageEnd(t, rects, origin);
     const room = page.right - origin.left;
     const inline = slot?.height && slot.right <= page.right;
-    let aside = t.id !== 'reading' && !inline;
+    const typing = !slot && at && marginPage.s.doc.blockAt(at.to)?.querySelector('.line-edit') && !(source ??= marginPage.s.doc.source()).slice(at.to, (source.indexOf('\n', at.to) + 1 || source.length + 1) - 1).trim();
+    let aside = t.id !== 'reading' && !inline && !typing;
     mark.toggleAttribute('data-aside', aside);
     let size = mark.offsetWidth;
     let x, y;

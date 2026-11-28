@@ -46,6 +46,7 @@ function usePane(p) {
   if (p.s && was !== p.s && state.view === 'note') noteContext(p.s.note);
   for (const q of panes) q.el.classList.toggle('pane-on', split() && q === p);
   document.body.classList.toggle('beside-on', p === besidePane);
+  if (was !== state.session) drawSide();
 }
 
 for (const p of panes) for (const type of ['pointerdown', 'focusin']) p.el.addEventListener(type, () => { if (split()) usePane(p); }, true);
@@ -65,9 +66,10 @@ function besideClose() {
   besideGrip.hidden = true;
   document.body.classList.remove('split', 'beside-on');
   app.classList.remove('pane-on');
+  const was = state.session;
   if (marginPage === besidePane.margin || state.session === s) usePane(panes[0]);
   pageBarLater();
-  drawSide();
+  if (state.session === was) drawSide();
   window.dispatchEvent(new Event('resize'));
 }
 
@@ -86,8 +88,20 @@ async function besideShut() {
   return true;
 }
 
-function besideLeave(hash) {
-  return NOTE_PAGE.test(hash || '') ? true : besideShut();
+let besideAway = null;
+async function besideLeave(hash) {
+  if (NOTE_PAGE.test(hash || '')) return true;
+  const away = panes[0].s?.note.id && besidePane.s?.note.id ? { left: panes[0].s.note.id, right: besidePane.s.note.id, onRight: state.session === besidePane.s } : null;
+  const closed = await besideShut();
+  if (closed) besideAway = away;
+  return closed;
+}
+
+function besideBack(id) {
+  const away = besideAway;
+  besideAway = null;
+  if (!away || away.left !== id || split() || panes[0].s?.note.id !== id || !besideRoomy()) return;
+  besideOpen(away.right).then(() => { if (split() && !away.onRight) usePane(panes[0]); }, () => {});
 }
 
 function besideTake(id) {
@@ -133,9 +147,10 @@ async function besideOpen(id, into = besidePane) {
     throw error;
   }
   if (!besidePane.s) return;
+  const was = state.session;
   usePane(besidePane);
   pageBarLater();
-  drawSide();
+  if (state.session === was) drawSide();
 }
 
 function besideRoomy() {

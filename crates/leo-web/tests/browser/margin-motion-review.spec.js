@@ -1850,3 +1850,38 @@ test.describe('marks around formulas', () => {
     }, { layout: 'marks', source: text, threads: [thread] });
   });
 });
+
+test.describe('a passage mark at the end of a bullet', () => {
+  const lines = ['Update the resume with the new job', 'add katie in my portfolio world'];
+  const source = `Plans for the week.\n\n${lines.map((l) => `- ${l}`).join('\n')}\n\nClosing line.`;
+  const threads = lines.map((quote, i) => ({ id: `t${i + 1}`, quote, prefix: '- ', suffix: '\n', status: 'open', messages: [{ from: 'felix', text: `Note ${i + 1}.` }, { from: 'you', text: 'Why?' }, { from: 'felix', text: 'Because.' }] }));
+  for (const replies of [0, 2]) {
+    test(`a passage mark stays at its words while its own line is edited, with ${replies} replies`, async ({ browser }) => {
+      const long = 'reflect upon your actions and thoughts each evening before bed so that you can learn from the day and plan the next one well';
+      const body = `Plans for the week.\n\n- ${long}\n- ${lines[1]}\n\nClosing line.`;
+      const talk = Array.from({ length: replies }, (_, i) => ({ from: i % 2 ? 'felix' : 'you', text: 'More.' }));
+      const ones = [{ ...threads[0], quote: long, messages: [{ from: 'felix', text: 'Note 1.' }, ...talk] }, { ...threads[1], messages: [{ from: 'felix', text: 'Note 2.' }] }];
+      await fixture(browser, async (page) => {
+        const mark = page.locator('.margin-mark[data-id="t1"]');
+        await expect.poll(() => page.locator('.margin-slot').count()).toBe(2);
+        await page.waitForTimeout(200);
+        expect(await mark.evaluate((el) => el.hasAttribute('data-aside'))).toBe(false);
+        await mark.click();
+        await expect(page.locator('.margin-note[data-id="t1"]')).toBeVisible();
+        await page.locator('#doc .blk', { hasText: 'reflect upon' }).click({ position: { x: 60, y: 10 } });
+        await expect(page.locator('#doc .line-edit')).toBeFocused();
+        await page.waitForTimeout(700);
+        const got = await page.evaluate(() => {
+          const box = document.querySelector('.margin-mark[data-id="t1"]').getBoundingClientRect();
+          const edit = document.querySelector('#doc .line-edit').getBoundingClientRect();
+          return { aside: document.querySelector('.margin-mark[data-id="t1"]').hasAttribute('data-aside'), beside: box.left - edit.right, top: box.top - edit.top, bottom: edit.bottom - box.bottom };
+        });
+        if (process.env.SHOTS) await page.screenshot({ path: path.join(process.env.SHOTS, `inline-mark-editing-${replies}-${test.info().project.name}.png`), clip: { x: 300, y: 60, width: 900, height: 220 } });
+        expect(got.aside).toBe(false);
+        expect(got.top).toBeGreaterThan(-4);
+        expect(got.bottom).toBeGreaterThan(-4);
+        expect(got.beside).toBeLessThan(40);
+      }, { layout: 'marks', source: body, threads: ones });
+    });
+  }
+});

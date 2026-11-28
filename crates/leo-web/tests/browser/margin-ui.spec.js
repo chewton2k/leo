@@ -323,6 +323,20 @@ test('the Felix bar opens in the margin beside a selection when there is room, a
   expect((await menu.boundingBox()).x).toBeLessThan(word.x + 400);
 });
 
+test('the Felix bar stays when the explorer scrolls and goes when the note scrolls', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Bar scroll', body: 'Intro line\n\nHeat flows from the hot side to the cold side.' } })).json();
+  const menu = page.getByRole('toolbar', { name: 'Felix and this passage' });
+  await page.goto(`/#/n/${note.id}`);
+  await expect(page.locator('#doc')).toBeVisible();
+  expect(await pickText(page, 'the hot side')).toBe(true);
+  await expect(menu).toBeVisible();
+  await page.locator('#side .side-tree').dispatchEvent('scroll');
+  await expect(menu).toBeVisible();
+  await page.evaluate(() => document.dispatchEvent(new Event('scroll')));
+  await expect(menu).toBeHidden();
+});
+
 test('Ask Felix opens a question box beside the passage, keeps a half-typed question and asks only when sent', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 });
   const note = await (await page.request.post('/api/notes', { data: { title: 'Ask first', body: 'Intro line\n\nHeat flows from the hot side to the cold side.\n\nLast line' } })).json();
@@ -981,4 +995,19 @@ test('a long selection stays in the margin and the Felix bar says what he reads'
   await expect(page.locator('.margin-note[data-id="t1"] .margin-felix')).toHaveText('Heat flows from hot to cold.');
   expect(asked).toHaveLength(1);
   expect(asked[0]).toMatchObject({ quote: long.trim(), question: 'Which way does heat flow?' });
+});
+
+test('every choice ring is the size of its selected card', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  for (const at of ['/#/settings/appearance', '/#/settings/felix', '/#/settings/writing', '/#/record']) {
+    await page.goto(at);
+    await expect(page.locator('.choice-cards').first()).toBeVisible();
+    await quiet(page);
+    const off = await page.evaluate(() => [...document.querySelectorAll('.choice-cards')].filter((box) => box.offsetParent && box.querySelector('.choice-pick.on')).flatMap((box) => {
+      const ring = box.querySelector('.choice-ring').getBoundingClientRect();
+      const card = box.querySelector('.choice-pick.on').getBoundingClientRect();
+      return ['top', 'bottom', 'left', 'right'].filter((side) => Math.abs(ring[side] - card[side]) > 1).map((side) => `${box.getAttribute('aria-label')} ${side} ${Math.round(ring[side] - card[side])}px`);
+    }));
+    expect(off, at).toEqual([]);
+  }
 });

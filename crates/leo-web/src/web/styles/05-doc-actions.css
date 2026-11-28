@@ -262,7 +262,8 @@ label.trash-row { cursor: pointer; }
 }
 .blk-folded { display: none; }
 .blk-fold :is(h1, h2, h3, h4, h5, h6) { position: relative; }
-.fold-btn { position: absolute; left: -26px; top: calc(50% + var(--lead, 0px) / 2); width: 20px; height: 20px; margin-top: -10px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--r-xs); background: none; color: var(--faint); cursor: pointer; opacity: 0; transition: opacity var(--t-follow) var(--ease-move); }
+:root { --fold-room: 26px; }
+.fold-btn { position: absolute; left: calc(-1 * var(--fold-room)); top: calc(50% + var(--lead, 0px) / 2); width: 20px; height: 20px; margin-top: -10px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--r-xs); background: none; color: var(--faint); cursor: pointer; opacity: 0; transition: opacity var(--t-follow) var(--ease-move); }
 .blk-fold:hover .fold-btn, .fold-btn:focus-visible, .blk-closed .fold-btn { opacity: 1; }
 .fold-btn:hover { color: var(--text); }
 .fold-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transform: rotate(90deg); transition: transform var(--t-follow) var(--ease-move); }

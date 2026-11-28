@@ -1458,7 +1458,12 @@
       stop();
       const target = line + done.line;
       const index = blockAtLine(target);
-      if (index >= 0) edit(index, lineStart(target) - lineStart(blocks[index].start) + done.caret);
+      if (index < 0) return;
+      edit(index, lineStart(target) - lineStart(blocks[index].start) + done.caret);
+      if (!editing) return;
+      editing.initialHeight = null;
+      editing.area.closest('.blk').style.minHeight = '';
+      fit(editing.area);
     }
 
     function onInput(e) {
@@ -2305,9 +2310,17 @@
         }
         const closed = folded.has(head.key);
         const range = closed ? ranges.find((x) => x.owner === i) : null;
-        const lineCount = range ? lines.slice(range.from, range.to).filter((line) => line.trim()).length : 0;
+        const inside = range ? lines.slice(range.from, range.to).filter((line) => line.trim()) : [];
+        let fenced = false;
+        const tasks = inside.filter((line) => {
+          if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+          else if (!fenced) return ed.isBox(line);
+          return false;
+        });
+        const done = tasks.filter((line) => /^\S+ {1,4}\[[xX]\]/.test(line.trimStart())).length;
+        const lineCount = inside.length - tasks.length;
         const notes = range ? foldNotes.get(blocks[i].start) || 0 : 0;
-        const said = range ? [lineCount ? `${lineCount} ${lineCount === 1 ? 'line' : 'lines'}` : '', notes ? `${notes} margin ${notes === 1 ? 'note' : 'notes'}` : ''].filter(Boolean).join(' · ') : '';
+        const said = range ? [lineCount ? `${lineCount} ${lineCount === 1 ? 'line' : 'lines'}` : '', tasks.length ? `${done} of ${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'} done` : '', notes ? `${notes} margin ${notes === 1 ? 'note' : 'notes'}` : ''].filter(Boolean).join(' · ') : '';
         const sign = `${closed}|${said}|${head.text}`;
         if (r.fold === sign) return;
         const h = el.querySelector('h1, h2, h3, h4, h5, h6');
@@ -2339,24 +2352,38 @@
       const moved = moves.filter((m) => m.move && m.el.animate);
       const still = !moved.length || (window.leoMotion && window.leoMotion.stillMotion && window.leoMotion.stillMotion());
       const ease = still ? '' : getComputedStyle(document.documentElement).getPropertyValue('--ease-move').trim() || 'ease';
-      const leaving = still ? [] : moved.filter((m) => m.hide).map(({ el }) => ({ el, height: el.offsetHeight }));
-      for (const { el, height } of leaving) {
+      const leaving = still ? [] : moved.filter((m) => m.hide).map(({ el }) => {
+        const height = el.getBoundingClientRect().height;
         const clone = el.cloneNode(true);
-        clone.classList.remove('blk-folded', 'blk');
+        clone.classList.remove('blk-folded', 'margin-room');
         clone.classList.add('blk-leaving');
         clone.removeAttribute('data-start');
         clone.removeAttribute('data-i');
         clone.setAttribute('aria-hidden', 'true');
-        el.before(clone);
-        clone.animate([{ height: `${height}px`, opacity: 1 }, { height: '0px', opacity: 0 }], { duration: FOLD_MS, easing: ease }).finished.finally(() => clone.remove());
-      }
+        return { el: clone, height, at: el };
+      });
+      for (const { el, at } of leaving) at.before(el);
       for (const { el, hide } of moves) el.classList.toggle('blk-folded', hide);
+      curtain(leaving, ease, true);
       const arriving = still ? [] : moved.filter((m) => !m.hide).map(({ el }) => el);
       if (!arriving.length) return;
-      requestAnimationFrame(() => {
-        const heights = arriving.map((el) => el.offsetHeight);
-        arriving.forEach((el, k) => el.animate([{ height: '0px', opacity: 0, overflow: 'hidden' }, { height: `${heights[k]}px`, opacity: 1, overflow: 'hidden' }], { duration: FOLD_MS, easing: ease }));
-      });
+      requestAnimationFrame(() => curtain(arriving.map((el) => ({ el, height: el.getBoundingClientRect().height })), ease, false));
+    }
+
+    function curtain(parts, ease, closing) {
+      const total = parts.reduce((sum, { height }) => sum + height, 0) || 1;
+      let above = 0;
+      for (const { el, height } of parts) {
+        const from = above / total;
+        const to = (above + height) / total;
+        above += height;
+        const open = { height: `${height}px`, minHeight: '0px', opacity: 1, overflow: 'visible' };
+        const shut = { height: '0px', minHeight: '0px', opacity: 0, overflow: 'hidden' };
+        const held = { ...open, overflow: 'hidden' };
+        const frames = closing ? [{ ...open, offset: 0 }, { ...held, offset: 1 - to }, { ...shut, offset: 1 - from }, { ...shut, offset: 1 }] : [{ ...shut, offset: 0 }, { ...shut, offset: from }, { ...held, offset: to }, { ...open, offset: 1 }];
+        const run = el.animate(frames, { duration: FOLD_MS, easing: ease });
+        if (closing) run.finished.finally(() => el.remove());
+      }
     }
 
     function unfoldAt(i) {

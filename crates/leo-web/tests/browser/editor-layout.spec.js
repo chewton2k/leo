@@ -15,7 +15,7 @@ async function editorFixture(browser, run, { remember = false, body = null, touc
   const source = body ?? (remember ? Array.from({ length: 160 }, (_, i) => `Paragraph number ${i + 1} about reading.`).join('\n\n') : 'An ordinary paragraph.');
   const fixture = `window.doc = leoDoc.mount(document.querySelector('#doc'), {
     source: new URLSearchParams(location.search).get('body') ?? ${JSON.stringify(source)}, onChange() {},
-    dir: new URLSearchParams(location.search).get('dir') ?? '', onPictures: new URLSearchParams(location.search).has('pics') ? files => (window.pictured ??= []).push(files.length) : null, outline: document.querySelector('.note-outline'), noteTools: new URLSearchParams(location.search).has('tools')
+    dir: new URLSearchParams(location.search).get('dir') ?? '', onPictures: new URLSearchParams(location.search).has('pics') ? files => (window.pictured ??= []).push(files.length) : null, outline: document.querySelector('.note-outline'), noteTools: new URLSearchParams(location.search).has('tools'), foldKey: new URLSearchParams(location.search).get('fold') ?? ''
   });
   window.audit = { pick: width => leoTheme.setNoteWidth(width), anchor: () => JSON.parse(localStorage.getItem('fixture-reading') || 'null') };
   ${related ? `const hideAskFloat = () => {};
@@ -457,6 +457,68 @@ test('a picture inserted into a checkbox or bullet stays in the item, and Enter,
   });
 });
 
+test('folding a heading hides every block type under it and unfolding restores each one exactly', async ({ browser }) => {
+  const under = ['Plain text', '- [ ] Open task\n- [x] Done task', '- Bullet\n  - Nested bullet', '1. First\n2. Second', '> A quote\n> More', '> [!note] A callout\n> Body', '```js\nconst a = 1;\n```', '| A | B |\n| --- | --- |\n| 1 | 2 |', '---', '$$\nx = 2\n$$', '#### Deeper heading\n\n- [ ] Deeper task'];
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    for (const level of ['##', '###']) {
+      for (const sample of under) {
+        await page.goto(url + '/?tools&fold=f&body=' + encodeURIComponent(`${level} Folded\n\n${sample}\n\n${level} Next\n\nAfter`));
+        const blocks = page.locator('#doc > .blk');
+        const shape = () => page.evaluate(() => [...document.querySelectorAll('#doc > .blk')].map(b => [b.textContent, Math.round(b.getBoundingClientRect().height)]));
+        const before = await shape();
+        const head = blocks.first();
+        await head.hover();
+        await head.locator('.fold-btn').click();
+        await expect(head).toHaveClass(/blk-closed/);
+        await expect(page.locator('#doc .blk-leaving')).toHaveCount(0);
+        const folded = await page.evaluate(() => {
+          const first = document.querySelector('#doc > .blk').getBoundingClientRect();
+          const next = [...document.querySelectorAll('#doc :is(h1, h2, h3, h4, h5, h6)')].find(h => h.textContent.includes('Next')).getBoundingClientRect();
+          const leaks = [...document.querySelectorAll('#doc *')].filter(el => el.closest('.blk-folded') && el.getClientRects().length > 0).length;
+          const stray = [...document.querySelectorAll('#doc > .blk:not(.blk-folded)')].map(b => b.textContent.replace(/\u200b/g, '')).filter(Boolean);
+          return { gap: next.top - first.bottom, leaks, stray };
+        });
+        expect(folded.leaks, sample).toBe(0);
+        expect(folded.stray, sample).toEqual([expect.stringContaining('Folded'), 'Next', 'After']);
+        expect(folded.gap, sample).toBeLessThan(48);
+        await head.locator('.fold-btn').click();
+        await expect(head).not.toHaveClass(/blk-closed/);
+        await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0);
+        expect(await shape(), sample).toEqual(before);
+      }
+    }
+  });
+});
+
+test('a folding section of tasks moves as one curtain: styled rows, never two clipped at once', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    await page.goto(url + '/?tools&fold=f&body=' + encodeURIComponent('### Folded\n\n- [ ] Open task\n- [x] Done task\n- [ ] Third task\n\n### Next\n\nAfter'));
+    const head = page.locator('#doc > .blk').first();
+    await head.hover();
+    for (const phase of ['fold', 'unfold']) {
+      await head.locator('.fold-btn').click();
+      await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+      await page.evaluate(() => document.getAnimations().forEach(a => a.pause()));
+      for (let t = 0; t <= 160; t += 10) {
+        const rows = await page.evaluate(t => {
+          document.getAnimations().forEach(a => { a.currentTime = t; });
+          return [...document.querySelectorAll('#doc .task-item')].filter(li => li.getClientRects().length).map(li => {
+            const blk = li.closest('.blk-line');
+            const high = blk.getBoundingClientRect().height;
+            return { styled: blk.classList.contains('blk'), clipped: high > 0.5 && high + 0.5 < li.getBoundingClientRect().height };
+          });
+        }, t);
+        expect(rows.every(r => r.styled), `${phase} at ${t}ms`).toBe(true);
+        expect(rows.filter(r => r.clipped).length, `${phase} at ${t}ms`).toBeLessThanOrEqual(1);
+      }
+      await page.evaluate(() => document.getAnimations().forEach(a => a.play()));
+      await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0);
+    }
+  });
+});
+
 test('a fold chevron sits level with its heading text, first heading or not', async ({ browser }) => {
   await editorFixture(browser, async (context, url) => {
     const page = await context.newPage();
@@ -472,6 +534,55 @@ test('a fold chevron sits level with its heading text, first heading or not', as
     }));
     expect(off).toHaveLength(2);
     for (const gap of off) expect(gap).toBeLessThan(2);
+  });
+});
+
+test('every slash heading below other text shows its whole line and caret, like typing the marks', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    for (const [query, mark] of [['head', '# '], ['sub', '## '], ['small', '### ']]) {
+      for (const how of ['slash', 'typed']) {
+        await page.goto(url + '/?body=' + encodeURIComponent('First paragraph'));
+        await page.locator('#doc .blk').first().click();
+        await page.keyboard.press('End');
+        await page.keyboard.press('Enter');
+        if (how === 'slash') { await page.keyboard.type('/' + query); await page.keyboard.press('Enter'); }
+        else await page.keyboard.type(mark);
+        const editor = page.locator('#doc textarea');
+        await expect(editor).toBeFocused();
+        await expect(editor).toHaveValue(mark);
+        const box = await editor.evaluate(el => ({ clipped: el.scrollHeight - el.clientHeight, height: el.clientHeight, line: parseFloat(getComputedStyle(el).lineHeight), caret: el.selectionStart }));
+        expect(box.clipped, how + ' ' + mark).toBeLessThanOrEqual(1);
+        expect(box.height, how + ' ' + mark).toBeGreaterThanOrEqual(box.line);
+        expect(box.caret).toBe(mark.length);
+        await page.keyboard.type('Title');
+        expect(await page.evaluate(() => window.doc.source())).toBe('First paragraph\n' + mark + 'Title');
+      }
+    }
+  });
+});
+
+test('a folded heading counts its tasks apart from its lines and keeps the count when a task changes', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    await page.goto(url + '/?body=' + encodeURIComponent('## Tasks\n\n- [ ] Milk\n- [x] Eggs\n- [ ] Bread\n\nSome text\n\n### Sub\n\n- [ ] Deep\n\n## Only tasks\n\n- [x] Done\n\n## Plain\n\nWords\n\n## Tricky\n\n- [ ] compare [x] and [y]\n\n```\n- [x] in code\n```\n\n## Open\n\n- [ ] Later'));
+    const heads = page.locator('#doc :is(h2, h3)');
+    for (const name of ['Tasks', 'Only tasks', 'Plain', 'Tricky']) {
+      await heads.filter({ hasText: new RegExp('^' + name + '$') }).locator('.fold-btn').click({ force: true });
+      await expect(page.locator('#doc .blk-leaving')).toHaveCount(0);
+    }
+    await expect(heads.filter({ hasText: /^Tasks$/ })).toHaveAttribute('data-fold-said', '2 lines · 1 of 4 tasks done');
+    await expect(heads.filter({ hasText: /^Only tasks$/ })).toHaveAttribute('data-fold-said', '1 of 1 task done');
+    await expect(heads.filter({ hasText: 'Plain' })).toHaveAttribute('data-fold-said', '1 line');
+    await expect(heads.filter({ hasText: /^Tricky$/ })).toHaveAttribute('data-fold-said', '3 lines · 0 of 1 task done');
+    await expect(page.locator('#doc .blk-folded .task')).toHaveCount(6);
+    await page.locator('#doc .task input[type=checkbox]').last().click();
+    await expect.poll(() => page.evaluate(() => window.doc.source().endsWith('- [x] Later'))).toBe(true);
+    await expect(heads.filter({ hasText: /^Tasks$/ })).toHaveAttribute('data-fold-said', '2 lines · 1 of 4 tasks done');
+    await expect(page.locator('#doc .blk-folded .task')).toHaveCount(6);
+    await heads.filter({ hasText: /^Tasks$/ }).locator('.fold-btn').click({ force: true });
+    await expect(heads.filter({ hasText: /^Tasks$/ })).not.toHaveAttribute('data-fold-said', /./);
+    await expect(page.locator('#doc .blk-folded .task')).toHaveCount(2);
   });
 });
 

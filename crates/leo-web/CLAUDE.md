@@ -442,7 +442,7 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   content, so no text node reaches the caret or margin maths; the Markdown is unchanged;
   2026-11-21, the user's call). A heading block (not the first)
   has 16 px of padding above its heading, open or not, so it leads the text below (2026-11-21, the
-  user's call). The line under
+  user's call). An editor opened at the height of the block it replaces keeps that height; only a slash pick, which changes the line's kind under the caret, drops it and refits so a new heading's caret stays visible (2026-11-28). A folded heading's summary counts checkbox lines apart from other lines ("2 lines · 1 of 4 tasks done"; lines inside a code fence are lines, not tasks). The line under
   the title (`#note-facts`) holds the save state, `#save-state` (the drying mark, its
   words hidden, or a visible problem such as "Not saved"), then `#note-edited` ("Edited …",
   "Edited just now" after a save, hidden while a problem shows), then the read time (`#note-read`, " · N min read" from
@@ -651,8 +651,14 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   saved first; a failed save keeps it with Close anyway when the draft is kept). Closing the left
   pane promotes the right with its unsaved typing (`besideTake`, `replaceState`, the same session, so
   no conflict copy), as does opening `#/n/<right id>`. The hash names the left pane; Back and
-  Forward change only it; a note open in one pane is refused in the other; beside is not restored
-  after a restart. Trash closes a pane without a save (`paneGone`); Felix's reloads check unsaved
+  Forward change only it; a note open in one pane is refused in the other; leaving for a page that
+  is not a note remembers the pair (`besideAway`) and coming back to the left note reopens the
+  right beside (`besideBack`, quietly, focus back on the pane that had it); closing a pane by hand forgets it; beside is not restored after a
+  restart. The drop boxes are fixed pseudo-elements: `main` never changes layout while a
+  note is dragged (a `position: relative` there relaid the whole note per zone change, the drag
+  freeze), and `noteOver` writes body attributes only when they change. The explorer lights only the focused pane's note (`on`, pill, `aria-current`), the other is
+  `open`. Split panes keep `--fold-room` on the left so heading fold chevrons are never
+  clipped. Trash closes a pane without a save (`paneGone`); Felix's reloads check unsaved
   typing per pane (`saving.get(key)`). Look (Style D2): one background, a 1 px `--line` hairline in
   the 8 px handle, a 10 px shade on the active pane (`--split-shade`, its own light and dark value), the other pane's chips in `--faint`; print
   shows only the focused pane.
@@ -919,7 +925,8 @@ Felix (2026-10-19).
   line, a quote, code, table or maths block, or a slot that hangs past the end of its line) has its blot
   in the 16 px right of the column (`data-aside`), level with its last line and stacked down when two
   meet; a read's blot sits just after the last word (`marginPassageEnd`), or beside the column when that
-  would not fit in it. No blot or count is ever over text (2026-11-24, the user's call). A slot's fit is
+  would not fit in it. The exception is a passage that ends the line being edited: its blot stays just
+  after its last word, so clicking off its note never throws it to the far edge (2026-11-28). No blot or count is ever over text (2026-11-24, the user's call). A slot's fit is
   measured again only when its block's size or the fonts changed (`data-fit`). A window resize
   redraws in the same frame. Opening a line redraws (`focusin` on `#doc`). An open or pinned note sits
   under its block as a raised card (`--raised`, `--shadow-pop`), the block's `--margin-room`
@@ -1025,7 +1032,7 @@ Felix (2026-10-19).
   with a preset question (`ASK_PRESETS`). It opens in the right margin beside the
   selection when the layout has one (`.ask-float.beside`), else above the selection (below
   its last word when there is no room above; 2026-11-21, the user's call); `marginDraw` places it
-  again whenever the margin layout changes, so a resize never leaves it beside a margin that is gone.
+  again whenever the margin layout changes, so a resize never leaves it beside a margin that is gone. A scroll hides it only when it moves the note's text (the page, a scroller around `#doc` or one inside it); the explorer, the margin or the other pane scrolling leaves it (2026-11-28).
   Ask Felix opens the margin draft without asking (`marginAskFirst`: Felix-blue box,
   Escape keeps a half-typed question per passage in `marginPage.drafted`); a passage
   that already has an open thread opens it instead (`marginSame`). Both margins puts
@@ -1711,7 +1718,8 @@ Config and data file paths use the same `leo_core::paths::own` names as uninstal
   Due today. Note headings fold (`doc.js` `applyFolds`: a `.fold-btn` inside the heading, the
   heading's `data-fold-said` drawn by `::after` so no text node reaches the caret or margin
   maths; folds per note in `leo-folds`, at most 40 notes; same-text headings fold apart; the note
-  file never changes; opening a line inside a fold unfolds it, and folding closes an open line first); margin notes
+  file never changes; opening a line inside a fold unfolds it, and folding closes an open line first; the folding
+  rows move as one curtain, `curtain`, one row at a time with min-height lifted, and leaving copies keep `.blk`); margin notes
   inside a fold are hidden with it and counted on the heading (`doc.foldedHeading`,
   `doc.foldNotes`, from `marginDraw`). A note made from a recording ends with Felix's three
   follow-ups (`.note-follow`, `NOTE_FOLLOW_ASKS`, each `chat.askNew`). The Calendar shows "Nothing

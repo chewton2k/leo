@@ -102,7 +102,12 @@ document.addEventListener('keydown', (e) => {
   askAboutSelection(ASK_PRESETS.this);
 }, true);
 
-window.addEventListener('scroll', hideAskFloat, { passive: true, capture: true });
+window.addEventListener('scroll', (e) => {
+  if (askFloat.hidden) return;
+  const at = getSelection().anchorNode;
+  const doc = (at?.nodeType === Node.ELEMENT_NODE ? at : at?.parentElement)?.closest('#doc') || inPane('#doc');
+  if (!(e.target instanceof Element) || !doc || e.target.contains(doc) || doc.contains(e.target)) hideAskFloat();
+}, { passive: true, capture: true });
 
 function requestId() {
   if (window.crypto && typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();

@@ -328,7 +328,11 @@ async function render() {
   drawActivity();
   try {
     if (kind === 'f') await showWorkspace(arg);
-    else if (kind === 'n') await showNote(arg.replace(/\/edit$/, ''), besideTake(arg.replace(/\/edit$/, '')) || { fresh: prepared });
+    else if (kind === 'n') {
+      const id = arg.replace(/\/edit$/, '');
+      await showNote(id, besideTake(id) || { fresh: prepared });
+      if (generation === renderGeneration) besideBack(id);
+    }
     else if (kind === 'new') await newNote(arg);
     else if (kind === 'search') await showSearch(arg);
     else if (kind === 'trash') await showTrash();
