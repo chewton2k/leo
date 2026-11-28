@@ -264,7 +264,6 @@ main:has(> #rec-box > .rec-live) { max-width: 1280px; }
 @keyframes combine-hold { from { transform: scaleX(0); } }
 .side-kids.drop-in { background: color-mix(in srgb, var(--accent-soft) 55%, transparent); border-radius: 0 0 var(--r-tile) var(--r-tile); }
 .card[draggable="true"], .side-row[draggable="true"] { -webkit-user-drag: element; }
-body.files-over main, body[data-note-drop] main { position: relative; }
 body.files-over main::after, body[data-note-drop] main::before, body[data-note-drop] main::after {
   content: "Drop files to ask Felix or make notes"; position: fixed; z-index: 24; pointer-events: none;
   left: calc(var(--side) + 16px); right: calc(var(--right) + 16px); top: 76px; bottom: 16px;

@@ -414,6 +414,29 @@ test('the explorer marks both open notes', async ({ page }) => {
   await expect(page.locator(`#side .side-note[data-id="${c.id}"]`)).not.toHaveAttribute('aria-current', /.*/);
 });
 
+test('hovering a note drag over the panes lays the page out once per zone, not on every pause', async ({ page }) => {
+  const [a, b] = await notes(page, 'One.', 'Two.');
+  await open(page, a);
+  const rules = await page.evaluate((id) => {
+    const t = new DataTransfer();
+    document.querySelector(`#side .side-note[data-id="${id}"]`).dispatchEvent(new DragEvent('dragstart', { dataTransfer: t, bubbles: true, cancelable: true }));
+    const at = { dataTransfer: t, clientX: innerWidth - 300, clientY: 400, bubbles: true, cancelable: true };
+    const doc = document.querySelector('#app #doc');
+    doc.dispatchEvent(new DragEvent('dragover', at));
+    const main = getComputedStyle(document.querySelector('main')).position;
+    const writes = [];
+    new MutationObserver((m) => writes.push(...m.map((r) => r.attributeName))).observe(document.body, { attributes: true });
+    for (let i = 0; i < 20; i++) doc.dispatchEvent(new DragEvent('dragover', at));
+    return new Promise((done) => setTimeout(() => {
+      const seen = [...writes];
+      document.dispatchEvent(new DragEvent('dragend', { bubbles: true }));
+      done({ main, writes: seen });
+    }, 0));
+  }, b.id);
+  expect(rules.main, 'the drop boxes are fixed, so main keeps its layout').toBe('static');
+  expect(rules.writes, 'steady hovering writes nothing to the body').toEqual([]);
+});
+
 test('a right pane reloaded by Felix while focused stays the focused pane', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1000 });
   const [a, b] = await notes(page, 'Left stays put.', 'Right words.');
