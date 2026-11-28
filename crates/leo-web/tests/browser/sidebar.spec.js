@@ -237,6 +237,33 @@ test('folder chevrons are at least 24 px to press, and open notes line up under 
   });
 });
 
+test('explorer rows light from where the pointer is, not from a hover WebKit keeps after a drag', async ({ browser }) => {
+  await sidebarFixture(browser,async(context,url)=>{
+    const page = await context.newPage({viewport:{width:1280,height:800}});
+    await page.goto(url);
+    await page.locator('.side-tree .side-row[data-dir="Course"]').click();
+    const wrap = (id) => page.locator(`.side-note-wrap:has(.side-note[data-id="${id}"])`);
+    const lit = (id) => wrap(id).evaluate(el => ({ hot: el.classList.contains('hot'), bg: getComputedStyle(el.querySelector('.side-row')).backgroundColor, more: getComputedStyle(el.querySelector('.side-sub')).opacity }));
+    const dark = { hot: false, bg: 'rgba(0, 0, 0, 0)', more: '0' };
+    await expect(wrap('course-note')).toBeVisible();
+    await wrap('course-note').locator('.side-note').hover();
+    expect(await lit('course-note')).toEqual(expect.objectContaining({ hot: true, more: '1' }));
+    expect((await lit('course-note')).bg).not.toBe(dark.bg);
+    await page.evaluate(() => window.audit.draw());
+    expect((await lit('course-note')).hot, 'a redraw keeps the row under the pointer lit').toBe(true);
+    await wrap('escaped-note').locator('.side-note').dispatchEvent('pointerover');
+    expect(await lit('course-note'), 'the row the pointer is truly over but WebKit forgot is dark').toEqual(dark);
+    expect((await lit('escaped-note')).hot).toBe(true);
+    await page.mouse.move(900, 600);
+    await expect(page.locator('.side-tree .hot')).toHaveCount(0);
+    expect(await lit('escaped-note')).toEqual(dark);
+    await page.locator('.side-tree .side-row[data-dir="Personal"]').hover();
+    await expect(page.locator('.side-folder.hot')).toHaveCount(1);
+    await page.mouse.move(900, 600);
+    await expect(page.locator('.side-folder.hot')).toHaveCount(0);
+  });
+});
+
 test('clicking parent folder labels toggles descendants without navigating or disturbing the draft', async ({ browser }) => {
   await sidebarFixture(browser,async(context,url)=>{
     const page = await context.newPage({viewport:{width:1280,height:800}});

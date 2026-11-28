@@ -167,6 +167,7 @@ function drawSide() {
   inkSettle((id) => box.querySelectorAll(`.side-tree .side-note[data-id="${CSS.escape(id)}"]`));
   applySideFilter(box.querySelector('.side-tree'));
   sideRoving(box.querySelector('.side-tree'));
+  sideHotAgain(box);
   const pill = box.querySelector('.side-tree .side-pill');
   const owner = pillKey(pill);
   if (pill && owner !== side.pill && pillFrom && sideWide()) pillGlide(pillFrom, pill);
@@ -197,6 +198,22 @@ function folderShown(path) {
 // Like VS Code's auto reveal: the open note's row is scrolled into the
 // explorer's view once, when it first appears for that note; later redraws keep
 // whatever scroll the user chose. Only the explorer scrolls, never the page.
+let sideHot = null;
+function sideHover(e) {
+  const at = e.type === 'pointerover' ? e.target : e.relatedTarget;
+  const row = at?.closest?.('.side-note-wrap, .side-folder') || null;
+  if (row === sideHot) return;
+  sideHot?.classList.remove('hot');
+  sideHot = row;
+  row?.classList.add('hot');
+}
+for (const type of ['pointerover', 'pointerout']) document.addEventListener(type, sideHover, { passive: true });
+
+function sideHotAgain(box) {
+  if (sideHot && !sideHot.isConnected) sideHot = box.querySelector(`[data-refresh-key="${CSS.escape(sideHot.dataset.refreshKey || '')}"]`);
+  sideHot?.classList.add('hot');
+}
+
 function revealNoteRow(tree) {
   const id = panes[0].s?.note?.id;
   if (!id) side.shownNote = null;
@@ -613,6 +630,7 @@ function drawFoldersSheet() {
     ${sideLeave()}<nav class="side-nav side-tree" aria-label="Folders" data-drop-dir="" tabindex="0">${folderTree(sideHere()) || '<p class="side-none">Folders you make show up here.</p>'}</nav>`);
   box.querySelector('.side-tree').scrollTop = scroll;
   sideRoving(box.querySelector('.side-tree'));
+  sideHotAgain(box);
   revealNoteRow(box.querySelector('.side-tree'));
 }
 
