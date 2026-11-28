@@ -46,6 +46,7 @@ function usePane(p) {
   if (p.s && was !== p.s && state.view === 'note') noteContext(p.s.note);
   for (const q of panes) q.el.classList.toggle('pane-on', split() && q === p);
   document.body.classList.toggle('beside-on', p === besidePane);
+  if (was !== state.session) drawSide();
 }
 
 for (const p of panes) for (const type of ['pointerdown', 'focusin']) p.el.addEventListener(type, () => { if (split()) usePane(p); }, true);

@@ -406,12 +406,25 @@ test('a wide window with a 1000px left pane and margin on the right shows cards 
   }
 });
 
-test('the explorer marks both open notes', async ({ page }) => {
+test('the explorer lights only the focused pane’s note and marks the other open, in both orders', async ({ page }) => {
   const [a, b, c] = await notes(page, 'One.', 'Two.', 'Three.');
   await split(page, a, b);
-  await expect(page.locator(`#side .side-note[data-id="${a.id}"]`)).toHaveAttribute('aria-current', 'page');
-  await expect(page.locator(`#side .side-note[data-id="${b.id}"]`)).toHaveAttribute('aria-current', 'page');
-  await expect(page.locator(`#side .side-note[data-id="${c.id}"]`)).not.toHaveAttribute('aria-current', /.*/);
+  const row = (note) => page.locator(`#side .side-note[data-id="${note.id}"]`);
+  const lit = async (on, open) => {
+    await expect(row(on)).toHaveAttribute('aria-current', 'page');
+    await expect(row(on)).toHaveClass(/\bon\b/);
+    await expect(row(on).locator('.side-pill')).toHaveCount(1);
+    await expect(row(open)).not.toHaveAttribute('aria-current', /.*/);
+    await expect(row(open)).toHaveClass(/\bopen\b/);
+    await expect(row(open).locator('.side-pill')).toHaveCount(0);
+    await expect(row(c)).not.toHaveClass(/\b(on|open)\b/);
+    await expect(page.locator('#side .side-tree .side-pill')).toHaveCount(1);
+  };
+  await lit(b, a);
+  await page.locator('#app #doc .blk').first().click();
+  await lit(a, b);
+  await page.locator('#beside #doc .blk').first().click();
+  await lit(b, a);
 });
 
 test('hovering a note drag over the panes lays the page out once per zone, not on every pause', async ({ page }) => {
